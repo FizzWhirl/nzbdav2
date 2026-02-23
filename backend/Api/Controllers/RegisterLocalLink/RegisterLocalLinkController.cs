@@ -15,6 +15,52 @@ public class RegisterLocalLinkController(
     ConfigManager configManager
 ) : ControllerBase
 {
+    [HttpPost("register-by-link-path")]
+    public async Task<IActionResult> RegisterByLinkPath([FromBody] RegisterByLinkPathRequest request)
+    {
+        try
+        {
+            // Validate external API key
+            var apiKey = HttpContext.GetRequestApiKey();
+            if (apiKey == null || apiKey != configManager.GetApiKey())
+                return Unauthorized(new { error = "API Key Required" });
+
+            // Validate input
+            if (string.IsNullOrWhiteSpace(request.LinkPath))
+                return BadRequest(new { error = "linkPath is required" });
+
+            // Convert arr-side mount path to nzbdav2 internal DavItem path
+            var mountDir = configManager.GetRcloneMountDir();
+            if (!request.LinkPath.StartsWith(mountDir))
+                return BadRequest(new { error = $"linkPath must start with rclone mount dir '{mountDir}'" });
+
+            var davItemPath = request.LinkPath[mountDir.Length..];
+
+            // Look up DavItem by path
+            var davItem = await dbClient.Ctx.Items
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Path == davItemPath, HttpContext.RequestAborted)
+                .ConfigureAwait(false);
+
+            if (davItem == null)
+            {
+                Log.Warning("[LocalLinks] DavItem not found for linkPath={LinkPath} (davItemPath={DavItemPath})",
+                    request.LinkPath, davItemPath);
+                return NotFound(new { error = $"No DavItem found for path '{davItemPath}'" });
+            }
+
+            OrganizedLinksUtil.UpdateCacheEntry(davItem.Id, request.LinkPath);
+            Log.Information("[LocalLinks] Registered by path: {DavItemPath} → {LinkPath} (DavItemId={DavItemId})",
+                davItemPath, request.LinkPath, davItem.Id);
+
+            return Ok(new { davItemId = davItem.Id, message = "LocalLink registered successfully" });
+        }
+        catch (Exception e)
+        {
+            return StatusCode(500, new { error = e.Message });
+        }
+    }
+
     [HttpPost]
     public async Task<IActionResult> RegisterLocalLink([FromBody] RegisterLocalLinkRequest request)
     {

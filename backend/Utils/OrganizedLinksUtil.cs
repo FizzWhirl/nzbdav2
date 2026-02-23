@@ -282,6 +282,13 @@ public static class OrganizedLinksUtil
             {
                 if (!onDiskMap.ContainsKey(dbLink.LinkPath))
                 {
+                    // Don't remove regular-file LocalLinks (e.g. rclone FUSE mount paths).
+                    // They are not symlinks/strm so they never appear in onDiskMap, but they
+                    // are still valid as long as the file exists on the mount.
+                    var fi = new FileInfo(dbLink.LinkPath);
+                    if (fi.Exists && SymlinkAndStrmUtil.GetSymlinkOrStrmInfo(fi) == null)
+                        continue;
+
                     toRemove.Add(dbLink);
                 }
             }

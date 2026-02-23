@@ -763,11 +763,14 @@ public class HealthCheckService
             }
             else
             {
-                deleteMessage = $"Deleting file '{symlinkOrStrmPath}' and associated NzbDav item '{davItem.Path}'.";
+                // Regular file on rclone FUSE mount — do not delete directly.
+                deleteMessage = $"File '{symlinkOrStrmPath}' is a regular mount path and was NOT deleted. Removing associated NzbDav item '{davItem.Path}'.";
             }
 
             Log.Warning($"[HealthCheck] Could not find corresponding Radarr/Sonarr media-item for file: {davItem.Name}. {deleteMessage}");
-            await Task.Run(() => File.Delete(symlinkOrStrmPath)).ConfigureAwait(false);
+            // Only delete symlinks and strm files; regular rclone mount paths must not be deleted directly.
+            if (linkInfoToDelete is SymlinkAndStrmUtil.SymlinkInfo or SymlinkAndStrmUtil.StrmInfo)
+                await Task.Run(() => File.Delete(symlinkOrStrmPath)).ConfigureAwait(false);
             dbClient.Ctx.Items.Remove(davItem);
             OrganizedLinksUtil.RemoveCacheEntry(davItem.Id);
             dbClient.Ctx.HealthCheckResults.Add(SendStatus(new HealthCheckResult()

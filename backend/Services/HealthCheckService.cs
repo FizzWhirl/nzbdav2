@@ -654,7 +654,8 @@ public class HealthCheckService
 
             // if the unhealthy item is linked within the organized media-library
             // then we must find the corresponding arr instance and trigger a new search.
-            var linkType = symlinkOrStrmPath.ToLower().EndsWith("strm") ? "strm-file" : "symlink";
+            var linkType = symlinkOrStrmPath.ToLower().EndsWith("strm") ? "strm-file"
+                : (new FileInfo(symlinkOrStrmPath).LinkTarget != null ? "symlink" : "file");
 
             foreach (var arrClient in _configManager.GetArrConfig().GetArrClients())
             {

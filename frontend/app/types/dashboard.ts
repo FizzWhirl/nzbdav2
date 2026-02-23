@@ -15,7 +15,6 @@ export type ProviderHealthItem = {
     providerIndex: number;
     providerHost: string;
     providerType: string;
-    selectionPercentage: number;
     successRate: number;
     benchmarkSpeedMbps: number | null;
 };

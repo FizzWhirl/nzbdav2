@@ -654,7 +654,13 @@ public class HealthCheckService
 
             // if the unhealthy item is linked within the organized media-library
             // then we must find the corresponding arr instance and trigger a new search.
-            var linkType = symlinkOrStrmPath.ToLower().EndsWith("strm") ? "strm-file" : "symlink";
+            var resolvedLinkInfo = SymlinkAndStrmUtil.GetSymlinkOrStrmInfo(new FileInfo(symlinkOrStrmPath));
+            var linkType = resolvedLinkInfo switch
+            {
+                SymlinkAndStrmUtil.StrmInfo    => "strm-file",
+                SymlinkAndStrmUtil.SymlinkInfo => "symlink",
+                _                              => "file"
+            };
 
             foreach (var arrClient in _configManager.GetArrConfig().GetArrClients())
             {
@@ -666,7 +672,7 @@ public class HealthCheckService
 
                 // Safety Check: Ensure the file points to our mount
                 var mountDir = _configManager.GetRcloneMountDir();
-                var linkInfo = SymlinkAndStrmUtil.GetSymlinkOrStrmInfo(new FileInfo(symlinkOrStrmPath));
+                var linkInfo = resolvedLinkInfo;
                 if (linkInfo is SymlinkAndStrmUtil.SymlinkInfo symInfo && !symInfo.TargetPath.StartsWith(mountDir))
                 {
                     Log.Warning($"[HealthCheck] Safety check failed: Symlink {symlinkOrStrmPath} points to {symInfo.TargetPath}, which is outside mount dir {mountDir}. Skipping Arr delete.");
@@ -674,7 +680,7 @@ public class HealthCheckService
                 }
 
                 // Capture link info before deletion for logging
-                var arrLinkInfo = SymlinkAndStrmUtil.GetSymlinkOrStrmInfo(new FileInfo(symlinkOrStrmPath));
+                var arrLinkInfo = resolvedLinkInfo;
                 string linkTargetMsg = "";
                 if (arrLinkInfo is SymlinkAndStrmUtil.SymlinkInfo sInfo)
                     linkTargetMsg = $" (Symlink target: '{sInfo.TargetPath}')";
@@ -757,11 +763,14 @@ public class HealthCheckService
             }
             else
             {
-                deleteMessage = $"Deleting file '{symlinkOrStrmPath}' and associated NzbDav item '{davItem.Path}'.";
+                // Regular file on rclone FUSE mount — do not delete directly.
+                deleteMessage = $"File '{symlinkOrStrmPath}' is a regular mount path and was NOT deleted. Removing associated NzbDav item '{davItem.Path}'.";
             }
 
             Log.Warning($"[HealthCheck] Could not find corresponding Radarr/Sonarr media-item for file: {davItem.Name}. {deleteMessage}");
-            await Task.Run(() => File.Delete(symlinkOrStrmPath)).ConfigureAwait(false);
+            // Only delete symlinks and strm files; regular rclone mount paths must not be deleted directly.
+            if (linkInfoToDelete is SymlinkAndStrmUtil.SymlinkInfo or SymlinkAndStrmUtil.StrmInfo)
+                await Task.Run(() => File.Delete(symlinkOrStrmPath)).ConfigureAwait(false);
             dbClient.Ctx.Items.Remove(davItem);
             OrganizedLinksUtil.RemoveCacheEntry(davItem.Id);
             dbClient.Ctx.HealthCheckResults.Add(SendStatus(new HealthCheckResult()

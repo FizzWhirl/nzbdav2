@@ -278,10 +278,25 @@ public static class OrganizedLinksUtil
                 }
             }
 
+            // Paths registered by arr-path-fixer are outside the library dir and are not
+            // visible from inside this container, so only remove LocalLinks whose paths
+            // are inside the library dir. External paths are cleaned up via FK CASCADE
+            // when their DavItem is deleted.
+            var libraryDir = configManager.GetLibraryDir();
+            var libDirPrefix = string.IsNullOrEmpty(libraryDir)
+                ? null
+                : libraryDir.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
             foreach (var dbLink in dbLinks)
             {
                 if (!onDiskMap.ContainsKey(dbLink.LinkPath))
                 {
+                    // Only remove links that live inside the library directory.
+                    // Links outside (e.g. rclone mount paths from arr-path-fixer)
+                    // are invisible to this container and must not be purged here.
+                    if (libDirPrefix == null || !dbLink.LinkPath.StartsWith(libDirPrefix))
+                        continue;
+
                     toRemove.Add(dbLink);
                 }
             }
@@ -345,12 +360,30 @@ public static class OrganizedLinksUtil
 
     private static bool Verify(string linkFromCache, DavItem targetDavItem, ConfigManager configManager)
     {
-        var mountDir = configManager.GetRcloneMountDir();
         var fileInfo = new FileInfo(linkFromCache);
-        if (!fileInfo.Exists) return false; // Basic check
+
+        // Paths outside the library dir (e.g. arr-path-fixer rclone mount paths) are not
+        // mounted inside this container. Skip the existence check and trust the LocalLink;
+        // Repair() will handle stale paths gracefully if the file is already gone.
+        var libraryDir = configManager.GetLibraryDir();
+        var libDirPrefix = string.IsNullOrEmpty(libraryDir)
+            ? null
+            : libraryDir.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (libDirPrefix == null || !linkFromCache.StartsWith(libDirPrefix))
+            return true;
+
+        // Library path: must exist on disk
+        if (!fileInfo.Exists) return false;
 
         var symlinkOrStrmInfo = SymlinkAndStrmUtil.GetSymlinkOrStrmInfo(fileInfo);
-        if (symlinkOrStrmInfo == null) return false;
+        if (symlinkOrStrmInfo == null)
+        {
+            // Regular file inside the library dir — existence confirmed above
+            return true;
+        }
+
+        // Symlink or .strm: verify it actually points to this DavItem
+        var mountDir = configManager.GetRcloneMountDir();
         var davItemLink = GetDavItemLink(symlinkOrStrmInfo, mountDir);
         return davItemLink?.DavItemId == targetDavItem.Id;
     }

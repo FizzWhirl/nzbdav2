@@ -46,10 +46,13 @@ jobs:
           MINOR=5
           PATCH=$(( ${{ github.run_number }} - 115 ))
 
+          # Sanitize branch name for use as a Docker tag (replace / with -)
+          SAFE_REF=$(echo "${{ github.ref_name }}" | tr '/' '-')
+
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             echo "NZBDAV_VERSION=${MAJOR}.${MINOR}.${PATCH}" >> $GITHUB_OUTPUT
           else
-            echo "NZBDAV_VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "NZBDAV_VERSION=${SAFE_REF}" >> $GITHUB_OUTPUT
           fi
 
           GHCR_REPO="ghcr.io/${{ github.repository }}"
@@ -69,7 +72,7 @@ jobs:
               echo "EOF"
             } >> $GITHUB_OUTPUT
           else
-            echo "TAGS=${GHCR_REPO}:${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "TAGS=${GHCR_REPO}:${SAFE_REF}" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push Docker image (amd64 + arm64)
@@ -81,3 +84,4 @@ jobs:
           tags: ${{ steps.set_vars.outputs.TAGS }}
           build-args: |
             NZBDAV_VERSION=${{ steps.set_vars.outputs.NZBDAV_VERSION }}
+            CACHE_BUST=${{ github.sha }}

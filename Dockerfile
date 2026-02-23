@@ -15,12 +15,18 @@ RUN npm prune --omit=dev
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS backend-build
 
 WORKDIR /backend
+ARG CACHE_BUST
 COPY ./backend ./
 
-# Accept build-time architecture as ARG (e.g., x64 or arm64)
+# Map Docker TARGETARCH (amd64/arm64) to .NET RID arch suffix (x64/arm64)
 ARG TARGETARCH
-RUN dotnet restore
-RUN dotnet publish -c Release -r linux-musl-${TARGETARCH} -o ./publish
+RUN case "$TARGETARCH" in \
+      amd64) DOTNET_ARCH=x64 ;; \
+      arm64) DOTNET_ARCH=arm64 ;; \
+      *) echo "Unsupported TARGETARCH: $TARGETARCH" && exit 1 ;; \
+    esac && \
+    dotnet restore && \
+    dotnet publish -c Release -r linux-musl-$DOTNET_ARCH -o ./publish
 
 # -------- Stage 3: Combined runtime image --------
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine

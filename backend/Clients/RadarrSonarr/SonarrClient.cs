@@ -148,21 +148,29 @@ public class SonarrClient(string host, string apiKey) : ArrClient(host, apiKey)
             if (episodeFile.Path == symlinkOrStrmPath) return episodeFileId;
         }
 
-        // otherwise, find the series-id
-        var seriesId = await GetSeriesId(symlinkOrStrmPath);
-        if (seriesId == null) return null;
+        // When all series share the same root path (e.g. /mnt/nzbdav/content/tv),
+        // GetSeriesId returns the first match which may not be correct. Instead,
+        // find ALL series whose path is a prefix of the target, ordered by most
+        // specific first, and search each one's episode files until we find a match.
+        var allSeries = await GetAllSeries();
+        var matchingSeries = allSeries
+            .Where(s => s.Path != null && symlinkOrStrmPath.StartsWith(s.Path))
+            .OrderByDescending(s => s.Path!.Length)
+            .ToList();
 
-        // then use it to find all episode-files and repopulate the cache
-        int? result = null;
-        foreach (var episodeFile in await GetAllEpisodeFiles(seriesId.Value))
+        foreach (var series in matchingSeries)
         {
-            SymlinkOrStrmToEpisodeFileIdCache[episodeFile.Path!] = episodeFile.Id;
-            if (episodeFile.Path == symlinkOrStrmPath)
-                result = episodeFile.Id;
+            SeriesPathToSeriesIdCache[series.Path!] = series.Id;
+            foreach (var episodeFile in await GetAllEpisodeFiles(series.Id))
+            {
+                if (episodeFile.Path != null)
+                    SymlinkOrStrmToEpisodeFileIdCache[episodeFile.Path] = episodeFile.Id;
+                if (episodeFile.Path == symlinkOrStrmPath)
+                    return episodeFile.Id;
+            }
         }
 
-        // return the found episode-file-id
-        return result;
+        return null;
     }
 
     public async Task<int?> GetSeriesId(string symlinkOrStrmPath)

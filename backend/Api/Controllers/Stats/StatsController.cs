@@ -483,21 +483,23 @@ public class StatsController(
 
             var totalOperations = operationsByProvider.Sum(x => x.Count);
 
-            // 4. Provider affinity stats (selection percentage, success rate)
-            var affinityStats = await dbContext.NzbProviderStats
+            // 4. Provider health: successful BODY segment count per provider
+            var bodySuccessByProvider = await dbContext.ProviderUsageEvents
                 .AsNoTracking()
-                .GroupBy(x => x.ProviderIndex)
-                .Select(g => new
-                {
-                    ProviderIndex = g.Key,
-                    TotalSuccessful = g.Sum(x => x.SuccessfulSegments),
-                    TotalFailed = g.Sum(x => x.FailedSegments)
-                })
+                .Where(x => x.CreatedAt >= cutoff && x.OperationType == "BODY")
+                .GroupBy(x => x.ProviderHost)
+                .Select(g => new { ProviderHost = g.Key, Count = g.Count() })
                 .ToListAsync();
 
-            var totalSegments = affinityStats.Sum(x => x.TotalSuccessful + x.TotalFailed);
+            // 5. Provider health: failed BODY segment count per provider
+            var bodyFailureByProvider = await dbContext.MissingArticleEvents
+                .AsNoTracking()
+                .Where(x => x.Timestamp >= cutoff && x.Operation == "BODY")
+                .GroupBy(x => x.ProviderIndex)
+                .Select(g => new { ProviderIndex = g.Key, Count = g.Count() })
+                .ToListAsync();
 
-            // 5. Benchmark speeds (latest per provider)
+            // 6. Benchmark speeds (latest per provider)
             var benchmarks = await dbContext.ProviderBenchmarkResults
                 .AsNoTracking()
                 .Where(r => r.Success && !r.IsLoadBalanced)
@@ -507,29 +509,31 @@ public class StatsController(
 
             var benchmarkByProvider = benchmarks.ToDictionary(x => x.ProviderIndex, x => x.SpeedMbps);
 
-            // 6. Build provider health/usage list
+            // 7. Build provider health/usage list
             var providerHealth = new List<object>();
             var providerUsage = new List<object>();
 
             for (int i = 0; i < providers.Count; i++)
             {
                 var provider = providers[i];
-                var affinityStat = affinityStats.FirstOrDefault(x => x.ProviderIndex == i);
                 var bandwidth = bandwidthByProvider.FirstOrDefault(x => x.ProviderIndex == i);
                 var operations = operationsByProvider.FirstOrDefault(x => x.ProviderHost == provider.Host);
 
-                var successfulSegments = affinityStat?.TotalSuccessful ?? 0;
-                var failedSegments = affinityStat?.TotalFailed ?? 0;
-                var totalProviderSegments = successfulSegments + failedSegments;
+                var successCount = bodySuccessByProvider.FirstOrDefault(x => x.ProviderHost == provider.Host)?.Count ?? 0;
+                var failureCount = bodyFailureByProvider.FirstOrDefault(x => x.ProviderIndex == i)?.Count ?? 0;
+                var totalProviderSegments = successCount + failureCount;
 
                 providerHealth.Add(new
                 {
                     ProviderIndex = i,
                     ProviderHost = provider.Host,
                     ProviderType = provider.Type.ToString(),
-                    SelectionPercentage = totalSegments > 0 ? Math.Round((double)totalProviderSegments / totalSegments * 100, 1) : 0,
-                    SuccessRate = totalProviderSegments > 0 ? Math.Round((double)successfulSegments / totalProviderSegments * 100, 1) : 100,
-                    BenchmarkSpeedMbps = benchmarkByProvider.TryGetValue(i, out var speed) ? (double?)Math.Round(speed, 1) : null
+                    SuccessRate = totalProviderSegments > 0
+                        ? Math.Round((double)successCount / totalProviderSegments * 100, 1)
+                        : 100,
+                    BenchmarkSpeedMbps = benchmarkByProvider.TryGetValue(i, out var speed)
+                        ? (double?)Math.Round(speed, 1)
+                        : null
                 });
 
                 providerUsage.Add(new
@@ -543,7 +547,7 @@ public class StatsController(
                 });
             }
 
-            // 7. Recent completions (last 20)
+            // 8. Recent completions (last 20)
             var recentCompletions = await dbContext.HistoryItems
                 .AsNoTracking()
                 .Where(x => x.DownloadStatus == HistoryItem.DownloadStatusOption.Completed)

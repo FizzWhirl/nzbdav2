@@ -56,8 +56,11 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-02-22-BACKGROUND-REPAIRS");
-        Log.Warning("  FEATURE: LocalLinks API for rclone-mount repair support");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-02-23-PROVIDER-HEALTH-FIX");
+        Log.Warning("  FEATURE: Provider Health stats use ProviderUsageEvents + MissingArticleEvents");
+        Log.Warning("  - Works regardless of Provider Affinity setting");
+        Log.Warning("  - Respects time window selection correctly");
+        Log.Warning("  - Dropped redundant selectionPercentage from Provider Health cards");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

@@ -492,11 +492,11 @@ public class StatsController(
                 .ToListAsync();
 
             // 5. Provider health: failed BODY segment count per provider
-            var bodyFailureByProvider = await dbContext.MissingArticleEvents
+            var bodyFailureByProvider = await dbContext.ProviderUsageEvents
                 .AsNoTracking()
-                .Where(x => x.Timestamp >= cutoff && x.Operation == "BODY")
-                .GroupBy(x => x.ProviderIndex)
-                .Select(g => new { ProviderIndex = g.Key, Count = g.Count() })
+                .Where(x => x.CreatedAt >= cutoff && x.OperationType == "BODY_FAIL")
+                .GroupBy(x => x.ProviderHost)
+                .Select(g => new { ProviderHost = g.Key, Count = g.Count() })
                 .ToListAsync();
 
             // 6. Benchmark speeds (latest per provider)
@@ -520,7 +520,7 @@ public class StatsController(
                 var operations = operationsByProvider.FirstOrDefault(x => x.ProviderHost == provider.Host);
 
                 var successCount = bodySuccessByProvider.FirstOrDefault(x => x.ProviderHost == provider.Host)?.Count ?? 0;
-                var failureCount = bodyFailureByProvider.FirstOrDefault(x => x.ProviderIndex == i)?.Count ?? 0;
+                var failureCount = bodyFailureByProvider.FirstOrDefault(x => x.ProviderHost == provider.Host)?.Count ?? 0;
                 var totalProviderSegments = successCount + failureCount;
 
                 providerHealth.Add(new

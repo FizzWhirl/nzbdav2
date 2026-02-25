@@ -292,6 +292,10 @@ public class MultiProviderNntpClient : INntpClient
                     }
                 }
 
+                // Track failure for provider health dashboard
+                if (operationName == "BODY")
+                    _trackingService?.TrackProviderUsage(provider.Host, provider.ProviderType.ToString(), "BODY_FAIL", null);
+
                 lastException = ExceptionDispatchInfo.Capture(e);
             }
             catch (Exception e) when (e is not OperationCanceledException and not TaskCanceledException)
@@ -308,6 +312,10 @@ public class MultiProviderNntpClient : INntpClient
                     }
                 }
 
+                // Track failure for provider health dashboard
+                if (operationName == "BODY")
+                    _trackingService?.TrackProviderUsage(provider.Host, provider.ProviderType.ToString(), "BODY_FAIL", null);
+
                 lastException = ExceptionDispatchInfo.Capture(e);
             }
             catch (OperationCanceledException ex)
@@ -323,6 +331,10 @@ public class MultiProviderNntpClient : INntpClient
                         _affinityService.RecordFailure(affinityKey, provider.ProviderIndex);
                     }
                 }
+
+                // Track timeout as failure for provider health dashboard (only real provider timeouts, not parent cancellation)
+                if (operationName == "BODY" && !cancellationToken.IsCancellationRequested)
+                    _trackingService?.TrackProviderUsage(provider.Host, provider.ProviderType.ToString(), "BODY_FAIL", null);
 
                 // If parent cancellation is requested, stop everything immediately
                 if (cancellationToken.IsCancellationRequested)

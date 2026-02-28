@@ -72,14 +72,20 @@ public class ProviderStatsService
 
             await using var dbContext = new DavDatabaseContext();
 
-            // Query events from the specified time window with operation type
-            var events = await dbContext.ProviderUsageEvents
+            // Query 1: Get total operations per provider (database-side GROUP BY)
+            var providerTotals = await dbContext.ProviderUsageEvents
                 .Where(e => e.CreatedAt >= startTime && e.OperationType != null)
-                .Select(e => new { e.ProviderHost, e.ProviderType, e.OperationType })
+                .GroupBy(e => new { e.ProviderHost, e.ProviderType })
+                .Select(g => new
+                {
+                    g.Key.ProviderHost,
+                    g.Key.ProviderType,
+                    TotalOperations = (long)g.Count()
+                })
                 .ToListAsync(_cancellationToken)
                 .ConfigureAwait(false);
 
-            if (events.Count == 0)
+            if (providerTotals.Count == 0)
             {
                 lock (_lock)
                 {
@@ -95,30 +101,41 @@ public class ProviderStatsService
                 return;
             }
 
-            // Group by provider and calculate stats
-            var providerGroups = events
-                .GroupBy(e => new { e.ProviderHost, e.ProviderType })
+            // Query 2: Get per-operation breakdown (database-side GROUP BY)
+            var operationBreakdown = await dbContext.ProviderUsageEvents
+                .Where(e => e.CreatedAt >= startTime && e.OperationType != null)
+                .GroupBy(e => new { e.ProviderHost, e.ProviderType, e.OperationType })
                 .Select(g => new
                 {
                     g.Key.ProviderHost,
                     g.Key.ProviderType,
-                    TotalOperations = (long)g.Count(),
-                    OperationCounts = g.GroupBy(e => e.OperationType!)
-                        .ToDictionary(og => og.Key, og => (long)og.Count())
+                    OperationType = g.Key.OperationType!,
+                    Count = (long)g.Count()
                 })
-                .ToList();
+                .ToListAsync(_cancellationToken)
+                .ConfigureAwait(false);
 
-            var totalOperations = (long)events.Count;
+            // Build operation counts dictionary per provider (from ~20-50 rows, not 3M)
+            var operationCountsByProvider = operationBreakdown
+                .GroupBy(x => new { x.ProviderHost, x.ProviderType })
+                .ToDictionary(
+                    g => (g.Key.ProviderHost, g.Key.ProviderType),
+                    g => g.ToDictionary(x => x.OperationType, x => x.Count)
+                );
 
-            var providerStats = providerGroups
-                .Select(pg => new ProviderStats
+            var totalOperations = providerTotals.Sum(p => p.TotalOperations);
+
+            var providerStats = providerTotals
+                .Select(pt => new ProviderStats
                 {
-                    ProviderHost = pg.ProviderHost,
-                    ProviderType = pg.ProviderType,
-                    TotalOperations = pg.TotalOperations,
-                    OperationCounts = pg.OperationCounts,
+                    ProviderHost = pt.ProviderHost,
+                    ProviderType = pt.ProviderType,
+                    TotalOperations = pt.TotalOperations,
+                    OperationCounts = operationCountsByProvider
+                        .GetValueOrDefault((pt.ProviderHost, pt.ProviderType),
+                            new Dictionary<string, long>()),
                     PercentageOfTotal = totalOperations > 0
-                        ? Math.Round((double)pg.TotalOperations / totalOperations * 100, 1)
+                        ? Math.Round((double)pt.TotalOperations / totalOperations * 100, 1)
                         : 0
                 })
                 .OrderByDescending(ps => ps.TotalOperations)

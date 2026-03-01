@@ -11,53 +11,49 @@ namespace NzbWebDAV.Database.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.CreateTable(
-                name: "ProviderBenchmarkResults",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    RunId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    CreatedAt = table.Column<long>(type: "INTEGER", nullable: false),
-                    TestFileName = table.Column<string>(type: "TEXT", nullable: false),
-                    TestFileSize = table.Column<long>(type: "INTEGER", nullable: false),
-                    TestSizeMb = table.Column<int>(type: "INTEGER", nullable: false),
-                    ProviderIndex = table.Column<int>(type: "INTEGER", nullable: false),
-                    ProviderHost = table.Column<string>(type: "TEXT", nullable: false),
-                    ProviderType = table.Column<string>(type: "TEXT", nullable: false),
-                    IsLoadBalanced = table.Column<bool>(type: "INTEGER", nullable: false),
-                    BytesDownloaded = table.Column<long>(type: "INTEGER", nullable: false),
-                    ElapsedSeconds = table.Column<double>(type: "REAL", nullable: false),
-                    SpeedMbps = table.Column<double>(type: "REAL", nullable: false),
-                    Success = table.Column<bool>(type: "INTEGER", nullable: false),
-                    ErrorMessage = table.Column<string>(type: "TEXT", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ProviderBenchmarkResults", x => x.Id);
-                });
+            // Idempotent: table may already exist from a prior broken migration
+            migrationBuilder.Sql("""
+                CREATE TABLE IF NOT EXISTS "ProviderBenchmarkResults" (
+                    "Id" TEXT NOT NULL CONSTRAINT "PK_ProviderBenchmarkResults" PRIMARY KEY,
+                    "RunId" TEXT NOT NULL,
+                    "CreatedAt" INTEGER NOT NULL,
+                    "TestFileName" TEXT NOT NULL,
+                    "TestFileSize" INTEGER NOT NULL,
+                    "TestSizeMb" INTEGER NOT NULL,
+                    "ProviderIndex" INTEGER NOT NULL,
+                    "ProviderHost" TEXT NOT NULL,
+                    "ProviderType" TEXT NOT NULL,
+                    "IsLoadBalanced" INTEGER NOT NULL,
+                    "BytesDownloaded" INTEGER NOT NULL,
+                    "ElapsedSeconds" REAL NOT NULL,
+                    "SpeedMbps" REAL NOT NULL,
+                    "Success" INTEGER NOT NULL,
+                    "ErrorMessage" TEXT NULL
+                );
+                """);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_ProviderBenchmarkResults_CreatedAt",
-                table: "ProviderBenchmarkResults",
-                column: "CreatedAt");
+            migrationBuilder.Sql("""
+                CREATE INDEX IF NOT EXISTS "IX_ProviderBenchmarkResults_CreatedAt"
+                    ON "ProviderBenchmarkResults" ("CreatedAt");
+                """);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_ProviderBenchmarkResults_RunId",
-                table: "ProviderBenchmarkResults",
-                column: "RunId");
+            migrationBuilder.Sql("""
+                CREATE INDEX IF NOT EXISTS "IX_ProviderBenchmarkResults_RunId"
+                    ON "ProviderBenchmarkResults" ("RunId");
+                """);
 
-            migrationBuilder.DropIndex(
-                name: "IX_ProviderUsageEvents_CreatedAt",
-                table: "ProviderUsageEvents");
+            migrationBuilder.Sql("""
+                DROP INDEX IF EXISTS "IX_ProviderUsageEvents_CreatedAt";
+                """);
 
-            migrationBuilder.DropIndex(
-                name: "IX_ProviderUsageEvents_OperationType",
-                table: "ProviderUsageEvents");
+            migrationBuilder.Sql("""
+                DROP INDEX IF EXISTS "IX_ProviderUsageEvents_OperationType";
+                """);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_ProviderUsageEvents_CreatedAt_ProviderHost_ProviderType_OperationType",
-                table: "ProviderUsageEvents",
-                columns: new[] { "CreatedAt", "ProviderHost", "ProviderType", "OperationType" });
+            migrationBuilder.Sql("""
+                CREATE INDEX IF NOT EXISTS "IX_ProviderUsageEvents_CreatedAt_ProviderHost_ProviderType_OperationType"
+                    ON "ProviderUsageEvents" ("CreatedAt", "ProviderHost", "ProviderType", "OperationType");
+                """);
         }
 
         /// <inheritdoc />

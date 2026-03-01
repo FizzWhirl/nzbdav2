@@ -56,11 +56,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-02-23-PROVIDER-HEALTH-FIX");
-        Log.Warning("  FEATURE: Provider Health stats use ProviderUsageEvents + MissingArticleEvents");
-        Log.Warning("  - Works regardless of Provider Affinity setting");
-        Log.Warning("  - Respects time window selection correctly");
-        Log.Warning("  - Dropped redundant selectionPercentage from Provider Health cards");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-01-REMOVE-PROVIDER-USAGE-EVENTS");
+        Log.Warning("  CLEANUP: Removed ProviderUsageEvent tracking (replaced by NzbProviderStats)");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

@@ -1,37 +1,71 @@
 using Microsoft.AspNetCore.Mvc;
-using NzbWebDAV.Models;
-using NzbWebDAV.Services;
+using Microsoft.EntityFrameworkCore;
+using NzbWebDAV.Config;
+using NzbWebDAV.Database;
 
 namespace NzbWebDAV.Api.Controllers.GetProviderStats;
 
 [ApiController]
 [Route("api/provider-stats")]
-public class GetProviderStatsController(ProviderStatsService statsService) : BaseApiController
+public class GetProviderStatsController(
+    DavDatabaseContext dbContext,
+    ConfigManager configManager) : ControllerBase
 {
-    protected override Task<IActionResult> HandleRequest()
+    [HttpGet]
+    public async Task<IActionResult> Get()
     {
-        // Extract hours parameter from query string, default to 24
-        var hoursParam = HttpContext.Request.Query["hours"].FirstOrDefault();
-        var hours = 24;
-        if (hoursParam != null && int.TryParse(hoursParam, out var parsedHours))
-        {
-            hours = parsedHours;
-        }
+        var providerConfig = configManager.GetUsenetProviderConfig();
+        var providers = providerConfig.Providers;
 
-        var stats = statsService.GetCachedStats(hours);
-
-        if (stats == null)
-        {
-            return Task.FromResult<IActionResult>(Ok(new ProviderStatsResponse
+        var statsByProvider = await dbContext.NzbProviderStats
+            .AsNoTracking()
+            .GroupBy(s => s.ProviderIndex)
+            .Select(g => new
             {
-                Providers = new List<ProviderStats>(),
-                TotalOperations = 0,
-                CalculatedAt = DateTimeOffset.UtcNow,
-                TimeWindow = TimeSpan.FromHours(hours),
-                TimeWindowHours = hours
-            }));
-        }
+                ProviderIndex = g.Key,
+                SuccessfulSegments = g.Sum(s => s.SuccessfulSegments),
+                FailedSegments = g.Sum(s => s.FailedSegments),
+                TotalBytes = g.Sum(s => s.TotalBytes),
+                TotalTimeMs = g.Sum(s => s.TotalTimeMs)
+            })
+            .ToListAsync();
 
-        return Task.FromResult<IActionResult>(Ok(stats));
+        var totalOperations = statsByProvider.Sum(s => s.SuccessfulSegments + s.FailedSegments);
+
+        var providerStatsList = statsByProvider
+            .Where(s => s.ProviderIndex < providers.Count)
+            .OrderByDescending(s => s.SuccessfulSegments + s.FailedSegments)
+            .Select(s =>
+            {
+                var total = s.SuccessfulSegments + s.FailedSegments;
+                return new
+                {
+                    ProviderHost = providers[s.ProviderIndex].Host,
+                    ProviderType = providers[s.ProviderIndex].Type.ToString(),
+                    TotalOperations = total,
+                    OperationCounts = new Dictionary<string, int>
+                    {
+                        ["BODY"] = s.SuccessfulSegments,
+                        ["BODY_FAIL"] = s.FailedSegments
+                    },
+                    PercentageOfTotal = totalOperations > 0
+                        ? Math.Round((double)total / totalOperations * 100, 1)
+                        : 0,
+                    TotalBytes = s.TotalBytes,
+                    AverageSpeedMbps = s.TotalTimeMs > 0
+                        ? Math.Round((double)s.TotalBytes / s.TotalTimeMs * 1000 / 1024 / 1024, 1)
+                        : 0
+                };
+            })
+            .ToList();
+
+        return Ok(new
+        {
+            Providers = providerStatsList,
+            TotalOperations = totalOperations,
+            CalculatedAt = DateTimeOffset.UtcNow.ToString("o"),
+            TimeWindow = "cumulative",
+            TimeWindowHours = 0
+        });
     }
 }

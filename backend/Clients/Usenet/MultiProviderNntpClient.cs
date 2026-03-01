@@ -19,7 +19,6 @@ public class MultiProviderNntpClient : INntpClient
     public IReadOnlyList<MultiConnectionNntpClient> Providers { get; }
     private readonly ProviderErrorService? _providerErrorService;
     private readonly NzbProviderAffinityService? _affinityService;
-    private readonly ProviderUsageTrackingService? _trackingService;
 
     /// <summary>
     /// Exposes the affinity service for external access (e.g., BufferedSegmentStream cooldown logic).
@@ -29,13 +28,11 @@ public class MultiProviderNntpClient : INntpClient
     public MultiProviderNntpClient(
         List<MultiConnectionNntpClient> providers,
         ProviderErrorService? providerErrorService = null,
-        NzbProviderAffinityService? affinityService = null,
-        ProviderUsageTrackingService? trackingService = null)
+        NzbProviderAffinityService? affinityService = null)
     {
         Providers = providers;
         _providerErrorService = providerErrorService;
         _affinityService = affinityService;
-        _trackingService = trackingService;
     }
 
     public Task<bool> ConnectAsync(string host, int port, bool useSsl, CancellationToken cancellationToken)
@@ -264,13 +261,6 @@ public class MultiProviderNntpClient : INntpClient
                     }
                 }
 
-                // Track provider usage for statistics dashboard
-                _trackingService?.TrackProviderUsage(
-                    provider.Host,
-                    provider.ProviderType.ToString(),
-                    operationName,
-                    null);
-
                 if (lastSuccessfulProviderContext is not null && lastSuccessfulProvider != provider)
                     lastSuccessfulProviderContext.Provider = provider;
                 return result;
@@ -292,10 +282,6 @@ public class MultiProviderNntpClient : INntpClient
                     }
                 }
 
-                // Track failure for provider health dashboard
-                if (operationName == "BODY")
-                    _trackingService?.TrackProviderUsage(provider.Host, provider.ProviderType.ToString(), "BODY_FAIL", null);
-
                 lastException = ExceptionDispatchInfo.Capture(e);
             }
             catch (Exception e) when (e is not OperationCanceledException and not TaskCanceledException)
@@ -312,10 +298,6 @@ public class MultiProviderNntpClient : INntpClient
                     }
                 }
 
-                // Track failure for provider health dashboard
-                if (operationName == "BODY")
-                    _trackingService?.TrackProviderUsage(provider.Host, provider.ProviderType.ToString(), "BODY_FAIL", null);
-
                 lastException = ExceptionDispatchInfo.Capture(e);
             }
             catch (OperationCanceledException ex)
@@ -331,10 +313,6 @@ public class MultiProviderNntpClient : INntpClient
                         _affinityService.RecordFailure(affinityKey, provider.ProviderIndex);
                     }
                 }
-
-                // Track timeout as failure for provider health dashboard (only real provider timeouts, not parent cancellation)
-                if (operationName == "BODY" && !cancellationToken.IsCancellationRequested)
-                    _trackingService?.TrackProviderUsage(provider.Host, provider.ProviderType.ToString(), "BODY_FAIL", null);
 
                 // If parent cancellation is requested, stop everything immediately
                 if (cancellationToken.IsCancellationRequested)

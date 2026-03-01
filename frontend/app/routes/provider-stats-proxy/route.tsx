@@ -1,12 +1,9 @@
 import type { Route } from "./+types/route";
 import { backendClient } from "~/clients/backend-client.server";
 
-export async function loader({ request }: Route.LoaderArgs) {
-    const url = new URL(request.url);
-    const hours = Number(url.searchParams.get('hours')) || 24;
-
+export async function loader({}: Route.LoaderArgs) {
     try {
-        const stats = await backendClient.getProviderStats(hours);
+        const stats = await backendClient.getProviderStats();
         return Response.json(stats);
     } catch (error) {
         console.error('Failed to fetch provider stats:', error);
@@ -15,8 +12,8 @@ export async function loader({ request }: Route.LoaderArgs) {
                 providers: [],
                 totalOperations: 0,
                 calculatedAt: new Date().toISOString(),
-                timeWindow: `PT${hours}H`,
-                timeWindowHours: hours
+                timeWindow: 'cumulative',
+                timeWindowHours: 0
             },
             { status: 200 }
         );

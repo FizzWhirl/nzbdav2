@@ -481,8 +481,8 @@ class BackendClient {
         return data.resetCount;
     }
 
-    public async getProviderStats(hours: number = 24): Promise<ProviderStatsResponse> {
-        const url = process.env.BACKEND_URL + `/api/provider-stats?hours=${hours}`;
+    public async getProviderStats(): Promise<ProviderStatsResponse> {
+        const url = process.env.BACKEND_URL + `/api/provider-stats`;
 
         const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
         const response = await this.fetchWithTimeout(url, {
@@ -515,5 +515,7 @@ export type ProviderStats = {
     providerType: string,
     totalOperations: number,
     operationCounts: { [key: string]: number },
-    percentageOfTotal: number
+    percentageOfTotal: number,
+    totalBytes: number,
+    averageSpeedMbps: number
 }

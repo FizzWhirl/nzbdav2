@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace NzbWebDAV.Database.Migrations
 {
     /// <inheritdoc />
-    public partial class AddProviderBenchmarkResults : Migration
+    public partial class AddProviderBenchmarksAndOptimizeStats : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -45,11 +45,38 @@ namespace NzbWebDAV.Database.Migrations
                 name: "IX_ProviderBenchmarkResults_RunId",
                 table: "ProviderBenchmarkResults",
                 column: "RunId");
+
+            migrationBuilder.DropIndex(
+                name: "IX_ProviderUsageEvents_CreatedAt",
+                table: "ProviderUsageEvents");
+
+            migrationBuilder.DropIndex(
+                name: "IX_ProviderUsageEvents_OperationType",
+                table: "ProviderUsageEvents");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ProviderUsageEvents_CreatedAt_ProviderHost_ProviderType_OperationType",
+                table: "ProviderUsageEvents",
+                columns: new[] { "CreatedAt", "ProviderHost", "ProviderType", "OperationType" });
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropIndex(
+                name: "IX_ProviderUsageEvents_CreatedAt_ProviderHost_ProviderType_OperationType",
+                table: "ProviderUsageEvents");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ProviderUsageEvents_CreatedAt",
+                table: "ProviderUsageEvents",
+                column: "CreatedAt");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ProviderUsageEvents_OperationType",
+                table: "ProviderUsageEvents",
+                column: "OperationType");
+
             migrationBuilder.DropTable(
                 name: "ProviderBenchmarkResults");
         }

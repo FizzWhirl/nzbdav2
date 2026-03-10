@@ -56,8 +56,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-10-ZSTD-COMPRESSION");
-        Log.Warning("  FEATURE: Zstandard compression for DB payload columns (~35% storage reduction)");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-10-HISTORY-AWARE-HEALTHCHECKS");
+        Log.Warning("  FEATURE: Health checks skip items awaiting Radarr/Sonarr import");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

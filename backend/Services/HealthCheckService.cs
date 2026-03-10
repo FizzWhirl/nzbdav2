@@ -306,11 +306,22 @@ public class HealthCheckService
 
     public static IQueryable<DavItem> GetHealthCheckQueueItemsQuery(DavDatabaseClient dbClient)
     {
+        // Get parent directory IDs that still have pending (non-imported) history entries.
+        // These items haven't been imported by Radarr/Sonarr yet, so health checks
+        // and repairs should not run on them (they'd be incorrectly deleted as "orphaned").
+        var pendingHistoryDirIds = dbClient.Ctx.HistoryItems
+            .Where(h => h.DownloadDirId != null
+                        && !h.IsImported
+                        && !h.IsArchived
+                        && h.DownloadStatus == HistoryItem.DownloadStatusOption.Completed)
+            .Select(h => h.DownloadDirId!.Value);
+
         return dbClient.Ctx.Items
             .AsNoTracking()
-            .Where(x => x.Type == DavItem.ItemType.NzbFile
-                        || x.Type == DavItem.ItemType.RarFile
-                        || x.Type == DavItem.ItemType.MultipartFile);
+            .Where(x => (x.Type == DavItem.ItemType.NzbFile
+                         || x.Type == DavItem.ItemType.RarFile
+                         || x.Type == DavItem.ItemType.MultipartFile)
+                        && !pendingHistoryDirIds.Contains(x.ParentId!.Value));
     }
 
     private async Task PerformHealthCheck
@@ -623,6 +634,41 @@ public class HealthCheckService
                 await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
                 await _providerErrorService.ClearErrorsForFile(davItem.Path).ConfigureAwait(false);
                 return;
+            }
+
+            // if the item still has a pending (non-imported) history entry,
+            // don't delete it — Radarr/Sonarr hasn't imported it yet.
+            {
+                await using var historyCheckCtx = new DavDatabaseContext();
+                var hasPendingHistory = await historyCheckCtx.HistoryItems
+                    .AnyAsync(h => h.DownloadDirId == davItem.ParentId
+                                   && !h.IsImported
+                                   && !h.IsArchived
+                                   && h.DownloadStatus == HistoryItem.DownloadStatusOption.Completed, ct)
+                    .ConfigureAwait(false);
+
+                if (hasPendingHistory)
+                {
+                    Log.Information("[HealthCheck] Item {Name} has a pending history entry (not yet imported by arr). Skipping repair, rescheduling.", davItem.Name);
+                    var utcNow = DateTimeOffset.UtcNow;
+                    davItem.LastHealthCheck = utcNow;
+                    davItem.NextHealthCheck = utcNow.AddHours(1);
+                    davItem.IsCorrupted = true;
+                    davItem.CorruptionReason = "Missing articles - awaiting arr import before repair";
+                    dbClient.Ctx.HealthCheckResults.Add(SendStatus(new HealthCheckResult()
+                    {
+                        Id = Guid.NewGuid(),
+                        DavItemId = davItem.Id,
+                        Path = davItem.Path,
+                        CreatedAt = utcNow,
+                        Result = HealthCheckResult.HealthResult.Unhealthy,
+                        RepairStatus = HealthCheckResult.RepairAction.ActionNeeded,
+                        Message = "File has missing articles but is still awaiting Radarr/Sonarr import. Repair deferred.",
+                        Operation = operation
+                    }));
+                    await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+                    return;
+                }
             }
 
             // if the unhealthy item is unlinked/orphaned,

@@ -106,7 +106,7 @@ public class DatabaseMaintenanceService(IServiceScopeFactory scopeFactory) : Bac
         var uncompressedIds = new List<Guid>();
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT Id FROM HistoryItems WHERE NzbContents IS NOT NULL AND NzbContents NOT LIKE 'ZSTD:%' LIMIT 50";
+            cmd.CommandText = "SELECT Id FROM HistoryItems WHERE NzbContents IS NOT NULL AND NzbContents NOT LIKE 'ZSTD:%' LIMIT 1000";
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 uncompressedIds.Add(Guid.Parse(reader.GetString(0)));

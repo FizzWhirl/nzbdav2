@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using NzbWebDAV.Config;
-using NzbWebDAV.Database;
-using NzbWebDAV.Services;
 using NzbWebDAV.Tasks;
 using NzbWebDAV.Websocket;
 
@@ -11,14 +10,13 @@ namespace NzbWebDAV.Api.Controllers.RemoveUnlinkedFiles;
 [Route("api/remove-unlinked-files/dry-run")]
 public class RemoveUnlinkedFilesDryRunController(
     ConfigManager configManager,
-    DavDatabaseClient dbClient,
-    WebsocketManager websocketManager,
-    ProviderErrorService providerErrorService
+    IServiceScopeFactory scopeFactory,
+    WebsocketManager websocketManager
 ) : BaseApiController
 {
     protected override async Task<IActionResult> HandleRequest()
     {
-        var task = new RemoveUnlinkedFilesTask(configManager, dbClient, websocketManager, providerErrorService, isDryRun: true);
+        var task = new RemoveUnlinkedFilesTask(configManager, scopeFactory, websocketManager, isDryRun: true);
         await task.Execute();
         return Ok(new RemoveUnlinkedFilesResponse(RemoveUnlinkedFilesTask.GetAuditReport()));
     }

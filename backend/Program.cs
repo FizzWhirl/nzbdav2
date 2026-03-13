@@ -284,7 +284,7 @@ class Program
         // run
         app.UseMiddleware<ExceptionMiddleware>();
         // ReservedConnectionsMiddleware removed - using GlobalOperationLimiter instead
-        app.UseWebSockets();
+        app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
         app.MapHealthChecks("/health");
         app.Map("/ws", websocketManager.HandleRoute);
         app.MapControllers();

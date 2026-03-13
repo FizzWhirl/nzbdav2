@@ -359,7 +359,6 @@ public class QueueItemProcessor(
         
         // Smart Grouping: Group by base name first to keep multi-part files together
         var baseGroups = fileInfos
-            .DistinctBy(x => x.FileName)
             .GroupBy(x => FilenameUtil.GetMultipartBaseName(x.FileName))
             .ToList();
 

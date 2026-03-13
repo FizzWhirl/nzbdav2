@@ -188,7 +188,6 @@ public class FullNzbTester
             // Step 4: Smart Grouping (Manual Replication of QueueItemProcessor logic)
             Console.WriteLine("\n--- STEP 4: SMART GROUPING ---");
             var baseGroups = fileInfos
-                .DistinctBy(x => x.FileName)
                 .GroupBy(x => FilenameUtil.GetMultipartBaseName(x.FileName))
                 .ToList();
 

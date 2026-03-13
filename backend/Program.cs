@@ -56,7 +56,7 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-13-HISTORY-CLEANUP");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-13-UPSTREAM-SYNC");
         Log.Warning("  FEATURE: History-aware cleanup with HistoryItemId tracking");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 

@@ -359,7 +359,6 @@ public class QueueItemProcessor(
         
         // Smart Grouping: Group by base name first to keep multi-part files together
         var baseGroups = fileInfos
-            .DistinctBy(x => x.FileName)
             .GroupBy(x => FilenameUtil.GetMultipartBaseName(x.FileName))
             .ToList();
 
@@ -601,6 +600,9 @@ public class QueueItemProcessor(
                 Log.Error(ex, "[QueueItemProcessor] Failed to trigger Rclone refresh");
             }
         }
+
+        // Forget /nzbs since queue item was consumed
+        DavDatabaseContext.TriggerVfsForget("/nzbs");
 
         _ = websocketManager.SendMessage(WebsocketTopic.QueueItemRemoved, queueItem.Id.ToString());
         _ = websocketManager.SendMessage(WebsocketTopic.HistoryItemAdded, historySlot.ToJson());

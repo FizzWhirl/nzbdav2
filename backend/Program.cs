@@ -56,7 +56,7 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-13-HISTORY-CLEANUP");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-13-UPSTREAM-SYNC");
         Log.Warning("  FEATURE: History-aware cleanup with HistoryItemId tracking");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
@@ -248,6 +248,11 @@ class Program
 
         // force instantiation of services
         var app = builder.Build();
+
+        // Wire rclone vfs/forget into DavDatabaseContext SaveChangesAsync
+        var rcloneService = app.Services.GetRequiredService<RcloneRcService>();
+        DavDatabaseContext.VfsForgetCallback = paths => rcloneService.ForgetAsync(paths);
+
         app.Services.GetRequiredService<ArrMonitoringService>();
         app.Services.GetRequiredService<HealthCheckService>();
         app.Services.GetRequiredService<BandwidthService>();
@@ -284,7 +289,7 @@ class Program
         // run
         app.UseMiddleware<ExceptionMiddleware>();
         // ReservedConnectionsMiddleware removed - using GlobalOperationLimiter instead
-        app.UseWebSockets();
+        app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
         app.MapHealthChecks("/health");
         app.Map("/ws", websocketManager.HandleRoute);
         app.MapControllers();

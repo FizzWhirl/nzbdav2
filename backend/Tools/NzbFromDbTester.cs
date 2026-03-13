@@ -944,7 +944,6 @@ public class NzbFromDbTester
 
             // Group files by type
             var baseGroups = fileInfos
-                .DistinctBy(x => x.FileName)
                 .GroupBy(x => NzbWebDAV.Utils.FilenameUtil.GetMultipartBaseName(x.FileName))
                 .ToList();
 

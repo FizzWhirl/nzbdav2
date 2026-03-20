@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NzbWebDAV.Database;
+using NzbWebDAV.Database.Models;
 using NzbWebDAV.Utils;
 using Serilog;
 
@@ -44,13 +45,52 @@ public class DatabaseMaintenanceService(IServiceScopeFactory scopeFactory) : Bac
         using var scope = scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
 
-        // 1. Prune BandwidthSamples (> 30 days)
+        // 1. Prune BandwidthSamples (> 30 days) — accumulate bytes before deleting
         var bandwidthCutoff = DateTimeOffset.UtcNow.AddDays(-30).ToUnixTimeSeconds();
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(stoppingToken);
+
+        // Sum bytes about to be pruned (raw SQL to match DELETE pattern)
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync(stoppingToken).ConfigureAwait(false);
+
+        await using var cmd = conn.CreateCommand();
+        var cutoffParam = cmd.CreateParameter();
+        cutoffParam.ParameterName = "@cutoff";
+        cutoffParam.Value = bandwidthCutoff;
+        cmd.Parameters.Add(cutoffParam);
+        cmd.CommandText = "SELECT COALESCE(SUM(\"Bytes\"), 0) FROM \"BandwidthSamples\" WHERE \"Timestamp\" < @cutoff";
+        var prunedBytes = Convert.ToInt64(await cmd.ExecuteScalarAsync(stoppingToken).ConfigureAwait(false));
+
+        if (prunedBytes > 0)
+        {
+            // Read current counter, upsert with accumulated bytes
+            var existing = await dbContext.ConfigItems
+                .FirstOrDefaultAsync(c => c.ConfigName == "stats.alltime-bandwidth-bytes", stoppingToken)
+                .ConfigureAwait(false);
+            var currentTotal = long.TryParse(existing?.ConfigValue, out var parsed) ? parsed : 0L;
+            var newTotal = currentTotal + prunedBytes;
+
+            if (existing != null)
+                existing.ConfigValue = newTotal.ToString();
+            else
+                dbContext.ConfigItems.Add(new ConfigItem
+                    { ConfigName = "stats.alltime-bandwidth-bytes", ConfigValue = newTotal.ToString() });
+
+            await dbContext.SaveChangesAsync(stoppingToken).ConfigureAwait(false);
+            Log.Information("[DatabaseMaintenance] Archived {Bytes} bandwidth bytes to all-time counter (total: {Total}).",
+                prunedBytes, newTotal);
+        }
+
+        // Delete old samples
         var bandwidthDeleted = await dbContext.Database.ExecuteSqlRawAsync(
-            $"DELETE FROM \"BandwidthSamples\" WHERE \"Timestamp\" < {bandwidthCutoff}", 
+            $"DELETE FROM \"BandwidthSamples\" WHERE \"Timestamp\" < {bandwidthCutoff}",
             stoppingToken);
         if (bandwidthDeleted > 0)
             Log.Information("[DatabaseMaintenance] Pruned {Count} old records from BandwidthSamples.", bandwidthDeleted);
+
+        await transaction.CommitAsync(stoppingToken).ConfigureAwait(false);
 
         // 2. Prune HealthCheckResults (> 30 days)
         // Keep Deleted items longer? For now, treat all same as 30 days history.

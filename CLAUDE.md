@@ -12,7 +12,7 @@ NzbDav is a WebDAV server that mounts and streams NZB documents as a virtual fil
 
 The application runs two processes managed by entrypoint.sh:
 
-1. **Backend (C# .NET 9.0)** - Port 8080
+1. **Backend (C# .NET 10.0)** - Port 8080
    - ASP.NET Core WebDAV server
    - SABnzbd-compatible API
    - Usenet client and streaming engine

@@ -459,9 +459,16 @@ public class StatsController(
                 .Where(x => x.Timestamp >= cutoff)
                 .SumAsync(x => x.Bytes);
 
-            var allTimeBytes = await dbContext.BandwidthSamples
+            var archivedBytes = long.TryParse(
+                (await dbContext.ConfigItems.AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.ConfigName == "stats.alltime-bandwidth-bytes"))?.ConfigValue,
+                out var parsed) ? parsed : 0L;
+
+            var liveBytes = await dbContext.BandwidthSamples
                 .AsNoTracking()
                 .SumAsync(x => x.Bytes);
+
+            var allTimeBytes = archivedBytes + liveBytes;
 
             // 2. Bandwidth by provider for the period
             var bandwidthByProvider = await dbContext.BandwidthSamples

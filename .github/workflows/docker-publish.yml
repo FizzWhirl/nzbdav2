@@ -43,8 +43,8 @@ jobs:
         id: set_vars
         run: |
           MAJOR=0
-          MINOR=5
-          PATCH=$(( ${{ github.run_number }} - 115 ))
+          MINOR=6
+          PATCH=$(( ${{ github.run_number }} - 71 ))
 
           # Sanitize branch name for use as a Docker tag (replace / with -)
           SAFE_REF=$(echo "${{ github.ref_name }}" | tr '/' '-')

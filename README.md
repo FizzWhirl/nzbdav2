@@ -116,6 +116,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.1 (2026-03-20)
+*   **Versioning**: Switched to independent versioning scheme. Minor version tracks upstream nzbdav-dev/nzbdav sync level (currently synced to v0.6.0); patch auto-increments per build. Previous changelog entries used the 0.1.x scheme.
+*   **UI**: Updated GitHub link to point to dgherman/nzbdav2. Changelog footer link now links to this changelog.
+*   **Docs**: Replaced README with developer-focused version documenting provenance, original features, upstream sync history, and architectural divergences.
+
 ## v0.1.29 (2026-01-14)
 *   **Fix**: Corrected rclone VFS disk cache deletion to use the proper path structure. The cache now correctly mirrors WebDAV paths directly instead of using an incorrect nested directory structure.
 *   **Fix**: Fixed byte position tracking for multipart/RAR files. The UI now displays accurate progress across the entire file instead of resetting for each archive part.

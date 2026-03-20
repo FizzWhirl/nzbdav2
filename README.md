@@ -1,274 +1,120 @@
-<p align="center">
-  <img width="1101" height="238" alt="image" src="https://github.com/user-attachments/assets/b14165f4-24ff-4abe-8af6-3ca852e781d4" />
-</p>
+# nzbdav2
 
-# Nzb Dav
+nzbdav2 is a WebDAV server that allows you to mount and stream NZB content as a virtual file system without downloading. It integrates with Sonarr and Radarr via a SABnzbd-compatible API and enables streaming directly from Usenet providers through Plex or Jellyfin — using no local storage.
 
-NzbDav is a WebDAV server that allows you to mount and browse NZB documents as a virtual file system without downloading. It's designed to integrate with other media management tools, like Sonarr and Radarr, by providing a SABnzbd-compatible API. With it, you can build an infinite Plex or Jellyfin media library that streams directly from your usenet provider at maxed-out speeds, without using any storage space on your own server.
+> **Provenance:** nzbdav2 is an independent project based on [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav). During early development, some changes were incorporated from [johoja12/nzbdav](https://github.com/johoja12/nzbdav) (a separate fork of the same upstream, now private). nzbdav2 is not a continuation of that project and is developed and maintained independently.
 
-Check the video below for a demo:
+Throughout this document, "upstream" refers to [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav).
 
-https://github.com/user-attachments/assets/be3e59bc-99df-440d-8144-43b030a4eaa4
+## What nzbdav2 Adds
 
-> **Attribution**: The video above contains clips of [Sintel (2010)](https://studio.blender.org/projects/sintel/), by Blender Studios, used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+These features are original to nzbdav2 and not present in [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav).
 
+### BufferedSegmentStream
 
-# Key Features
+A producer-consumer RAM jitter buffer that pre-fetches NZB segments in parallel, handles out-of-order arrival, and re-orders them before writing to the output stream. Includes straggler detection: if the head-of-line segment stalls for more than 1.5s, a duplicate fetch races it on another connection. Upstream uses a sequential `MultiSegmentStream` with no buffering. The RAM buffer isolates the player from network jitter and eliminates stutter at high bitrates.
 
-* 📁 **WebDAV Server** - *Host your virtual file system over HTTP(S)*
-* ☁️ **Mount NZB Documents** - *Mount and browse NZB documents without downloading.*
-* 📽️ **Full Streaming and Seeking Abilities** - *Jump ahead to any point in your video streams.*
-* 🗃️ **Stream archived contents** - *View, stream, and seek content within RAR and 7z archives.*
-* 🔓 **Stream password-protected content** - *View, stream, and seek within password-protected archives.*
-* 💙 **Healthchecks & Repairs** - *Automatically replace content that has been removed from your usenet provider*
-* 🧩 **SABnzbd-Compatible API** - *Use NzbDav as a drop-in replacement for sabnzbd.*
-* 🙌 **Sonarr/Radarr Integration** - *Configure it once, and leave it unattended.*
+### Persistent Seek Cache
 
-# Fork Enhancements
+Segment byte offsets are cached in the database during health checks and media analysis. This enables O(log N) instant seeking for previously accessed files — no NNTP round-trips needed. Without the cache, each seek requires interpolation searches across the provider. Upstream has no equivalent.
 
-This fork introduces significant architectural and feature improvements over the original implementation:
+### Priority Queuing via `GlobalOperationLimiter`
 
-### 🚀 Smart Buffering Engine
-*   **Read-Ahead Buffering**: Implements a custom `BufferedSegmentStream` that pre-fetches segments into memory, ensuring smooth playback and eliminating stutter during high-bitrate streams.
-*   **Persistent Seek Cache**: Automatically caches segment byte offsets in the database during health checks or manual analysis. This enables **instant seeking** for previously accessed files by bypassing slow NNTP-based interpolation searches.
-*   **Optimized Seeking**: Intelligent segment seeking and stream management for faster seek times.
+Connections are statically partitioned between active streaming requests and background tasks (health checks, queue processing). This prevents background work from starving playback connections. Upstream uses `PrioritizedSemaphore` with dynamic probability-based allocation; nzbdav2's static partitioning is simpler and sufficient for the target use case.
 
-### 🧠 Intelligent Connection Management
-*   **Priority Queuing**: Dynamically prioritizes active streaming connections over background maintenance tasks (like health checks and queue repairs) to prevent playback interruptions.
-*   **Load Balancing**: Smart distribution of requests across available Usenet providers and connections.
+### Audio File Support
 
-### 📊 Advanced UI Dashboard
-*   **Real-Time Monitoring**: Live visualization of bandwidth usage and active connections.
-*   **Granular Connection Insights**: See exactly what each connection is doing (Buffering, Streaming, Repairing) and details about the file being accessed, including its **Usenet age** (e.g., "5d ago").
-*   **Server Identification**: Provider cards now display the specific server host address (e.g., `news.example.com`) instead of generic labels, making it easier to track performance across different backbones.
-*   **Interactive System Logs**: A built-in log console with per-level filtering (Debug, Info, Error) and optimized memory storage (10k records per level) for easier troubleshooting.
+nzbdav2 recognizes audio file extensions and accepts audio-only NZBs as valid imports. `EnsureImportableMediaValidator` validates for both video and audio files. Default SABnzbd categories include `audio`. Upstream is video-only — audio NZBs would be rejected.
 
-### 🛠️ Modern Tech Stack
-*   **Backend**: Upgrade to **.NET 9.0** for improved performance and resource efficiency.
-*   **Frontend**: Rebuilt using **React Router v7** with Server-Side Rendering (SSR), React 19, and Bootstrap 5/Tailwind for a snappy, modern user experience.
+### Provider Stats UI
 
+Real-time per-provider performance tracking visible from the Stats page: throughput (MB/s), success rate, active connection usage, and the file currently being served per connection. No upstream equivalent.
 
-# Getting Started
+### Media Analysis via ffprobe
 
-The easiest way to get started is by using the official Docker image.
+Deep media verification triggered on demand (from File Details modal) or automatically during health checks when a file lacks media metadata. Displays video and audio codec information in the File Details modal. ffmpeg and ffprobe are bundled in the Docker image. No upstream equivalent.
 
-To try it out, run the following command to pull and run the image with port `3000` exposed:
+### Rich File Details Modal
+
+A per-file action panel accessible from Health, Stats, and Explore pages. Provides: run health check, trigger repair (delete + Sonarr/Radarr re-search), run media analysis, test download, and view per-provider stats. Upstream's equivalent is a simpler dropdown with Preview, Download, and Export NZB.
+
+## Adopted Upstream Features — Architectural Differences
+
+These features originated in [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) but are implemented differently in nzbdav2. Implementation rationale is documented in [`docs/upstream-sync-2026-03-10.md`](./docs/upstream-sync-2026-03-10.md).
+
+### Zstd NZB Compression (In-DB Instead of Blobstore)
+
+Upstream's v0.6.0 migration moves NZB XML content to a filesystem blobstore. nzbdav2 skipped the blobstore and instead applies Zstd compression to NZB content stored in-DB via an EF Core value converter. This achieves approximately 31% database size reduction (856MB → 592MB after VACUUM) without a non-reversible schema migration. The blobstore migration was evaluated and skipped; see the sync doc for the full rationale.
+
+### RcloneRcService (DI-Injected vs. Static)
+
+Upstream uses a static `RcloneClient` class with flat config keys (`rclone.host`, `rclone.user`, `rclone.pass`). nzbdav2 uses a DI-injected `RcloneRcService` singleton backed by `IHttpClientFactory` with a single JSON config blob at the `rclone.rc` key. nzbdav2 also adds `DeleteFromDiskCache` — explicit RClone VFS cache invalidation — which upstream does not have.
+
+## Deliberately Skipped Upstream Features
+
+These upstream features were evaluated and intentionally not adopted. The "Re-evaluate If" column documents when to revisit each decision. Full rationale is in [`docs/upstream-sync-2026-03-10.md`](./docs/upstream-sync-2026-03-10.md).
+
+| Feature | Why Skipped | Re-evaluate If |
+|---|---|---|
+| Blobstore migration | Non-reversible schema change. In-DB Zstd compression achieves the same size savings safely. | DB size becomes a problem again, or upstream makes blobstore reversible. |
+| Export NZB from Explore | Depends on blobstore (`nzbBlobId`). Not applicable without blobstore. | Could be reimplemented to read from in-DB `NzbContents` if the feature is wanted. |
+| User-Agent configuration | NNTP protocol does not support user-agent headers. The setting has no effect. | N/A — not a real feature. |
+| Explore page actions dropdown | Superseded by the richer `FileDetailsModal`, which provides a superset of actions. | N/A — already covered. |
+| `PrioritizedSemaphore` | `GlobalOperationLimiter` meets current needs. Adopting this requires a significant refactor of `GlobalOperationLimiter` and `ConnectionPool`. | Static partitioning causes observed contention issues under load. |
+| `UnbufferedMultiSegmentStream` | Not needed. Would serve as a low-memory fallback for `BufferedSegmentStream`. | A low-memory deployment scenario becomes relevant. |
+
+## Architecture Overview
+
+For full architecture, DB schema, development commands, and configuration details, see [`CLAUDE.md`](./CLAUDE.md) — the project's primary architecture reference and AI context file.
+
+### Dual-Service Setup
+
+The application runs two processes managed by `entrypoint.sh`:
+
+- **Backend** (`/backend`) — .NET 10.0 ASP.NET Core on port 8080. WebDAV server, SABnzbd-compatible API, Usenet client, streaming engine, SQLite database via EF Core.
+- **Frontend** (`/frontend`) — React Router v7 with server-side rendering, Express proxy on port 3000. Proxies API requests to backend, serves SSR pages, WebSocket connection for real-time updates.
+
+`entrypoint.sh` health-gates frontend startup: it waits for the backend health endpoint before starting the frontend, and shuts down both processes if either exits.
+
+### Streaming Pipeline
+
+NZB segment IDs are stored in the database when an NZB is queued. When a WebDAV request arrives, the backend streams segment data on demand via `BufferedSegmentStream` — no content is stored locally. Range requests are supported, enabling seeking. Archive contents (RAR/7z) are extracted via the `SharpCompress` streaming API without writing to disk.
+
+### WebDAV Virtual Filesystem
+
+NZB contents are exposed as a virtual directory hierarchy. Completed items expose `.rclonelink` files that RClone translates to native symlinks when mounting the WebDAV server. Sonarr and Radarr pick up these symlinks, move them to the media library, and Plex/Jellyfin stream through them — all without any local copy of the content.
+
+### Health and Repair
+
+`HealthCheckService` runs in the background, validating article availability on each configured Usenet provider. When segments are missing, it triggers Par2 recovery or a Sonarr/Radarr re-search (blacklist + new grab). `GlobalOperationLimiter` ensures health check connections never starve active streaming connections.
+
+### SABnzbd-Compatible API
+
+The backend exposes a SABnzbd-compatible API subset (`/api?mode=...`). Sonarr and Radarr are configured to use nzbdav2 as their download client. When they send an NZB, nzbdav2 mounts it to the WebDAV filesystem and signals completion — no actual download occurs.
+
+## Quick Start
 
 ```bash
-docker pull ghcr.io/johoja12/nzbdav:latest
-```
-
-If you are developing or prefer to build the image locally:
-
-```bash
-docker build -t local/nzbdav:3 .
-```
-
-```
-
-And if you would like to persist saved settings, attach a volume at `/config`
-
-```
-mkdir -p $(pwd)/nzbdav && \
+mkdir -p $(pwd)/nzbdav2 && \
 docker run --rm -it \
-  -v $(pwd)/nzbdav:/config \
+  -v $(pwd)/nzbdav2:/config \
   -e PUID=1000 \
   -e PGID=1000 \
   -p 3000:3000 \
-  ghcr.io/johoja12/nzbdav:latest
-```
-After starting the container, be sure to navigate to the Settings page on the UI to finish setting up your usenet connection settings.
-
-<p align="center">
-    <img width="600" alt="settings-page" src="https://github.com/user-attachments/assets/ca0a7fa7-be43-412d-9fec-eda24eb25fdb" />
-</p>
-
-You'll also want to set up a username and password for logging in to the webdav server
-
-<p align="center">
-    <img width="600" alt="webdav-settings" src="https://github.com/user-attachments/assets/833b382c-4e1d-480a-ac25-b9cc674baea4" />
-</p>
-
-# RClone
-
-In order to integrate with Plex, Radarr, and Sonarr, you'll need to mount the webdav server onto your filesystem. 
-
-```
-[nzb-dav]
-type = webdav
-url = // your endpoint
-vendor = other
-user = // your webdav user
-pass = // your rclone-obscured password https://rclone.org/commands/rclone_obscure
+  ghcr.io/dgherman/nzbdav2:latest
 ```
 
+After starting, navigate to `http://localhost:3000` and open Settings to configure your Usenet provider connections.
 
-Below are the RClone settings I use.  
-```
---vfs-cache-mode=full
---buffer-size=1024
---dir-cache-time=1s
---vfs-cache-max-size=5G
---vfs-cache-max-age=180m
---links
---use-cookies
---allow-other
---uid=1000
---gid=1000
-```
+For all environment variables and configuration options, see [`CLAUDE.md`](./CLAUDE.md).
 
-* The `--links` setting in RClone is important. It allows *.rclonelink files within the webdav to be translated to symlinks when mounted onto your filesystem.
+For a complete deployment guide including RClone mount configuration, Sonarr/Radarr integration, and Docker Compose setup, see the [upstream README](https://github.com/nzbdav-dev/nzbdav#readme). nzbdav2-specific architectural differences (e.g., in-DB Zstd compression instead of blobstore) are documented in [`CLAUDE.md`](./CLAUDE.md) and [`docs/upstream-sync-2026-03-10.md`](./docs/upstream-sync-2026-03-10.md).
 
-    > NOTE: Be sure to use an updated version of rclone that supports the `--links` argument.
-    > * Version `v1.70.3` has been known to support it.
-    > * Version `v1.60.1-DEV` has been known _not_ to support it.
+## Upstream Sync
 
-* The `--use-cookies` setting in RClone is also important. Without it, RClone is forced to re-authenticate on every single webdav request, slowing it down considerably.
-* The `--allow-other` setting is not required, but it should help if you find that your containers are not able to see the mount contents due to permission issues.
+nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and periodically cherry-picks relevant upstream changes manually. Each sync documents which changes were adopted, which were skipped, and the rationale for each decision. Sync history is in [`docs/upstream-sync-*.md`](./docs/). The most recent file contains the last reviewed upstream commit and a table of all items evaluated.
 
-**Optional**
-* The `--vfs-cache-max-size=5G` Can be added to set the max total size of objects in the cache (default off), thus possibly consuming all free space.
-* The `--vfs-cache-max-age=180m` Can be added to set the max time since last access of objects in the cache (default 1h0m0s). 
-
-
-# Radarr / Sonarr
-
-Once you have the webdav mounted onto your filesystem (e.g. accessible at `/mnt/nzbdav`), you can configure NZB-Dav as your download-client within Radarr and Sonarr, using the SABnzbd-compatible api.
-
-<p align="center">
-    <img width="600" alt="webdav-settings" src="https://github.com/user-attachments/assets/5ef6a362-7393-4b98-980a-a9e0e159ed72" />
-</p>
-
-### Steps
-* Radar will send an *.nzb to NZB-Dav to "download"
-* NZB-Dav will mount the nzb onto the webdav without actually downloading it.
-* RClone will make the nzb contents available to your filesystem by streaming, without using any storage space on your server.
-* NZB-Dav will tell Radarr that the "download" has completed within the `/mnt/nzbdav/completed-symlinks` folder.
-* Radarr will grab the symlinks from `/mnt/nzbdav/completed-symlinks` and will move them to wherever you have your media library.
-* The symlinks always point to the `/mnt/nzbdav/.ids` folder which contains the streamable content.
-* Plex accesses one of the symlinks from your media library, it will automatically fetch and stream it from the mounted webdav.
-
-
-# Example Docker Compose Setup
-Fully containerized setup for docker compose. 
-
-See rclone [docs](https://rclone.org/docker/) for more info.
-
-Verify FUSER driver is installed:
-```
-$ fusermount3 --version
-```
-
-Install FUSER driver if needed:
-- `sudo pacman -S fuse3` OR
-- `sudo dnf install fuse3` OR
-- `sudo apt install fuse3` OR
-- `sudo apk add fuse3`
-- etc...
-
-
-Install the rclone volume plugin:
-```
-$ sudo mkdir -p /var/lib/docker-plugins/rclone/config
-$ sudo mkdir -p /var/lib/docker-plugins/rclone/cache
-$ docker plugin install rclone/docker-volume-rclone:amd64 args="-v --links --buffer-size=1024" --alias rclone --grant-all-permissions
-```
-You can set any options here in the `args="..."` section. The command above sets bare minimum, and must be accompanied with more options in the example compose file.
-
-Move or create `rclone.conf` in `/var/lib/docker-plugins/rclone/config/`. Contents should follow the [example](https://github.com/nzbdav-dev/nzbdav?tab=readme-ov-file#rclone).
-
-In your compose.yaml... **NOTE: Ubuntu container is not required, and is only included for testing the rclone volume.**
-```yml
-services:
-  nzbdav:
-    image: ghcr.io/johoja12/nzbdav:latest
-    environment:
-      - PUID=1000
-      - PGID=1000
-    ports:
-      - 3000:3000
-    volumes:
-      - /opt/stacks/nzbdav:/config
-    restart: unless-stopped
-
-  ubuntu:
-    image: ubuntu
-    command: sleep infinity
-    volumes:
-      - nzbdav:/mnt/nzbdav
-    environment:
-      - PUID=1000
-      - PGID=1000
-
-  radarr:
-    volumes:
-      - nzbdav:/mnt/nzbdav # Change target path based on SABnzbd rclone mount directory setting.
-
-# the rest of your config ...
-
-volumes:
-  nzbdav:
-    driver: rclone
-    driver_opts:
-      remote: 'nzb-dav:'
-      allow_other: 'true'
-      vfs_cache_mode: off
-      dir_cache_time: 1s
-      allow_non_empty: 'true'
-      uid: 1000
-      gid: 1000
-
-```
-
-To verify proper rclone volume creation:
-```
-$ docker exec -it <ubuntu container name> bash
-$ ls -la /mnt/nzbdav
-```
-
-## Accessing the rclone volume from a separate stack.
-Note: Your rclone volume **must** be already created by another stack, for example: 
-
-- Media backend: nzbdav + sonarr + radarr <--- This stack is creating the rclone volume
-- Media frontend: jellyfin <--- Mounts the external arrstack rclone volume
-
-To do so, see the bottom 11 lines in the example compose file in the above section.
-
-The example below uses ubuntu again, but the concept is the same for a different container such as sonarr.
-
-
-Find the stack name that creates the rclone volume:
-```
-$ docker-compose ls
-```
-
-Combine in the new separate compose file:
-```yml
-services:
-  ubuntu:
-    image: ubuntu
-    container_name: ubuntu
-    command: sleep infinity
-    volumes:
-      - nzbdav:/mnt/nzbdav # -- IMPORTANT --
-    environment:
-      - PUID=1000 # Must match UID value from volume in the stack creating the volume (driver_opts).
-      - PGID=1000 # Must match GID value from volume in the stack creating the volume (driver_opts).
-
-volumes:
-  nzbdav:
-    name: <STACK NAME>_nzbdav # See above for finding the stack name. # -- IMPORTANT --
-    external: true # -- IMPORTANT --
-```
-
-
-# More screenshots
-<img width="300" alt="onboarding" src="https://github.com/user-attachments/assets/4ca1bfed-3b98-4ff2-8108-59ed07a25591" />
-<img width="300" alt="queue and history" src="https://github.com/user-attachments/assets/4f69f8dd-0dba-47b4-b02f-3e83ead293db" />
-<img width="300" alt="dav-explorer" src="https://github.com/user-attachments/assets/54a1d49b-8a8d-4306-bcda-9740bd5c9f52" />
-<img width="300" alt="health-page" src="https://github.com/user-attachments/assets/709b81c2-550b-47d0-ad50-65dc184cd3fa" />
-
-# Changelog
+## Changelog
 
 ## v0.1.29 (2026-01-14)
 *   **Fix**: Corrected rclone VFS disk cache deletion to use the proper path structure. The cache now correctly mirrors WebDAV paths directly instead of using an incorrect nested directory structure.
@@ -382,6 +228,7 @@ volumes:
 *   **Bug Fix**: Corrected the internal path format in the Missing Articles table to correctly show the nested ID structure (e.g., `/.ids/1/2/3/4/5/uuid...`).
 *   **Optimization**: Renamed `BackfillIsImportedStatusAsync` to `BackfillDavItemIdsAsync` and streamlined the startup backfill process to focus on populating missing DavItem IDs for mapped files logic.
 *   **Diagnostics**: Enhanced logging in `ArrClient` (Sonarr/Radarr) to dump recent history records when a "grab event" cannot be found during the repair/blacklist process, aiding in troubleshooting matching issues.
+
 ## v0.1.4 (2025-12-08)
 *   **Performance Optimization**: Addressed slow UI loading for stats pages by refactoring backend services to use asynchronous database queries and enabling SQLite WAL (Write-Ahead Logging) mode for improved concurrency.
 *   **Deleted Files UI Improvements**: The "Deleted Files" table now identifies and displays the original NZB/Job name for files with obfuscated filenames, making it easier to track which content was removed.

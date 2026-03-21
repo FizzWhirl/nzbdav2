@@ -116,6 +116,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.3 (2026-03-21)
+*   **Fix**: Health check completions now appear in the Analysis History tab. Previously, the Health Check Queue processed items but never recorded results to the shared Analysis History, so they were invisible in the UI.
+*   **Fix**: Suppressed noisy "No routes matched location" error logs caused by browser-generated requests for static assets (apple-touch-icon, favicon variants, robots.txt, etc.) that React Router's SSR handler was processing.
+
 ## v0.6.2 (2026-03-21)
 *   **Fix**: "Total Downloaded ALL TIME" on the System Dashboard now correctly tracks cumulative bandwidth across all time. Previously, the value only reflected the last 30 days because the database maintenance service pruned older bandwidth samples. The fix accumulates pruned bytes into a persistent counter before deletion, so the all-time total is preserved across prune cycles.
 

@@ -177,6 +177,57 @@ Log.Warning("  FEATURE: Database PRAGMA Optimizations (5-10x faster migrations)"
 - After bug fixes that affect core functionality
 - Use the current date and a short descriptor of the main change
 
+## Release & Changelog
+
+**ALWAYS update the changelog in `README.md` when making any code change.** The changelog is at the bottom of `README.md` under the `## Changelog` heading.
+
+### Versioning Scheme
+
+Version format: `0.MINOR.PATCH`
+
+- **MINOR** — tracks the upstream [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) sync level. Currently `6` (synced to upstream v0.6.0). Only bump MINOR after a deliberate upstream sync — document this in `docs/upstream-sync-YYYY-MM-DD.md`.
+- **PATCH** — auto-incremented by CI. **Never set this manually.** The formula is in `.github/workflows/docker-publish.yml`:
+  ```bash
+  PATCH=$(( ${{ github.run_number }} - OFFSET ))
+  ```
+  To determine what version the *next* CI build will produce, check `github.run_number` in recent Actions runs and apply the formula.
+
+### When to Add a Changelog Entry
+
+Add a new `## vX.Y.Z (YYYY-MM-DD)` entry at the **top** of the changelog (just below the `## Changelog` heading) whenever you:
+- Fix a bug
+- Add a feature
+- Make a UI change
+- Make a performance improvement
+- Adopt upstream changes
+
+### Changelog Entry Format
+
+```markdown
+## v0.6.Z (YYYY-MM-DD)
+*   **Category**: Description of what changed and why.
+*   **Category**: Another change.
+```
+
+**Category tags** (use these consistently): `Feature`, `Fix`, `UI`, `Performance`, `Logging`, `Reliability`, `Optimization`, `Tooling`, `Logic`, `Maintenance`, `Docs`, `Versioning`
+
+**For the version number in a new entry:** Use the current MINOR (e.g. `6`) and set PATCH to one more than the most recent `0.6.x` entry already in the changelog. If no `0.6.x` entry exists yet, start at `0.6.1`. The CI build that deploys the change will produce a matching version automatically.
+
+### Example Workflow
+
+When making changes in a session:
+1. Make the code change.
+2. Open `README.md` and locate `## Changelog`.
+3. Insert a new `## v0.6.Z (today's date)` block above the previous most-recent entry.
+4. List all changes made in this session with appropriate category tags.
+5. Commit `README.md` along with the code changes.
+
+### What NOT to Do
+
+- Do **not** create git version tags manually — CI handles Docker image tagging.
+- Do **not** hardcode `PATCH` in the workflow — the formula calculates it from `run_number`.
+- Do **not** bump `MINOR` without a corresponding upstream sync document in `docs/`.
+
 ## Configuration
 
 **Environment Variables**

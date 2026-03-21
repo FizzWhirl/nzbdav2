@@ -55,6 +55,22 @@ app.use(async (req, res, next) => {
   next();
 });
 
+// Silently return 404 for browser-generated static asset requests that would
+// otherwise produce verbose error logging from React Router's SSR handler
+app.use((req, res, next) => {
+  const path = req.path.toLowerCase();
+  if (
+    path.includes("apple-touch-icon") ||
+    path.includes("favicon") && path !== "/favicon.ico" ||
+    path === "/robots.txt" ||
+    path === "/site.webmanifest" ||
+    path === "/browserconfig.xml"
+  ) {
+    return res.status(404).end();
+  }
+  next();
+});
+
 // Let frontend handle all other requests
 app.use(
   createRequestHandler({

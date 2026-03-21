@@ -116,6 +116,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.2 (2026-03-21)
+*   **Fix**: "Total Downloaded ALL TIME" on the System Dashboard now correctly tracks cumulative bandwidth across all time. Previously, the value only reflected the last 30 days because the database maintenance service pruned older bandwidth samples. The fix accumulates pruned bytes into a persistent counter before deletion, so the all-time total is preserved across prune cycles.
+
 ## v0.6.1 (2026-03-20)
 *   **Versioning**: Switched to independent versioning scheme. Minor version tracks upstream nzbdav-dev/nzbdav sync level (currently synced to v0.6.0); patch auto-increments per build. Previous changelog entries used the 0.1.x scheme.
 *   **UI**: Updated GitHub link to point to dgherman/nzbdav2. Changelog footer link now links to this changelog.

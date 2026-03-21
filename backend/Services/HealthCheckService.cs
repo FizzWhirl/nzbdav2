@@ -173,11 +173,17 @@ public class HealthCheckService
             await dbClient.Ctx.Entry(davItem).ReloadAsync(cts.Token).ConfigureAwait(false);
             var result = davItem.IsCorrupted ? "Unhealthy (Repair Attempted)" : "Healthy";
             Log.Information("[HealthCheck] Finished item: {Name}. Result: {Result}", davItem.Name, result);
+
+            await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, davItem.Name,
+                davItem.IsCorrupted ? "Failed" : "Success",
+                davItem.IsCorrupted ? "Health check found issues - repair attempted" : "Health check passed").ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!_cancellationToken.IsCancellationRequested)
         {
             // Handle per-item timeout
             await HandleTimeout(itemInfo.Id, itemInfo.Name, itemInfo.Path, itemInfo.NextHealthCheck == DateTimeOffset.MinValue);
+            await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, itemInfo.Name,
+                "Failed", "Health check timed out").ConfigureAwait(false);
         }
         catch (Exception e)
         {
@@ -196,7 +202,7 @@ public class HealthCheckService
                 // Mark as failed in DB to prevent infinite loops and allow filtering
                 await using var errorContext = new DavDatabaseContext();
                 var utcNow = DateTimeOffset.UtcNow;
-                
+
                 await errorContext.Items
                     .Where(x => x.Id == itemInfo.Id)
                     .ExecuteUpdateAsync(setters => setters
@@ -222,6 +228,9 @@ public class HealthCheckService
             {
                 Log.Error(dbEx, "[HealthCheck] Failed to save error status to database.");
             }
+
+            await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, itemInfo.Name,
+                "Failed", $"Health check error: {e.Message}").ConfigureAwait(false);
         }
         finally
         {
@@ -884,6 +893,30 @@ public class HealthCheckService
                 Operation = operation
             }));
             await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task SaveHealthCheckToAnalysisHistoryAsync(Guid davItemId, string fileName, string jobName, string result, string details)
+    {
+        try
+        {
+            using var scope = _serviceScopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
+            var item = new AnalysisHistoryItem
+            {
+                DavItemId = davItemId,
+                FileName = fileName,
+                JobName = jobName,
+                Result = result,
+                Details = details,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            db.AnalysisHistoryItems.Add(item);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[HealthCheck] Failed to save analysis history for {FileName}", fileName);
         }
     }
 

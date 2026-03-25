@@ -116,6 +116,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.8 (2026-03-25)
+*   **Fix**: Resolved "DavItem cannot be tracked because another instance with the same key value" crash in queue processing. When multiple aggregators (Rar, File, SevenZip, MultipartMkv) share the same DbContext, deterministic GUID collisions could occur if deobfuscation resolved different NZB files to the same filename. Added `IsAlreadyTracked()` guard in `BaseAggregator` that checks the ChangeTracker before calling `.Add()`, skipping duplicates instead of crashing.
+
 ## v0.6.3 (2026-03-21)
 *   **Fix**: Health check completions now appear in the Analysis History tab. Previously, the Health Check Queue processed items but never recorded results to the shared Analysis History, so they were invisible in the UI.
 *   **Fix**: Suppressed noisy "No routes matched location" error logs caused by browser-generated requests for static assets (apple-touch-icon, favicon variants, robots.txt, etc.) that React Router's SSR handler was processing.

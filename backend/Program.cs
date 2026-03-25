@@ -56,8 +56,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-13-UPSTREAM-SYNC");
-        Log.Warning("  FEATURE: History-aware cleanup with HistoryItemId tracking");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-25-AGGREGATOR-FIX");
+        Log.Warning("  FIX: Prevent duplicate DavItem tracking errors in aggregators");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

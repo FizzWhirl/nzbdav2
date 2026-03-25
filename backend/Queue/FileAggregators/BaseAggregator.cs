@@ -1,6 +1,7 @@
 ﻿using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
 using NzbWebDAV.Queue.FileProcessors;
+using Serilog;
 
 namespace NzbWebDAV.Queue.FileAggregators;
 
@@ -9,6 +10,16 @@ public abstract class BaseAggregator
     public abstract void UpdateDatabase(List<BaseProcessor.Result> processorResults);
     protected abstract DavDatabaseClient DBClient { get; }
     protected abstract DavItem MountDirectory { get; }
+
+    /// <summary>
+    /// Check if a DavItem with the given ID is already tracked by the DbContext.
+    /// Prevents "cannot be tracked because another instance with the same key value"
+    /// errors when multiple aggregators or duplicate filenames produce the same deterministic GUID.
+    /// </summary>
+    protected bool IsAlreadyTracked(Guid id)
+    {
+        return DBClient.Ctx.ChangeTracker.Entries<DavItem>().Any(e => e.Entity.Id == id);
+    }
 
     protected DavItem EnsureExtractPath(string pathWithinArchive)
     {

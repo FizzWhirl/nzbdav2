@@ -4,6 +4,7 @@ using NzbWebDAV.Extensions;
 using NzbWebDAV.Models;
 using NzbWebDAV.Queue.FileProcessors;
 using NzbWebDAV.Utils;
+using Serilog;
 
 namespace NzbWebDAV.Queue.FileAggregators;
 
@@ -49,8 +50,16 @@ public class RarAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, b
             if (archiveFiles.Count == 1 && ObfuscationUtil.IsProbablyObfuscated(name))
                 name = mountDirectory.Name + Path.GetExtension(name);
 
+            var itemId = GuidUtil.CreateDeterministic(parentDirectory.Id, name);
+            if (IsAlreadyTracked(itemId))
+            {
+                Log.Warning("[RarAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
+                    name, itemId);
+                continue;
+            }
+
             var davItem = DavItem.New(
-                id: GuidUtil.CreateDeterministic(parentDirectory.Id, name),
+                id: itemId,
                 parent: parentDirectory,
                 name: name,
                 fileSize: fileSize,

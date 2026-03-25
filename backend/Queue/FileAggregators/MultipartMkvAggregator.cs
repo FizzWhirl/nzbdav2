@@ -2,6 +2,7 @@
 using NzbWebDAV.Database.Models;
 using NzbWebDAV.Queue.FileProcessors;
 using NzbWebDAV.Utils;
+using Serilog;
 
 namespace NzbWebDAV.Queue.FileAggregators;
 
@@ -32,8 +33,16 @@ public class MultipartMkvAggregator
             var parentDirectory = MountDirectory;
             var name = multipartMkvFile.Filename;
 
+            var itemId = GuidUtil.CreateDeterministic(parentDirectory.Id, name);
+            if (IsAlreadyTracked(itemId))
+            {
+                Log.Warning("[MultipartMkvAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
+                    name, itemId);
+                continue;
+            }
+
             var davItem = DavItem.New(
-                id: GuidUtil.CreateDeterministic(parentDirectory.Id, name),
+                id: itemId,
                 parent: parentDirectory,
                 name: name,
                 fileSize: fileParts.Sum(x => x.FilePartByteRange.Count),

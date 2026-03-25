@@ -3,6 +3,7 @@ using NzbWebDAV.Database.Models;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Queue.FileProcessors;
 using NzbWebDAV.Utils;
+using Serilog;
 
 namespace NzbWebDAV.Queue.FileAggregators;
 
@@ -18,8 +19,16 @@ public class FileAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, 
             if (processorResult is not FileProcessor.Result result) continue;
             if (result.FileName == "") continue; // skip files whose name we can't determine
 
+            var itemId = GuidUtil.CreateDeterministic(mountDirectory.Id, result.FileName);
+            if (IsAlreadyTracked(itemId))
+            {
+                Log.Warning("[FileAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
+                    result.FileName, itemId);
+                continue;
+            }
+
             var davItem = DavItem.New(
-                id: GuidUtil.CreateDeterministic(mountDirectory.Id, result.FileName),
+                id: itemId,
                 parent: mountDirectory,
                 name: result.FileName,
                 fileSize: result.FileSize,

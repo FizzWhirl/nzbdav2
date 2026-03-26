@@ -362,6 +362,15 @@ function Body(props: ExplorePageData) {
                                         <div className={styles["item-name"]}>{result.name}</div>
                                         <div className={styles["item-path"]}>{result.path}</div>
                                     </div>
+                                    {result.davItemId && (
+                                        <button
+                                            className={styles["delete-button"]}
+                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(result.davItemId!, result.name); }}
+                                            title="Delete"
+                                        >
+                                            <i className="bi bi-trash"></i>
+                                        </button>
+                                    )}
                                 </Link>
                             );
                         }
@@ -378,6 +387,15 @@ function Body(props: ExplorePageData) {
                                     <div className={styles["item-path"]}>{result.path}</div>
                                     <div className={styles["item-size"]}>{formatFileSize(result.size)}</div>
                                 </div>
+                                {result.davItemId && (
+                                    <button
+                                        className={styles["delete-button"]}
+                                        onClick={(e) => { e.stopPropagation(); onDelete(result.davItemId!, result.name); }}
+                                        title="Delete"
+                                    >
+                                        <i className="bi bi-trash"></i>
+                                    </button>
+                                )}
                             </div>
                         );
                     })}

@@ -189,24 +189,19 @@
     margin-left: auto;
     flex-shrink: 0;
     background: none;
-    border: 1px solid transparent;
+    border: 1px solid #dc322f40;
     border-radius: 6px;
-    color: #586e75;
+    color: #dc322f;
     cursor: pointer;
     padding: 6px 10px;
     font-size: 16px;
-    opacity: 0;
-    transition: opacity 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.item:hover .delete-button {
-    opacity: 1;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
 }
 
 .delete-button:hover {
-    color: #dc322f;
-    border-color: #dc322f40;
-    background-color: #dc322f10;
+    color: #fdf6e3;
+    border-color: #dc322f;
+    background-color: #dc322f;
 }
 
 .hidden * {

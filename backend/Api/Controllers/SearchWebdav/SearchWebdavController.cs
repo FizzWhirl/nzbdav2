@@ -52,21 +52,21 @@ public class SearchWebdavController(DatabaseStore store, ConfigManager configMan
             if (child.Name.ToLower().Contains(query))
             {
                 string? davItemId = null;
-                if (child is not IStoreCollection) // Only for files, not directories
+                if (child is DatabaseStoreCollection dirCollection)
                 {
-                    // Check for different file types that have direct access to DavItem
-                    if (child is DatabaseStoreNzbFile nzbFile)
-                    {
-                        davItemId = nzbFile.DavItem.Id.ToString();
-                    }
-                    else if (child is DatabaseStoreMultipartFile multipartFile)
-                    {
-                        davItemId = multipartFile.DavItem.Id.ToString();
-                    }
-                    else if (child is DatabaseStoreRarFile rarFile)
-                    {
-                        davItemId = rarFile.DavItem.Id.ToString();
-                    }
+                    davItemId = dirCollection.UniqueKey;
+                }
+                else if (child is DatabaseStoreNzbFile nzbFile)
+                {
+                    davItemId = nzbFile.DavItem.Id.ToString();
+                }
+                else if (child is DatabaseStoreMultipartFile multipartFile)
+                {
+                    davItemId = multipartFile.DavItem.Id.ToString();
+                }
+                else if (child is DatabaseStoreRarFile rarFile)
+                {
+                    davItemId = rarFile.DavItem.Id.ToString();
                 }
 
                 results.Add(new SearchWebdavResponse.SearchResult()

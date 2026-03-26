@@ -185,23 +185,61 @@
     min-height: unset;
 }
 
-.delete-button {
-    margin-left: auto;
+.checkbox {
     flex-shrink: 0;
-    background: none;
-    border: 1px solid #dc322f40;
-    border-radius: 6px;
-    color: #dc322f;
+    width: 18px;
+    height: 18px;
     cursor: pointer;
-    padding: 6px 10px;
-    font-size: 16px;
-    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+    accent-color: #268bd2;
 }
 
-.delete-button:hover {
-    color: #fdf6e3;
-    border-color: #dc322f;
+.item-selected {
+    background-color: #073642;
+    border-color: #268bd240 !important;
+}
+
+.selection-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 15px;
+    background-color: #073642;
+    border: 1px solid #268bd240;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    color: #93a1a1;
+    font-size: 14px;
+}
+
+.delete-selected-button {
+    padding: 8px 16px;
     background-color: #dc322f;
+    border: none;
+    border-radius: 6px;
+    color: #fdf6e3;
+    font-size: 14px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.delete-selected-button:hover {
+    background-color: #cb4b16;
+}
+
+.clear-selection-button {
+    padding: 8px 16px;
+    background: none;
+    border: 1px solid #586e75;
+    border-radius: 6px;
+    color: #93a1a1;
+    font-size: 14px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.clear-selection-button:hover {
+    border-color: #93a1a1;
+    color: #fdf6e3;
 }
 
 .hidden * {

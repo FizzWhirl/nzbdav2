@@ -88,6 +88,9 @@ function Body(props: ExplorePageData) {
     const { addToast } = useToast();
     const { confirm } = useConfirm();
 
+    // Multi-select state: Map<davItemId, name>
+    const [selectedItems, setSelectedItems] = useState<Map<string, string>>(new Map());
+
     const items = props.items;
     const parentDirectories = isNavigating
         ? getParentDirectories(getWebdavPathDecoded(navigation.location!.pathname))
@@ -97,6 +100,11 @@ function Body(props: ExplorePageData) {
     const isSearching = fetcher.state === "submitting" || fetcher.state === "loading";
     // Only show search results if we're still on the same path where search was performed
     const searchResults = (searchPerformedAt === currentDirectory) ? fetcher.data?.results : undefined;
+
+    // Clear selection when navigating to a different directory or when search changes
+    useEffect(() => {
+        setSelectedItems(new Map());
+    }, [location.pathname, searchPerformedAt]);
 
     const getDirectoryPath = useCallback((directoryName: string) => {
         return `${location.pathname}/${encodeURIComponent(directoryName)}`;
@@ -112,6 +120,18 @@ function Body(props: ExplorePageData) {
             return `/explore/${result.path}`;
         }
         return `/view/${result.path}?downloadKey=${result.downloadKey}`;
+    }, []);
+
+    const toggleSelection = useCallback((davItemId: string, name: string) => {
+        setSelectedItems(prev => {
+            const next = new Map(prev);
+            if (next.has(davItemId)) {
+                next.delete(davItemId);
+            } else {
+                next.set(davItemId, name);
+            }
+            return next;
+        });
     }, []);
 
     const handleSearch = (e: React.FormEvent) => {
@@ -215,7 +235,7 @@ function Body(props: ExplorePageData) {
             addToast(`Failed to start analysis: ${e}`, "danger", "Error");
         }
     }, [addToast, confirm]);
-    
+
     const onRepair = useCallback(async (id: string | string[]) => {
         const ids = Array.isArray(id) ? id : [id];
 
@@ -259,6 +279,7 @@ function Body(props: ExplorePageData) {
         }
     }, [addToast]);
 
+    // Used by FileDetailsModal for single-item deletion
     const onDelete = useCallback(async (davItemId: string, name: string) => {
         const confirmed = await confirm({
             title: "Delete Item",
@@ -276,14 +297,40 @@ function Body(props: ExplorePageData) {
                 throw new Error(data.error || "Failed to delete");
             }
             addToast(`Deleted "${name}"`, "success", "Deleted");
-            // Refresh the directory listing
             window.location.reload();
         } catch (e) {
             addToast(`Failed to delete "${name}": ${e}`, "danger", "Error");
         }
     }, [addToast, confirm]);
 
-    return (        <div className={styles.container}>
+    const onDeleteSelected = useCallback(async () => {
+        const count = selectedItems.size;
+        const confirmed = await confirm({
+            title: "Delete Items",
+            message: `Delete ${count} selected item(s)? This will permanently remove them and all their contents.`,
+            confirmText: `Delete ${count} item(s)`,
+            variant: "danger"
+        });
+
+        if (!confirmed) return;
+
+        const ids = Array.from(selectedItems.keys());
+        const results = await Promise.allSettled(
+            ids.map(id => fetch(`/api/dav-items/${id}`, { method: 'DELETE' }))
+        );
+
+        const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok)).length;
+        if (failed === 0) {
+            addToast(`Deleted ${count} item(s)`, "success", "Deleted");
+        } else {
+            addToast(`Deleted ${count - failed} of ${count} items. ${failed} failed.`, "warning", "Partial Delete");
+        }
+
+        window.location.reload();
+    }, [selectedItems, addToast, confirm]);
+
+    return (
+        <div className={styles.container}>
             <Breadcrumbs parentDirectories={parentDirectories} />
             <form onSubmit={handleSearch} className={styles["search-form"]}>
                 <input
@@ -302,21 +349,33 @@ function Body(props: ExplorePageData) {
                     </button>
                 )}
             </form>
+            {selectedItems.size > 0 && (
+                <div className={styles["selection-toolbar"]}>
+                    <span>{selectedItems.size} item(s) selected</span>
+                    <button className={styles["delete-selected-button"]} onClick={onDeleteSelected}>
+                        <i className="bi bi-trash me-1"></i>
+                        Delete {selectedItems.size} item(s)
+                    </button>
+                    <button className={styles["clear-selection-button"]} onClick={() => setSelectedItems(new Map())}>
+                        Clear selection
+                    </button>
+                </div>
+            )}
             {!isNavigating && !searchResults &&
                 <div>
                     {items.filter(x => x.isDirectory).map((x, index) =>
-                        <Link key={`${index}_dir_item`} to={getDirectoryPath(x.name)} className={getClassName(x)}>
+                        <Link key={`${index}_dir_item`} to={getDirectoryPath(x.name)} className={getClassName(x, selectedItems.has(x.davItemId ?? ""), styles)}>
+                            {x.davItemId && (
+                                <input
+                                    type="checkbox"
+                                    className={styles.checkbox}
+                                    checked={selectedItems.has(x.davItemId)}
+                                    onChange={() => toggleSelection(x.davItemId!, x.name)}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            )}
                             <div className={styles["directory-icon"]} />
                             <div className={styles["item-name"]}>{x.name}</div>
-                            {x.davItemId && (
-                                <button
-                                    className={styles["delete-button"]}
-                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(x.davItemId!, x.name); }}
-                                    title="Delete"
-                                >
-                                    <i className="bi bi-trash"></i>
-                                </button>
-                            )}
                         </Link>
                     )}
                     {items.filter(x => !x.isDirectory).map((x, index) =>
@@ -327,23 +386,23 @@ function Body(props: ExplorePageData) {
                                     onFileClick(x.davItemId);
                                 }
                             }}
-                            className={getClassName(x)}
+                            className={getClassName(x, selectedItems.has(x.davItemId ?? ""), styles)}
                             style={{ cursor: 'pointer' }}
                         >
+                            {x.davItemId && (
+                                <input
+                                    type="checkbox"
+                                    className={styles.checkbox}
+                                    checked={selectedItems.has(x.davItemId)}
+                                    onChange={() => toggleSelection(x.davItemId!, x.name)}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            )}
                             <div className={getIcon(x as ExploreFile)} />
                             <div className={styles["item-info"]}>
                                 <div className={styles["item-name"]}>{x.name}</div>
                                 <div className={styles["item-size"]}>{formatFileSize(x.size)}</div>
                             </div>
-                            {x.davItemId && (
-                                <button
-                                    className={styles["delete-button"]}
-                                    onClick={(e) => { e.stopPropagation(); onDelete(x.davItemId!, x.name); }}
-                                    title="Delete"
-                                >
-                                    <i className="bi bi-trash"></i>
-                                </button>
-                            )}
                         </div>
                     )}
                 </div>
@@ -356,21 +415,21 @@ function Body(props: ExplorePageData) {
                     {searchResults.map((result, index) => {
                         if (result.isDirectory) {
                             return (
-                                <Link key={`${index}_search_dir`} to={getSearchResultPath(result)} className={styles.item}>
+                                <Link key={`${index}_search_dir`} to={getSearchResultPath(result)} className={`${styles.item}${selectedItems.has(result.davItemId ?? "") ? " " + styles["item-selected"] : ""}`}>
+                                    {result.davItemId && (
+                                        <input
+                                            type="checkbox"
+                                            className={styles.checkbox}
+                                            checked={selectedItems.has(result.davItemId)}
+                                            onChange={() => toggleSelection(result.davItemId!, result.name)}
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                    )}
                                     <div className={styles["directory-icon"]} />
                                     <div className={styles["item-info"]}>
                                         <div className={styles["item-name"]}>{result.name}</div>
                                         <div className={styles["item-path"]}>{result.path}</div>
                                     </div>
-                                    {result.davItemId && (
-                                        <button
-                                            className={styles["delete-button"]}
-                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(result.davItemId!, result.name); }}
-                                            title="Delete"
-                                        >
-                                            <i className="bi bi-trash"></i>
-                                        </button>
-                                    )}
                                 </Link>
                             );
                         }
@@ -378,24 +437,24 @@ function Body(props: ExplorePageData) {
                             <div
                                 key={`${index}_search_file`}
                                 onClick={() => result.davItemId && onFileClick(result.davItemId)}
-                                className={styles.item}
+                                className={`${styles.item}${selectedItems.has(result.davItemId ?? "") ? " " + styles["item-selected"] : ""}`}
                                 style={{ cursor: 'pointer' }}
                             >
+                                {result.davItemId && (
+                                    <input
+                                        type="checkbox"
+                                        className={styles.checkbox}
+                                        checked={selectedItems.has(result.davItemId)}
+                                        onChange={() => toggleSelection(result.davItemId!, result.name)}
+                                        onClick={(e) => e.stopPropagation()}
+                                    />
+                                )}
                                 <div className={styles["file-icon"]} />
                                 <div className={styles["item-info"]}>
                                     <div className={styles["item-name"]}>{result.name}</div>
                                     <div className={styles["item-path"]}>{result.path}</div>
                                     <div className={styles["item-size"]}>{formatFileSize(result.size)}</div>
                                 </div>
-                                {result.davItemId && (
-                                    <button
-                                        className={styles["delete-button"]}
-                                        onClick={(e) => { e.stopPropagation(); onDelete(result.davItemId!, result.name); }}
-                                        title="Delete"
-                                    >
-                                        <i className="bi bi-trash"></i>
-                                    </button>
-                                )}
                             </div>
                         );
                     })}
@@ -414,7 +473,7 @@ function Body(props: ExplorePageData) {
                 onTestDownload={onTestDownload}
                 onDelete={onDelete}
             />
-        </div >
+        </div>
     );
 }
 
@@ -440,8 +499,9 @@ function getParentDirectories(webdavPath: string): string[] {
     return webdavPath == "" ? [] : webdavPath.split('/');
 }
 
-function getClassName(item: DirectoryItem | ExploreFile) {
+function getClassName(item: DirectoryItem | ExploreFile, selected: boolean, styles: Record<string, string>) {
     let className = styles.item;
     if (item.name.startsWith('.')) className += " " + styles.hidden;
+    if (selected) className += " " + styles["item-selected"];
     return className;
 }

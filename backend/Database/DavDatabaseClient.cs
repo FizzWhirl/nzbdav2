@@ -215,7 +215,8 @@ public sealed class DavDatabaseClient(DavDatabaseContext ctx)
         Ctx.HistoryCleanupItems.AddRange(historyItems.Select(x => new Models.HistoryCleanupItem
         {
             Id = x.Id,
-            DeleteMountedFiles = deleteFiles
+            DeleteMountedFiles = deleteFiles,
+            DownloadDirId = x.DownloadDirId
         }));
 
         // Remove history items from the database

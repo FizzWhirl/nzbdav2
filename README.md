@@ -116,6 +116,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.21 (2026-03-26)
+- Fixed: Files with missing articles no longer loop forever in the health check queue. Arr import detection now immediately marks `IsImported=true` when detected (no longer waits for retention period). Added 24-hour timeout: if arr never imports a file (e.g. rejected due to corruption), repair proceeds after 24h instead of looping indefinitely.
+
 ## v0.6.20 (2026-03-26)
 - Fixed: OrganizedLinksUtil no longer logs FK constraint errors on startup when symlinks reference DavItems that have been deleted. Missing DavItems are now silently skipped.
 

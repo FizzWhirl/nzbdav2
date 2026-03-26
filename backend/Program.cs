@@ -56,8 +56,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-26-ORGANIZED-LINKS-FK-FIX");
-        Log.Warning("  FIX: OrganizedLinksUtil silently skips missing DavItems instead of FK crash");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-26-HEALTH-CHECK-LOOP-FIX");
+        Log.Warning("  FIX: Health check deferral timeout + IsImported flag on arr import detection");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

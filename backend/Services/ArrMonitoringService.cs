@@ -104,6 +104,17 @@ public class ArrMonitoringService
                 .Select(h => new { h.Id, h.JobName, h.CompletedAt })
                 .ToListAsync(_cancellationToken).ConfigureAwait(false);
 
+            if (historyItems.Count == 0) return;
+
+            // Immediately mark all detected imports as IsImported = true so the health check
+            // deferral ("awaiting arr import") clears right away, without waiting for retention.
+            var markedCount = await dbClient.Ctx.HistoryItems
+                .Where(h => importedIds.Contains(h.Id) && !h.IsImported)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.IsImported, true), _cancellationToken)
+                .ConfigureAwait(false);
+            if (markedCount > 0)
+                Log.Information("[ArrMonitoring] Marked {Count} history item(s) as imported for {Host}", markedCount, client.Host);
+
             // Filter items that were imported before the cutoff time
             var itemsToCleanup = historyItems
                 .Where(h => importedIdsWithDates.TryGetValue(h.Id, out var importDate) && importDate < cutoffTime)

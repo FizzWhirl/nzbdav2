@@ -649,14 +649,17 @@ public class HealthCheckService
             }
 
             // if the item still has a pending (non-imported) history entry,
-            // don't delete it — Radarr/Sonarr hasn't imported it yet.
+            // don't repair it — Radarr/Sonarr hasn't imported it yet.
+            // Timeout after 24h: if arr rejected/abandoned the import, stop waiting.
             {
                 await using var historyCheckCtx = new DavDatabaseContext();
+                var importGraceCutoff = DateTime.UtcNow.AddHours(-24);
                 var hasPendingHistory = await historyCheckCtx.HistoryItems
                     .AnyAsync(h => h.DownloadDirId == davItem.ParentId
                                    && !h.IsImported
                                    && !h.IsArchived
-                                   && h.DownloadStatus == HistoryItem.DownloadStatusOption.Completed, ct)
+                                   && h.DownloadStatus == HistoryItem.DownloadStatusOption.Completed
+                                   && h.CompletedAt > importGraceCutoff, ct)
                     .ConfigureAwait(false);
 
                 if (hasPendingHistory)

@@ -15,9 +15,10 @@ export type FileDetailsModalProps = {
     onAnalyze?: (id: string) => void;
     onRepair?: (id: string) => void;
     onTestDownload?: (id: string) => Promise<any>;
+    onDelete?: (id: string, name: string) => void;
 }
 
-export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetStats, onRunHealthCheck, onAnalyze, onRepair, onTestDownload }: FileDetailsModalProps) {
+export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetStats, onRunHealthCheck, onAnalyze, onRepair, onTestDownload, onDelete }: FileDetailsModalProps) {
     const [testingDownload, setTestingDownload] = useState(false);
     const [repairingClassification, setRepairingClassification] = useState(false);
     const [flushingCache, setFlushingCache] = useState(false);
@@ -327,6 +328,16 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                         >
                                             <i className="bi bi-tools me-1"></i>
                                             Repair
+                                        </button>
+                                    )}
+                                    {onDelete && (
+                                        <button
+                                            className="btn btn-outline-danger btn-sm"
+                                            onClick={() => { onDelete(fileDetails.davItemId, fileDetails.fileName); onHide(); }}
+                                            title="Permanently delete this file from the DAV"
+                                        >
+                                            <i className="bi bi-trash me-1"></i>
+                                            Delete
                                         </button>
                                     )}
                                 </div>

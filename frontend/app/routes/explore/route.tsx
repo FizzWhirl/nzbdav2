@@ -394,6 +394,7 @@ function Body(props: ExplorePageData) {
                 onAnalyze={onAnalyze}
                 onRepair={onRepair}
                 onTestDownload={onTestDownload}
+                onDelete={onDelete}
             />
         </div >
     );

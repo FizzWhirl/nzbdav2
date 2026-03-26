@@ -116,6 +116,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.20 (2026-03-26)
+- Fixed: OrganizedLinksUtil no longer logs FK constraint errors on startup when symlinks reference DavItems that have been deleted. Missing DavItems are now silently skipped.
+
 ## v0.6.19 (2026-03-26)
 - Added: Delete button in Dav Explore allows direct deletion of files and folders from the virtual filesystem. Directories are recursively deleted. Protected system directories cannot be deleted.
 

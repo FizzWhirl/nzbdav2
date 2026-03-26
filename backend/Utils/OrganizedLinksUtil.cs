@@ -55,6 +55,13 @@ public static class OrganizedLinksUtil
                             }
                             else
                             {
+                                var davItemExists = db.Items.Any(x => x.Id == davItemId);
+                                if (!davItemExists)
+                                {
+                                    Cache.TryRemove(davItemId, out _);
+                                    Log.Debug($"[OrganizedLinksUtil] DavItem {davItemId} not found, skipping LocalLink registration");
+                                    break;
+                                }
                                 db.LocalLinks.Add(new LocalLink { DavItemId = davItemId, LinkPath = linkPath });
                             }
                             await db.SaveChangesAsync();

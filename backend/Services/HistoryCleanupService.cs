@@ -27,7 +27,7 @@ public class HistoryCleanupService(IServiceScopeFactory scopeFactory) : Backgrou
                     continue;
                 }
 
-                // Collect paths before bulk operation (bypasses EF change tracking)
+                // Collect paths before bulk operations for VFS cache invalidation.
                 var affectedPaths = await dbContext.Items
                     .Where(x => x.HistoryItemId == cleanupItem.Id)
                     .Select(x => x.Path)
@@ -36,13 +36,58 @@ public class HistoryCleanupService(IServiceScopeFactory scopeFactory) : Backgrou
 
                 if (cleanupItem.DeleteMountedFiles)
                 {
-                    var deleted = await dbContext.Items
+                    // Also collect paths from the mount folder tree for VFS cache invalidation
+                    if (cleanupItem.DownloadDirId.HasValue)
+                    {
+                        var descendantPaths = await dbContext.Database
+                            .SqlQueryRaw<string>(
+                                """
+                                WITH RECURSIVE descendants AS (
+                                    SELECT Id, Path FROM DavItems WHERE Id = {0}
+                                    UNION ALL
+                                    SELECT d.Id, d.Path FROM DavItems d
+                                    INNER JOIN descendants a ON d.ParentId = a.Id
+                                )
+                                SELECT Path AS Value FROM descendants WHERE Path IS NOT NULL
+                                """,
+                                cleanupItem.DownloadDirId.Value.ToString().ToUpper())
+                            .ToListAsync(stoppingToken)
+                            .ConfigureAwait(false);
+
+                        affectedPaths = affectedPaths.Union(descendantPaths).ToList();
+                    }
+
+                    // 1. Delete DavItems still linked by HistoryItemId (existing behavior)
+                    var deletedByHistoryId = await dbContext.Items
                         .Where(x => x.HistoryItemId == cleanupItem.Id)
                         .ExecuteDeleteAsync(stoppingToken)
                         .ConfigureAwait(false);
 
-                    Log.Information("[HistoryCleanup] Deleted {Count} DavItems for history item {Id}",
-                        deleted, cleanupItem.Id);
+                    Log.Information("[HistoryCleanup] Deleted {Count} DavItems by HistoryItemId for {Id}",
+                        deletedByHistoryId, cleanupItem.Id);
+
+                    // 2. Delete mount directory and all descendants via recursive CTE
+                    //    This catches DavItems that were previously unlinked (HistoryItemId set to null)
+                    if (cleanupItem.DownloadDirId.HasValue)
+                    {
+                        var deletedByTree = await dbContext.Database
+                            .ExecuteSqlRawAsync(
+                                """
+                                WITH RECURSIVE descendants AS (
+                                    SELECT Id FROM DavItems WHERE Id = {0}
+                                    UNION ALL
+                                    SELECT d.Id FROM DavItems d
+                                    INNER JOIN descendants a ON d.ParentId = a.Id
+                                )
+                                DELETE FROM DavItems WHERE Id IN (SELECT Id FROM descendants)
+                                """,
+                                [cleanupItem.DownloadDirId.Value.ToString().ToUpper()],
+                                stoppingToken)
+                            .ConfigureAwait(false);
+
+                        Log.Information("[HistoryCleanup] Deleted {Count} DavItems by mount folder tree for {Id} (DownloadDirId={DirId})",
+                            deletedByTree, cleanupItem.Id, cleanupItem.DownloadDirId.Value);
+                    }
                 }
                 else
                 {

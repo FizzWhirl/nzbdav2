@@ -185,6 +185,30 @@
     min-height: unset;
 }
 
+.delete-button {
+    margin-left: auto;
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #586e75;
+    cursor: pointer;
+    padding: 6px 10px;
+    font-size: 16px;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.item:hover .delete-button {
+    opacity: 1;
+}
+
+.delete-button:hover {
+    color: #dc322f;
+    border-color: #dc322f40;
+    background-color: #dc322f10;
+}
+
 .hidden * {
     opacity: 50%;
 }

@@ -259,6 +259,30 @@ function Body(props: ExplorePageData) {
         }
     }, [addToast]);
 
+    const onDelete = useCallback(async (davItemId: string, name: string) => {
+        const confirmed = await confirm({
+            title: "Delete Item",
+            message: `Delete "${name}"? This will permanently remove this item and all its contents.`,
+            confirmText: "Delete",
+            variant: "danger"
+        });
+
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch(`/api/dav-items/${davItemId}`, { method: 'DELETE' });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.error || "Failed to delete");
+            }
+            addToast(`Deleted "${name}"`, "success", "Deleted");
+            // Refresh the directory listing
+            window.location.reload();
+        } catch (e) {
+            addToast(`Failed to delete "${name}": ${e}`, "danger", "Error");
+        }
+    }, [addToast, confirm]);
+
     return (        <div className={styles.container}>
             <Breadcrumbs parentDirectories={parentDirectories} />
             <form onSubmit={handleSearch} className={styles["search-form"]}>
@@ -284,17 +308,23 @@ function Body(props: ExplorePageData) {
                         <Link key={`${index}_dir_item`} to={getDirectoryPath(x.name)} className={getClassName(x)}>
                             <div className={styles["directory-icon"]} />
                             <div className={styles["item-name"]}>{x.name}</div>
+                            {x.davItemId && (
+                                <button
+                                    className={styles["delete-button"]}
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(x.davItemId!, x.name); }}
+                                    title="Delete"
+                                >
+                                    <i className="bi bi-trash"></i>
+                                </button>
+                            )}
                         </Link>
                     )}
                     {items.filter(x => !x.isDirectory).map((x, index) =>
                         <div
                             key={`${index}_file_item`}
                             onClick={() => {
-                                console.log('File clicked:', x.name, 'davItemId:', x.davItemId);
                                 if (x.davItemId) {
                                     onFileClick(x.davItemId);
-                                } else {
-                                    console.warn('No davItemId for file:', x.name);
                                 }
                             }}
                             className={getClassName(x)}
@@ -305,6 +335,15 @@ function Body(props: ExplorePageData) {
                                 <div className={styles["item-name"]}>{x.name}</div>
                                 <div className={styles["item-size"]}>{formatFileSize(x.size)}</div>
                             </div>
+                            {x.davItemId && (
+                                <button
+                                    className={styles["delete-button"]}
+                                    onClick={(e) => { e.stopPropagation(); onDelete(x.davItemId!, x.name); }}
+                                    title="Delete"
+                                >
+                                    <i className="bi bi-trash"></i>
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>

@@ -484,6 +484,7 @@ public sealed class DavDatabaseContext() : DbContext(Options.Value)
             e.HasKey(i => i.Id);
             e.Property(i => i.Id).ValueGeneratedNever();
             e.Property(i => i.DeleteMountedFiles).IsRequired();
+            e.Property(i => i.DownloadDirId).IsRequired(false);
         });
 
         // QueueNzbContents

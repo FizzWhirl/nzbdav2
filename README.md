@@ -116,6 +116,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.19 (2026-03-26)
+- Added: Delete button in Dav Explore allows direct deletion of files and folders from the virtual filesystem. Directories are recursively deleted. Protected system directories cannot be deleted.
+
 ## v0.6.14 (2026-03-25)
 - Fixed: "Delete mounted files" now correctly removes virtual files even when they were previously unlinked by Sonarr/Radarr automatic archive cleanup. Uses recursive directory tree deletion via DownloadDirId instead of relying solely on HistoryItemId matching.
 

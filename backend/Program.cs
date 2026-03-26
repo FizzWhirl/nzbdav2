@@ -56,8 +56,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-25-RECURSIVE-HISTORY-CLEANUP");
-        Log.Warning("  FIX: Prevent duplicate DavItem tracking errors in aggregators");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-03-26-DAV-EXPLORE-DELETE");
+        Log.Warning("  FEAT: Delete files and folders directly from Dav Explore");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

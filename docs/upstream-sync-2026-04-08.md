@@ -6,6 +6,8 @@ v0.6.2 and v0.6.3 against our fork [dgherman/nzbdav2](https://github.com/dgherma
 Previous sync documented in [`docs/upstream-sync-2026-03-10.md`](./upstream-sync-2026-03-10.md).
 
 **Sync completed: 2026-04-08**
+**Merged to main: 2026-04-08** — commit `6482ca1`
+**Deployed: 2026-04-08** — confirmed working (streaming verified post-deploy)
 **Last upstream commit reviewed:** `75adf75` (v0.6.3 release, 2026-04-08)
 **Previous sync cutoff:** v0.6.0 (2026-03-09)
 

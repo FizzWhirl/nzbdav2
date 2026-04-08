@@ -231,7 +231,10 @@ public class QueueItemProcessor(
             Log.Debug("[QueueItemProcessor] Step 1d: Fetching file sizes for {FileCount} files without Par2 descriptors in {JobName}...",
                 filesWithoutSize.Count, queueItem.JobName);
             var fileSizeStartTime = DateTime.UtcNow;
-            var fileSizes = await usenetClient.GetFileSizesBatchAsync(filesWithoutSize, concurrency, queueCt).ConfigureAwait(false);
+            // Use capped QueueAnalysis context for file size analysis to limit connection consumption
+            using var analysisCts = CancellationTokenSource.CreateLinkedTokenSource(queueCt);
+            using var _analysisCtx = analysisCts.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.QueueAnalysis, queueItem.JobName));
+            var fileSizes = await usenetClient.GetFileSizesBatchAsync(filesWithoutSize, concurrency, analysisCts.Token).ConfigureAwait(false);
             var fileSizeElapsed = DateTime.UtcNow - fileSizeStartTime;
             Log.Information("[QueueItemProcessor] Step 1d complete: Fetched {FileCount} file sizes for {JobName}. Elapsed: {ElapsedSeconds}s",
                 fileSizes.Count, queueItem.JobName, fileSizeElapsed.TotalSeconds);

@@ -144,5 +144,6 @@ public enum ConnectionUsageType
     HealthCheck = 3,
     Repair = 4,
     BufferedStreaming = 5,
-    Analysis = 6
+    Analysis = 6,
+    QueueAnalysis = 7
 }

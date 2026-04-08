@@ -260,7 +260,8 @@ public class NzbFileStream : Stream
         // Disable buffered streaming for Queue processing since it only reads small amounts
         // (e.g., just the first segment for file size detection)
         var shouldUseBufferedStreaming = _useBufferedStreaming &&
-            _usageContext.UsageType != ConnectionUsageType.Queue;
+            _usageContext.UsageType != ConnectionUsageType.Queue &&
+            _usageContext.UsageType != ConnectionUsageType.QueueAnalysis;
 
         // Use buffered streaming if configured for better performance
         if (shouldUseBufferedStreaming && _concurrentConnections >= 3 && _fileSegmentIds.Length > _concurrentConnections)

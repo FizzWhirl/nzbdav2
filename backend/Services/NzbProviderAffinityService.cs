@@ -237,6 +237,7 @@ public class NzbProviderAffinityService
     {
         // Background operations should defer to streaming when possible
         return usageType is ConnectionUsageType.Queue
+            or ConnectionUsageType.QueueAnalysis
             or ConnectionUsageType.HealthCheck
             or ConnectionUsageType.Analysis;
     }

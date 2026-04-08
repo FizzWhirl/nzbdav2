@@ -17,6 +17,7 @@ public class GlobalOperationLimiter : IDisposable
     private readonly SemaphoreSlim _queueSemaphore;
     private readonly SemaphoreSlim _healthCheckSemaphore;
     private readonly SemaphoreSlim _streamingSemaphore;
+    private readonly SemaphoreSlim _queueAnalysisSemaphore;
     private readonly ConfigManager? _configManager;
 
     public GlobalOperationLimiter(
@@ -31,6 +32,11 @@ public class GlobalOperationLimiter : IDisposable
         maxQueueConnections = Math.Max(1, maxQueueConnections);
         maxHealthCheckConnections = Math.Max(1, maxHealthCheckConnections);
 
+        var envQueueAnalysis = Environment.GetEnvironmentVariable("QUEUE_ANALYSIS_MAX_CONNECTIONS");
+        var maxQueueAnalysisConnections = int.TryParse(envQueueAnalysis, out var parsedQA) && parsedQA > 0
+            ? parsedQA
+            : Math.Max(2, maxQueueConnections / 2);
+
         var maxStreamingConnections = Math.Max(1, totalConnections - maxQueueConnections - maxHealthCheckConnections);
 
         _guaranteedLimits = new Dictionary<ConnectionUsageType, int>
@@ -41,6 +47,7 @@ public class GlobalOperationLimiter : IDisposable
             { ConnectionUsageType.BufferedStreaming, maxStreamingConnections },
             { ConnectionUsageType.Repair, maxHealthCheckConnections }, // Share with HealthCheck
             { ConnectionUsageType.Analysis, maxHealthCheckConnections }, // Share with HealthCheck
+            { ConnectionUsageType.QueueAnalysis, maxQueueAnalysisConnections },
             { ConnectionUsageType.Unknown, maxStreamingConnections }
         };
 
@@ -54,6 +61,7 @@ public class GlobalOperationLimiter : IDisposable
         _queueSemaphore = new SemaphoreSlim(maxQueueConnections, maxQueueConnections);
         _healthCheckSemaphore = new SemaphoreSlim(maxHealthCheckConnections, maxHealthCheckConnections);
         _streamingSemaphore = new SemaphoreSlim(maxStreamingConnections, maxStreamingConnections);
+        _queueAnalysisSemaphore = new SemaphoreSlim(maxQueueAnalysisConnections, maxQueueAnalysisConnections);
 
         // Serilog.Log.Information($"[GlobalOperationLimiter] Initialized: Queue={maxQueueConnections}, HealthCheck={maxHealthCheckConnections}, Streaming={maxStreamingConnections}, Total={totalConnections}");
     }
@@ -186,6 +194,7 @@ public class GlobalOperationLimiter : IDisposable
         return type switch
         {
             ConnectionUsageType.Queue => _queueSemaphore,
+            ConnectionUsageType.QueueAnalysis => _queueAnalysisSemaphore,
             ConnectionUsageType.HealthCheck => _healthCheckSemaphore,
             ConnectionUsageType.Repair => _healthCheckSemaphore, // Share with HealthCheck
             ConnectionUsageType.Analysis => _healthCheckSemaphore, // Share with HealthCheck
@@ -225,9 +234,10 @@ public class GlobalOperationLimiter : IDisposable
     private void LogInfoForType(ConnectionUsageType usageType, string message, params object[] args)
     {
         // HealthCheck and Streaming operations should log at Debug level to reduce noise
-        if (usageType == ConnectionUsageType.HealthCheck || 
-            usageType == ConnectionUsageType.Repair || 
+        if (usageType == ConnectionUsageType.HealthCheck ||
+            usageType == ConnectionUsageType.Repair ||
             usageType == ConnectionUsageType.Analysis ||
+            usageType == ConnectionUsageType.QueueAnalysis ||
             usageType == ConnectionUsageType.Streaming ||
             usageType == ConnectionUsageType.BufferedStreaming)
         {
@@ -245,6 +255,7 @@ public class GlobalOperationLimiter : IDisposable
         return usageType switch
         {
             ConnectionUsageType.Queue => LogComponents.Queue,
+            ConnectionUsageType.QueueAnalysis => LogComponents.Queue,
             ConnectionUsageType.HealthCheck => LogComponents.HealthCheck,
             ConnectionUsageType.Repair => LogComponents.HealthCheck,
             ConnectionUsageType.Analysis => LogComponents.Analysis,
@@ -259,6 +270,7 @@ public class GlobalOperationLimiter : IDisposable
         _queueSemaphore.Dispose();
         _healthCheckSemaphore.Dispose();
         _streamingSemaphore.Dispose();
+        _queueAnalysisSemaphore.Dispose();
         GC.SuppressFinalize(this);
     }
 

@@ -28,6 +28,7 @@ nuget
 !DATABASE_OPTIMIZATION.md
 !CLAUDE.md
 !docs/upstream-sync-*.md
+!docs/superpowers/specs/*.md
 
 #################
 # Project Files #

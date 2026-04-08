@@ -29,6 +29,7 @@ nuget
 !CLAUDE.md
 !docs/upstream-sync-*.md
 !docs/superpowers/specs/*.md
+!docs/superpowers/plans/*.md
 
 #################
 # Project Files #

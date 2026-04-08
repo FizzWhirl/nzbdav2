@@ -4,6 +4,7 @@ import express from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import { websocketServer } from "./websocket.server";
 import { isAuthenticated } from "~/auth/authentication.server";
+import { authMiddleware } from "~/auth/auth-middleware.server";
 
 declare module "react-router" {
   interface AppLoadContext {
@@ -70,6 +71,9 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Require authentication for all React Router routes
+app.use(authMiddleware);
 
 // Let frontend handle all other requests
 app.use(

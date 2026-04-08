@@ -1,12 +1,10 @@
-﻿using Microsoft.AspNetCore.StaticFiles;
-using NWebDav.Server.Props;
+﻿using NWebDav.Server.Props;
+using NzbWebDAV.Utils;
 
 namespace NzbWebDAV.WebDav.Base;
 
 public class BaseStoreItemPropertyManager() : PropertyManager<BaseStoreItem>(DavProperties)
 {
-    private static readonly FileExtensionContentTypeProvider MimeTypeProvider = new();
-
     private static readonly DavProperty<BaseStoreItem>[] DavProperties =
     [
         new DavDisplayName<BaseStoreItem>
@@ -19,9 +17,7 @@ public class BaseStoreItemPropertyManager() : PropertyManager<BaseStoreItem>(Dav
         },
         new DavGetContentType<BaseStoreItem>
         {
-            Getter = item => !MimeTypeProvider.TryGetContentType(item.Name, out var mimeType)
-                ? "application/octet-stream"
-                : mimeType
+            Getter = item => ContentTypeUtil.GetContentType(item.Name)
         },
         new DavGetLastModified<BaseStoreItem>
         {

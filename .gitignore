@@ -27,6 +27,7 @@ nuget
 !OPTIMIZATIONS.md
 !DATABASE_OPTIMIZATION.md
 !CLAUDE.md
+!docs/upstream-sync-*.md
 
 #################
 # Project Files #

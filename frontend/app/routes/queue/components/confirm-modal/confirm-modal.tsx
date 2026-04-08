@@ -1,12 +1,13 @@
-import { Button, Form, Modal } from "react-bootstrap";
+import { Alert, Button, Form, Modal } from "react-bootstrap";
 import { WordWrap } from "../word-wrap/word-wrap";
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 
 export type ConfirmModalProps = {
     show: boolean,
     title: string,
-    message: string,
+    message: ReactNode,
     checkboxMessage?: string,
+    errorMessage?: string,
     cancelText?: string,
     confirmText?: string,
     onCancel: () => void,
@@ -44,6 +45,11 @@ export function ConfirmModal(props: ConfirmModalProps) {
                             label={props.checkboxMessage}
                             checked={isCheckboxChecked}
                             onChange={(e) => setIsCheckboxChecked(Boolean(e.target.checked))} />
+                    }
+                    {props.errorMessage &&
+                        <Alert variant="warning" style={{ marginTop: '20px', fontSize: '14px' }}>
+                            {props.errorMessage}
+                        </Alert>
                     }
                 </div>
             </Modal.Body>

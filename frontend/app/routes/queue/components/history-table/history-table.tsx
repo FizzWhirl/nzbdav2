@@ -327,9 +327,10 @@ export function HistoryRow({ slot, onIsSelectedChanged, onIsRemovingChanged, onR
         <>
             <ConfirmModal
                 show={showConfirmDelete}
-                title="Remove Item"
-                message={`Are you sure you want to remove "${slot.name}" from history?`}
-                checkboxMessage="Also delete mounted files (virtual files)?"
+                title="Remove From History?"
+                message={slot.nzb_name}
+                checkboxMessage={!slot.fail_message ? "Delete mounted files" : undefined}
+                errorMessage={slot.fail_message}
                 onCancel={() => setShowConfirmDelete(false)}
                 onConfirm={(deleteFiles) => onConfirmRemoval(deleteFiles)}
             />

@@ -103,7 +103,7 @@ public class DatabaseStoreCollection(
                     davItem.Name, "", httpContext, dbClient, usenetClient, configManager, nzbAnalysisService),
             DavItem.ItemType.Directory when davItem.Id == DavItem.NzbFolder.Id =>
                 new DatabaseStoreWatchFolder(
-                    davItem, httpContext, dbClient, configManager, usenetClient, queueManager, websocketManager, nzbAnalysisService),
+                    davItem, dbClient, configManager, queueManager, websocketManager),
             DavItem.ItemType.Directory =>
                 new DatabaseStoreCollection(
                     davItem, httpContext, dbClient, configManager, usenetClient, queueManager, websocketManager, nzbAnalysisService),

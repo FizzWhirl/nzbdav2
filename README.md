@@ -116,6 +116,17 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.22 (2026-04-08)
+*   **Upstream Sync**: Adopted changes from upstream v0.6.2 and v0.6.3 releases.
+*   **Fix**: WebDAV range requests past content boundary now return HTTP 416 (Range Not Satisfiable) instead of 500. Also fixed extraneous space in `Content-Range` header.
+*   **Fix**: Centralized content-type resolution into `ContentTypeUtil` with FLAC (`audio/flac`) mapping — FLAC files served via WebDAV and `/view` now get the correct MIME type.
+*   **Fix**: Frontend authentication now enforced via Express middleware instead of per-route loader checks. Prevents unauthenticated access to routes that bypass the root loader (e.g. direct `.data` requests).
+*   **Fix**: "Delete mounted files" checkbox no longer shown when clearing a failed history item (no mounted files to delete). Failed items now show their error message in the confirmation dialog.
+*   **Feature**: `/nzbs` WebDAV directory is now organized by category subdirectories (e.g. `/nzbs/tv/`, `/nzbs/movies/`). Categories are derived from configured categories and any categories present in the queue.
+*   **Performance**: QueueItems unique index changed from `(FileName)` to `(Category, FileName)`, allowing the same filename in different categories and improving category-filtered queries.
+*   **UI**: Added horizontal padding to queue/history table cells.
+*   **Maintenance**: Renamed `MimeType` property to `ContentType` in `AddFileRequest`/`AddUrlRequest` for consistency with upstream.
+
 ## v0.6.21 (2026-03-26)
 - Fixed: Files with missing articles no longer loop forever in the health check queue. Arr import detection now immediately marks `IsImported=true` when detected (no longer waits for retention period). Added 24-hour timeout: if arr never imports a file (e.g. rejected due to corruption), repair proceeds after 24h instead of looping indefinitely.
 

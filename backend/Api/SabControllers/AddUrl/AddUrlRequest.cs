@@ -23,7 +23,7 @@ public class AddUrlRequest() : AddFileRequest
         return new AddUrlRequest()
         {
             FileName = nzbFile.FileName,
-            MimeType = nzbFile.ContentType,
+            ContentType = nzbFile.ContentType,
             NzbFileContents = nzbFile.FileContents,
             Category = context.GetQueryParam("cat") ?? configManager.GetManualUploadCategory(),
             Priority = MapPriorityOption(context.GetQueryParam("priority")),

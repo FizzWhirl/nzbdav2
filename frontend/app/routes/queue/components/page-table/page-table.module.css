@@ -28,9 +28,7 @@
 
     /* body column */
     td {
-        padding: 0;
-        padding-top: 11px;
-        padding-bottom: 11px;
+        padding: 11px 5px;
         max-width: 200px;
         color: hsl(180, 7%, 70%) !important;
         --bs-table-bg: hsl(192, 90%, 6%);

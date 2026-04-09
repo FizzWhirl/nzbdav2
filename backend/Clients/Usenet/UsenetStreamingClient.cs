@@ -66,6 +66,24 @@ public class UsenetStreamingClient
         };
     }
 
+    /// <summary>
+    /// Checks if an exception indicates article-not-found (DMCA/takedown signal).
+    /// </summary>
+    private static bool IsArticleNotFoundException(Exception ex)
+    {
+        if (ex is UsenetArticleNotFoundException) return true;
+
+        var inner = ex.InnerException;
+        while (inner != null)
+        {
+            if (inner is UsenetArticleNotFoundException) return true;
+            inner = inner.InnerException;
+        }
+
+        var message = ex.Message ?? "";
+        return message.Contains("430") || message.Contains("no such article", StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<long[]> AnalyzeNzbAsync(string[] segmentIds, int concurrency, IProgress<int>? progress, CancellationToken ct, bool useSmartAnalysis = true)
     {
         // Copy context from parent token
@@ -116,7 +134,44 @@ public class UsenetStreamingClient
             }
             catch (Exception ex)
             {
-                Serilog.Log.Warning(ex, "[UsenetStreamingClient] Smart Analysis failed/skipped. Falling back to full scan.");
+                // Check if this looks like a DMCA/takedown (article not found)
+                if (IsArticleNotFoundException(ex) && segmentIds.Length > 3)
+                {
+                    Serilog.Log.Warning("[UsenetStreamingClient] Smart Analysis failed with article-not-found. Running DMCA confirmation check...");
+
+                    // Confirmation: try one segment from the middle of the NZB
+                    var midIndex = segmentIds.Length / 2;
+                    try
+                    {
+                        using var confirmCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        confirmCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+                        using var _ = confirmCts.Token.SetScopedContext(usageContext);
+
+                        await _client.GetSegmentYencHeaderAsync(segmentIds[midIndex], confirmCts.Token).ConfigureAwait(false);
+
+                        // Middle segment succeeded — not a full DMCA, proceed with full scan
+                        Serilog.Log.Warning("[UsenetStreamingClient] DMCA confirmation check PASSED (mid-segment exists). Falling back to full scan.");
+                    }
+                    catch (Exception confirmEx) when (IsArticleNotFoundException(confirmEx))
+                    {
+                        // Confirmed: first/last AND middle segments are missing — DMCA/takedown pattern
+                        Serilog.Log.Warning("[UsenetStreamingClient] DMCA/takedown pattern confirmed: first, last, and mid segments all missing. Failing fast.");
+                        throw new NonRetryableDownloadException(
+                            $"DMCA/takedown pattern detected: multiple segments across NZB are missing (first, mid={midIndex}, last). " +
+                            $"Skipping full scan of {segmentIds.Length} segments.");
+                    }
+                    catch (Exception confirmEx)
+                    {
+                        // Confirmation check failed with a non-article error (timeout, connection issue)
+                        // Proceed with full scan — might be a transient network problem
+                        Serilog.Log.Warning(confirmEx, "[UsenetStreamingClient] DMCA confirmation check failed with non-article error. Falling back to full scan.");
+                    }
+                }
+                else
+                {
+                    // Not article-not-found (timeout, connection reset, etc.) — proceed with full scan
+                    Serilog.Log.Warning(ex, "[UsenetStreamingClient] Smart Analysis failed/skipped. Falling back to full scan.");
+                }
             }
         }
 

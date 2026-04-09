@@ -116,6 +116,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.23 (2026-04-09)
+*   **Feature**: New `QueueAnalysis` connection type with its own capped semaphore (default: half of queue connections, min 2). Isolates the file-size analysis phase from regular queue processing and streaming, preventing analysis of bad NZBs from saturating the connection pool. Configurable via `QUEUE_ANALYSIS_MAX_CONNECTIONS` env var.
+*   **Fix**: DMCA/takedown fast-fail in `AnalyzeNzbAsync`. When Smart Analysis detects article-not-found errors, a confirmation check probes a mid-NZB segment before committing to a full scan. If confirmed missing, the item fails immediately instead of scanning hundreds of dead segments. Prevents multi-minute connection pool burns on DMCA'd content.
+
 ## v0.6.22 (2026-04-08)
 *   **Upstream Sync**: Adopted changes from upstream v0.6.2 and v0.6.3 releases.
 *   **Fix**: WebDAV range requests past content boundary now return HTTP 416 (Range Not Satisfiable) instead of 500. Also fixed extraneous space in `Content-Range` header.

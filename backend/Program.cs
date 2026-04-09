@@ -56,8 +56,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-08-UPSTREAM-SYNC-v0.6.2-v0.6.3");
-        Log.Warning("  SYNC: Range request 416, auth middleware, FLAC content-type, /nzbs by category");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-09-POOL-RESILIENCE");
+        Log.Warning("  NEW: QueueAnalysis connection cap, DMCA fast-fail confirmation check");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

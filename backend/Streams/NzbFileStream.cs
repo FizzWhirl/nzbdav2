@@ -486,6 +486,7 @@ public class NzbFileStream : Stream
         Serilog.Log.Debug("[NzbFileStream] Disposing NzbFileStream. Disposing: {Disposing}", disposing);
         _disposed = true;
         _cancellationRegistration.Dispose(); // Unregister callback first
+        try { _streamCts.Cancel(); } catch (ObjectDisposedException) { } // Cancel before disposing inner stream
         _innerStream?.Dispose();
         _streamCts.Dispose();
         _contextScope?.Dispose();
@@ -496,6 +497,7 @@ public class NzbFileStream : Stream
         if (_disposed) return;
         _disposed = true;
         _cancellationRegistration.Dispose(); // Unregister callback first
+        try { _streamCts.Cancel(); } catch (ObjectDisposedException) { } // Cancel before disposing inner stream
         if (_innerStream != null) await _innerStream.DisposeAsync().ConfigureAwait(false);
         _streamCts.Dispose();
         _contextScope?.Dispose();

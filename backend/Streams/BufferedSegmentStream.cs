@@ -119,6 +119,12 @@ public class BufferedSegmentStream : Stream
     private int _maxFetchedIndex = -1;
     private readonly int _totalSegments;
 
+    // Idle timeout: self-cancel workers if no ReadAsync calls for this duration.
+    // Prevents orphaned streams when the HTTP response write is stuck (client disconnected
+    // but Kestrel hasn't detected it yet, e.g. through a reverse proxy).
+    private const int IdleTimeoutSeconds = 60;
+    private long _lastReadTimestamp = Stopwatch.GetTimestamp();
+
     public int BufferedCount => _bufferedCount;
 
     // Detailed timing metrics (only collected when EnableDetailedTiming = true)
@@ -392,18 +398,28 @@ public class BufferedSegmentStream : Stream
                 .ConfigureAwait(false);
         }, contextToken);
 
-        // Start background reporter
-        if (_usageContext != null)
-        {
-            _ = Task.Run(async () => {
-                try {
-                    while (!contextToken.IsCancellationRequested) {
-                        await Task.Delay(1000, contextToken).ConfigureAwait(false);
-                        UpdateUsageContext();
+        // Start background reporter + idle timeout watchdog
+        _ = Task.Run(async () => {
+            try {
+                while (!contextToken.IsCancellationRequested) {
+                    await Task.Delay(1000, contextToken).ConfigureAwait(false);
+                    if (_usageContext != null) UpdateUsageContext();
+
+                    // Idle timeout: if no ReadAsync calls for IdleTimeoutSeconds, self-cancel.
+                    // This releases streaming permits when the HTTP write is stuck
+                    // (client disconnected but connection not yet closed by transport layer).
+                    var idleSeconds = Stopwatch.GetElapsedTime(Volatile.Read(ref _lastReadTimestamp)).TotalSeconds;
+                    if (idleSeconds > IdleTimeoutSeconds)
+                    {
+                        var jobName = _usageContext?.DetailsObject?.Text ?? "Unknown";
+                        Log.Warning("[BufferedStream] IDLE TIMEOUT: No reads for {IdleSeconds:F0}s, self-cancelling workers. Job={Job}",
+                            idleSeconds, jobName);
+                        _cts.Cancel();
+                        return;
                     }
-                } catch {}
-            }, contextToken);
-        }
+                }
+            } catch {}
+        }, contextToken);
 
         Length = fileSize;
         _totalSegments = segmentIds.Length;
@@ -1365,6 +1381,7 @@ public class BufferedSegmentStream : Stream
     public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
         if (count == 0) return 0;
+        Volatile.Write(ref _lastReadTimestamp, Stopwatch.GetTimestamp());
 
         int totalRead = 0;
 

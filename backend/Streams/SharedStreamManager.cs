@@ -97,12 +97,14 @@ public static class SharedStreamManager
                 return null;
             }
 
+            // Register the first reader's position for backpressure tracking
+            var handleId = entry.RegisterReader(startPosition);
             entry.StartPump();
             Log.Information("[SharedStreamManager] Created shared stream entry. DavItemId={DavItemId}, Position={Position}, BufferSize={BufferSize}MB",
                 davItemId, startPosition, ringBufferSize / (1024 * 1024));
 
             // The entry was created with readerCount=1, return the first handle
-            return new SharedStreamHandle(entry, startPosition);
+            return new SharedStreamHandle(entry, startPosition, handleId);
         }
         catch
         {

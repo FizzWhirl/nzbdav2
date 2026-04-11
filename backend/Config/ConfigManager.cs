@@ -200,7 +200,7 @@ public class ConfigManager
     {
         var mb = int.Parse(
             StringUtil.EmptyToNull(GetConfigValue("usenet.shared-stream-buffer-size"))
-            ?? "15"
+            ?? "32"
         );
         return Math.Max(2, mb) * 1024 * 1024; // Convert MB to bytes, minimum 2MB
     }

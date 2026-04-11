@@ -10,14 +10,16 @@ namespace NzbWebDAV.Streams;
 public class SharedStreamHandle : Stream
 {
     private readonly SharedStreamEntry _entry;
+    private readonly int _handleId;
     private long _position;
     private bool _detached;
     private bool _disposed;
 
-    internal SharedStreamHandle(SharedStreamEntry entry, long startPosition)
+    internal SharedStreamHandle(SharedStreamEntry entry, long startPosition, int handleId)
     {
         _entry = entry;
         _position = startPosition;
+        _handleId = handleId;
     }
 
     public override bool CanRead => true;
@@ -88,6 +90,10 @@ public class SharedStreamHandle : Stream
         }
 
         _position += bytesToCopy;
+
+        // Report position to entry for backpressure tracking
+        _entry.UpdateReaderPosition(_handleId, _position);
+
         return bytesToCopy;
     }
 
@@ -107,7 +113,7 @@ public class SharedStreamHandle : Stream
         _disposed = true;
         if (disposing)
         {
-            _entry.DetachReader();
+            _entry.DetachReader(_handleId);
         }
         base.Dispose(disposing);
     }
@@ -116,7 +122,7 @@ public class SharedStreamHandle : Stream
     {
         if (_disposed) return;
         _disposed = true;
-        _entry.DetachReader();
+        _entry.DetachReader(_handleId);
         GC.SuppressFinalize(this);
     }
 }

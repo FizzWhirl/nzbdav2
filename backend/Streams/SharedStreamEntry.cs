@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Serilog;
 
 namespace NzbWebDAV.Streams;
@@ -5,7 +6,8 @@ namespace NzbWebDAV.Streams;
 /// <summary>
 /// Owns a single BufferedSegmentStream and exposes its data through a ring buffer
 /// to multiple SharedStreamHandle readers. Manages lifetime via reference counting
-/// and a grace period timer.
+/// and a grace period timer. The pump applies backpressure — it will not overwrite
+/// data that the slowest active reader hasn't consumed yet.
 /// </summary>
 public class SharedStreamEntry : IDisposable
 {
@@ -28,8 +30,14 @@ public class SharedStreamEntry : IDisposable
     private Timer? _graceTimer;
     private Task? _pumpTask;
 
+    // Per-reader position tracking for backpressure
+    private readonly ConcurrentDictionary<int, long> _readerPositions = new();
+    private int _nextHandleId;
+
     // Signaling: pump notifies ALL waiting readers when new data is available (broadcast)
     private TaskCompletionSource _dataAvailableTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // Signaling: readers notify pump when they advance (for backpressure release)
+    private TaskCompletionSource _readerAdvancedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     // Gate: pauses pump when no readers are active
     private readonly ManualResetEventSlim _pumpGate = new(true); // Start open (first reader is attaching)
 
@@ -71,6 +79,55 @@ public class SharedStreamEntry : IDisposable
     public void StartPump()
     {
         _pumpTask = Task.Run(PumpLoop);
+    }
+
+    /// <summary>
+    /// Register a reader's position for backpressure tracking.
+    /// Returns a handle ID that must be passed to UpdateReaderPosition and UnregisterReader.
+    /// </summary>
+    internal int RegisterReader(long position)
+    {
+        var id = Interlocked.Increment(ref _nextHandleId);
+        _readerPositions[id] = position;
+        return id;
+    }
+
+    /// <summary>
+    /// Update a reader's current position. Called by SharedStreamHandle after each read.
+    /// Signals the pump in case it was waiting on backpressure.
+    /// </summary>
+    internal void UpdateReaderPosition(int handleId, long position)
+    {
+        _readerPositions[handleId] = position;
+        // Signal pump that a reader advanced (may release backpressure)
+        Interlocked.Exchange(ref _readerAdvancedTcs, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+    }
+
+    /// <summary>
+    /// Remove a reader from position tracking. Called by SharedStreamHandle on dispose.
+    /// </summary>
+    internal void UnregisterReader(int handleId)
+    {
+        _readerPositions.TryRemove(handleId, out _);
+        // Signal pump — removing the slowest reader may release backpressure
+        Interlocked.Exchange(ref _readerAdvancedTcs, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+    }
+
+    /// <summary>
+    /// Get the position of the slowest active reader, or null if no readers are tracked.
+    /// </summary>
+    private long? SlowestReaderPosition
+    {
+        get
+        {
+            long? min = null;
+            foreach (var kvp in _readerPositions)
+            {
+                if (min == null || kvp.Value < min.Value)
+                    min = kvp.Value;
+            }
+            return min;
+        }
     }
 
     /// <summary>
@@ -123,6 +180,7 @@ public class SharedStreamEntry : IDisposable
                 return null;
 
             Interlocked.Increment(ref _readerCount);
+            var handleId = RegisterReader(startPosition);
 
             // Cancel grace timer if we're in grace period
             if (_state == EntryState.GracePeriod)
@@ -134,15 +192,17 @@ public class SharedStreamEntry : IDisposable
                 Log.Debug("[SharedStreamEntry] Reader attached during grace period, resuming pump. DavItemId={DavItemId}", _davItemId);
             }
 
-            return new SharedStreamHandle(this, startPosition);
+            return new SharedStreamHandle(this, startPosition, handleId);
         }
     }
 
     /// <summary>
     /// Called by SharedStreamHandle.Dispose when a reader disconnects.
     /// </summary>
-    internal void DetachReader()
+    internal void DetachReader(int handleId)
     {
+        UnregisterReader(handleId);
+
         var remaining = Interlocked.Decrement(ref _readerCount);
         if (remaining > 0) return;
 
@@ -209,6 +269,28 @@ public class SharedStreamEntry : IDisposable
                     // Signal all waiting readers that we're done
                     Interlocked.Exchange(ref _dataAvailableTcs, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
                     return;
+                }
+
+                // Backpressure: wait until writing won't overwrite data the slowest reader needs
+                while (true)
+                {
+                    if (_state == EntryState.Disposed || _state == EntryState.Failed)
+                        return;
+
+                    var minPos = SlowestReaderPosition;
+                    // No readers tracked → write freely (grace period handles pump pausing)
+                    if (minPos == null || _writePosition + bytesRead <= minPos.Value + _ringBufferSize)
+                        break;
+
+                    // Pump would overwrite data the slowest reader hasn't consumed — wait
+                    try
+                    {
+                        await Volatile.Read(ref _readerAdvancedTcs).Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                    }
+                    catch (TimeoutException)
+                    {
+                        // Re-check state and try again
+                    }
                 }
 
                 // Write to ring buffer (may wrap around)

@@ -43,7 +43,7 @@ public class NzbFileStream : Stream
         int bufferSize = 20,  // Increased from 10 for better read-ahead buffering
         long[]? segmentSizes = null,
         Dictionary<int, string[]>? segmentFallbacks = null,
-        int sharedStreamBufferSize = 15 * 1024 * 1024,
+        int sharedStreamBufferSize = 32 * 1024 * 1024,
         int sharedStreamGracePeriod = 10
     )
     {

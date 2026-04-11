@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Diagnostics;
 using System.Threading.Channels;
 using NzbWebDAV.Clients.Usenet;
@@ -1037,7 +1036,7 @@ public class BufferedSegmentStream : Stream
                 }
 
                 // Rent a buffer and read the segment into it
-                var buffer = ArrayPool<byte>.Shared.Rent(1024 * 1024);
+                var buffer = new byte[1024 * 1024];
                 var totalRead = 0;
 
                 // Time network read
@@ -1054,9 +1053,8 @@ public class BufferedSegmentStream : Stream
                         if (totalRead == buffer.Length)
                         {
                             // Resize
-                            var newBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
+                            var newBuffer = new byte[buffer.Length * 2];
                             Buffer.BlockCopy(buffer, 0, newBuffer, 0, totalRead);
-                            ArrayPool<byte>.Shared.Return(buffer);
                             buffer = newBuffer;
                         }
 
@@ -1092,7 +1090,6 @@ public class BufferedSegmentStream : Stream
                             // Treat this as an error rather than just a warning
                             if (totalRead < expectedSize * 0.9) // Less than 90% of expected size
                             {
-                                ArrayPool<byte>.Shared.Return(buffer);
                                 throw new InvalidDataException(
                                     $"Incomplete segment for {jobName}: Segment {index}/{segmentIds.Length} ({segmentId}) " +
                                     $"expected {expectedSize} bytes but got only {totalRead} bytes ({totalRead - expectedSize} byte deficit). " +
@@ -1127,7 +1124,6 @@ public class BufferedSegmentStream : Stream
                 }
                 catch
                 {
-                    ArrayPool<byte>.Shared.Return(buffer);
                     throw;
                 }
             }
@@ -1283,7 +1279,7 @@ public class BufferedSegmentStream : Stream
         }
 
         // Return a zero-filled segment of correct size
-        var zeroBuffer = ArrayPool<byte>.Shared.Rent(zeroBufferSize);
+        var zeroBuffer = new byte[zeroBufferSize];
         Array.Clear(zeroBuffer, 0, zeroBufferSize);
 
         // Clean up provider exclusions before returning
@@ -1314,7 +1310,7 @@ public class BufferedSegmentStream : Stream
                 ? await multiClient.GetBalancedSegmentStreamAsync(segmentId, false, ct).ConfigureAwait(false)
                 : await client.GetSegmentStreamAsync(segmentId, false, ct).ConfigureAwait(false);
 
-            var buffer = ArrayPool<byte>.Shared.Rent(1024 * 1024);
+            var buffer = new byte[1024 * 1024];
             var totalRead = 0;
             try
             {
@@ -1322,9 +1318,8 @@ public class BufferedSegmentStream : Stream
                 {
                     if (totalRead == buffer.Length)
                     {
-                        var newBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
+                        var newBuffer = new byte[buffer.Length * 2];
                         Buffer.BlockCopy(buffer, 0, newBuffer, 0, totalRead);
-                        ArrayPool<byte>.Shared.Return(buffer);
                         buffer = newBuffer;
                     }
                     var read = await stream.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead), ct).ConfigureAwait(false);
@@ -1335,7 +1330,6 @@ public class BufferedSegmentStream : Stream
             }
             catch
             {
-                ArrayPool<byte>.Shared.Return(buffer);
                 throw;
             }
         }
@@ -1625,11 +1619,7 @@ public class BufferedSegmentStream : Stream
 
         public void Dispose()
         {
-            if (_buffer != null)
-            {
-                ArrayPool<byte>.Shared.Return(_buffer);
-                _buffer = null;
-            }
+            _buffer = null;
         }
     }
 

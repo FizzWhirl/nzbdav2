@@ -16,6 +16,7 @@ using NzbWebDAV.Services;
 using NzbWebDAV.Utils;
 using NzbWebDAV.Tools;
 using NzbWebDAV.WebDav;
+using NzbWebDAV.Streams;
 using NzbWebDAV.WebDav.Base;
 using NzbWebDAV.Websocket;
 using Serilog;
@@ -200,6 +201,18 @@ class Program
             {
                 levelSwitch.MinimumLevel = newLevel;
                 Log.Information($"Log level updated to {newLevel}");
+            }
+        };
+
+        // Set initial concurrent buffered stream cap
+        BufferedSegmentStream.SetMaxConcurrentStreams(configManager.GetMaxConcurrentBufferedStreams());
+
+        // Update on config change
+        configManager.OnConfigChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.NewConfig.ContainsKey("usenet.max-concurrent-buffered-streams"))
+            {
+                BufferedSegmentStream.SetMaxConcurrentStreams(configManager.GetMaxConcurrentBufferedStreams());
             }
         };
 

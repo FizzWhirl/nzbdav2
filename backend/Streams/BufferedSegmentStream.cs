@@ -18,6 +18,20 @@ namespace NzbWebDAV.Streams;
 /// </summary>
 public class BufferedSegmentStream : Stream
 {
+    // Concurrent stream cap — limits how many BufferedSegmentStreams can exist simultaneously
+    private static SemaphoreSlim s_concurrentStreamSlots = new(2, 2);
+    private bool _holdsSlot;
+
+    public static void SetMaxConcurrentStreams(int max)
+    {
+        s_concurrentStreamSlots = new SemaphoreSlim(max, max);
+    }
+
+    public static bool TryAcquireSlot()
+    {
+        return s_concurrentStreamSlots.Wait(0);
+    }
+
     // Enable detailed timing for benchmarks
     public static bool EnableDetailedTiming { get; set; } = false;
 
@@ -336,6 +350,8 @@ public class BufferedSegmentStream : Stream
         // Each buffered segment holds a ~1MB byte array, so large buffers
         // cause significant memory pressure (e.g., 250 segments = ~500MB).
         bufferSegmentCount = Math.Max(bufferSegmentCount, concurrentConnections * 2);
+
+        _holdsSlot = true;
 
         // Create bounded channel for buffering
         var channelOptions = new BoundedChannelOptions(bufferSegmentCount)
@@ -1474,6 +1490,13 @@ public class BufferedSegmentStream : Stream
                 scope?.Dispose();
 
             _linkedCts.Dispose();
+
+            // Release concurrent stream slot
+            if (_holdsSlot)
+            {
+                _holdsSlot = false;
+                s_concurrentStreamSlots.Release();
+            }
         }
         _disposed = true;
         base.Dispose(disposing);
@@ -1506,6 +1529,13 @@ public class BufferedSegmentStream : Stream
             scope?.Dispose();
 
         _linkedCts.Dispose();
+
+        // Release concurrent stream slot
+        if (_holdsSlot)
+        {
+            _holdsSlot = false;
+            s_concurrentStreamSlots.Release();
+        }
 
         _disposed = true;
         GC.SuppressFinalize(this);

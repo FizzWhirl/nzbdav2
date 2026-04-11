@@ -264,7 +264,8 @@ public class NzbFileStream : Stream
             _usageContext.UsageType != ConnectionUsageType.QueueAnalysis;
 
         // Use buffered streaming if configured for better performance
-        if (shouldUseBufferedStreaming && _concurrentConnections >= 3 && _fileSegmentIds.Length > _concurrentConnections)
+        if (shouldUseBufferedStreaming && _concurrentConnections >= 3 && _fileSegmentIds.Length > _concurrentConnections
+            && BufferedSegmentStream.TryAcquireSlot())
         {
             // Set BufferedStreaming context - this will be the ONLY ConnectionUsageContext
             // Calculate the byte offset where this stream starts within this NZB file

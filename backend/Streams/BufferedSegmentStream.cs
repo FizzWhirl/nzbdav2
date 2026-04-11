@@ -333,7 +333,7 @@ public class BufferedSegmentStream : Stream
         _segmentIndexOffset = segmentIndexOffset;
         _client = client;
         // Ensure buffer is large enough for concurrent workers, but don't over-allocate.
-        // Each buffered segment holds a ~1MB ArrayPool byte array, so large buffers
+        // Each buffered segment holds a ~1MB byte array, so large buffers
         // cause significant memory pressure (e.g., 250 segments = ~500MB).
         bufferSegmentCount = Math.Max(bufferSegmentCount, concurrentConnections * 2);
 
@@ -1465,7 +1465,7 @@ public class BufferedSegmentStream : Stream
             _currentSegment?.Dispose();
             _currentSegment = null;
 
-            // Drain any segments remaining in the buffer channel to return ArrayPool buffers
+            // Drain any segments remaining in the buffer channel to release segment memory
             while (_bufferChannel.Reader.TryRead(out var segment))
                 segment.Dispose();
 
@@ -1497,7 +1497,7 @@ public class BufferedSegmentStream : Stream
         _currentSegment?.Dispose();
         _currentSegment = null;
 
-        // Drain any segments remaining in the buffer channel to return ArrayPool buffers
+        // Drain any segments remaining in the buffer channel to release segment memory
         while (_bufferChannel.Reader.TryRead(out var segment))
             segment.Dispose();
 

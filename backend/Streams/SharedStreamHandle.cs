@@ -78,6 +78,15 @@ public class SharedStreamHandle : Stream
         var bytesAvailable = _entry.WritePosition - _position;
         var bytesToCopy = (int)Math.Min(Math.Min(bytesAvailable, count), int.MaxValue);
         _entry.CopyFromRingBuffer(_position, buffer, offset, bytesToCopy);
+
+        // Double-check: pump may have overwritten our bytes during the copy
+        if (_position < _entry.ValidRangeStart)
+        {
+            Log.Warning("[SharedStreamHandle] Reader detached (post-copy race) — position {Position} behind valid range start {ValidStart}", _position, _entry.ValidRangeStart);
+            _detached = true;
+            return 0;
+        }
+
         _position += bytesToCopy;
         return bytesToCopy;
     }

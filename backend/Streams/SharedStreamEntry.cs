@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Serilog;
 
 namespace NzbWebDAV.Streams;
@@ -25,12 +24,12 @@ public class SharedStreamEntry : IDisposable
     private int _readerCount;
     private volatile EntryState _state = EntryState.Active;
     private Exception? _failure;
-    private bool _completed; // Inner stream returned 0 (natural end)
+    private volatile bool _completed; // Inner stream returned 0 (natural end)
     private Timer? _graceTimer;
     private Task? _pumpTask;
 
-    // Signaling: pump notifies readers when new data is available
-    private readonly SemaphoreSlim _dataAvailable = new(0, int.MaxValue);
+    // Signaling: pump notifies ALL waiting readers when new data is available (broadcast)
+    private TaskCompletionSource _dataAvailableTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     // Gate: pauses pump when no readers are active
     private readonly ManualResetEventSlim _pumpGate = new(true); // Start open (first reader is attaching)
 
@@ -95,7 +94,7 @@ public class SharedStreamEntry : IDisposable
     /// </summary>
     public async Task WaitForDataAsync(CancellationToken ct)
     {
-        await _dataAvailable.WaitAsync(ct).ConfigureAwait(false);
+        await Volatile.Read(ref _dataAvailableTcs).Task.WaitAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -162,11 +161,18 @@ public class SharedStreamEntry : IDisposable
 
     private void OnGracePeriodExpired()
     {
+        bool shouldCleanup;
         lock (_stateLock)
         {
             if (_state != EntryState.GracePeriod) return;
             Log.Debug("[SharedStreamEntry] Grace period expired, disposing. DavItemId={DavItemId}", _davItemId);
-            TransitionToDisposed();
+            shouldCleanup = SetDisposedState();
+        }
+
+        if (shouldCleanup)
+        {
+            _evictCallback(_davItemId);
+            CleanupResources();
         }
     }
 
@@ -201,7 +207,7 @@ public class SharedStreamEntry : IDisposable
                     _completed = true;
                     Log.Debug("[SharedStreamEntry] Pump reached end of stream. DavItemId={DavItemId}", _davItemId);
                     // Signal all waiting readers that we're done
-                    _dataAvailable.Release(int.MaxValue / 2);
+                    Interlocked.Exchange(ref _dataAvailableTcs, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
                     return;
                 }
 
@@ -217,8 +223,8 @@ public class SharedStreamEntry : IDisposable
 
                 Volatile.Write(ref _writePosition, writePos + bytesRead);
 
-                // Signal waiting readers
-                try { _dataAvailable.Release(); } catch (SemaphoreFullException) { }
+                // Signal ALL waiting readers (broadcast)
+                Interlocked.Exchange(ref _dataAvailableTcs, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
             }
         }
         catch (OperationCanceledException)
@@ -244,7 +250,7 @@ public class SharedStreamEntry : IDisposable
             _graceTimer = null;
 
             // Wake all waiting readers so they see the failure
-            try { _dataAvailable.Release(int.MaxValue / 2); } catch (SemaphoreFullException) { }
+            Interlocked.Exchange(ref _dataAvailableTcs, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
 
             Log.Warning("[SharedStreamEntry] Entry failed, evicting. DavItemId={DavItemId}, Error={Error}", _davItemId, ex.Message);
         }
@@ -254,15 +260,17 @@ public class SharedStreamEntry : IDisposable
         CleanupResources();
     }
 
-    private void TransitionToDisposed()
+    /// <summary>
+    /// Set state to Disposed and clean up timer. Must be called inside _stateLock.
+    /// Returns true if cleanup should proceed (caller must call evict + CleanupResources outside the lock).
+    /// </summary>
+    private bool SetDisposedState()
     {
+        if (_state == EntryState.Disposed) return false;
         _state = EntryState.Disposed;
         _graceTimer?.Dispose();
         _graceTimer = null;
-
-        // Evict from manager (outside lock to avoid deadlocks)
-        _evictCallback(_davItemId);
-        CleanupResources();
+        return true;
     }
 
     private void CleanupResources()
@@ -283,10 +291,16 @@ public class SharedStreamEntry : IDisposable
 
     public void Dispose()
     {
+        bool shouldCleanup;
         lock (_stateLock)
         {
-            if (_state == EntryState.Disposed) return;
-            TransitionToDisposed();
+            shouldCleanup = SetDisposedState();
+        }
+
+        if (shouldCleanup)
+        {
+            _evictCallback(_davItemId);
+            CleanupResources();
         }
     }
 }

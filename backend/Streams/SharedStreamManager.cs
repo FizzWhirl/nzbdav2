@@ -39,15 +39,16 @@ public static class SharedStreamManager
     /// <param name="streamLength">Total length of the stream</param>
     /// <param name="ringBufferSize">Ring buffer size in bytes</param>
     /// <param name="gracePeriodSeconds">Grace period before disposing after last reader detaches</param>
-    /// <param name="factory">Creates a BufferedSegmentStream. Only called if creating a new entry.
-    /// Must NOT call SetAcquiredSlot — the entry manages the semaphore slot.</param>
+    /// <param name="factory">Creates a BufferedSegmentStream using the entry-scoped CancellationToken.
+    /// Only called if creating a new entry. Must NOT call SetAcquiredSlot — the entry manages the semaphore slot.
+    /// Must use the provided CancellationToken (not a request-scoped one) so the pump outlives individual requests.</param>
     public static SharedStreamHandle? GetOrCreate(
         Guid davItemId,
         long startPosition,
         long streamLength,
         int ringBufferSize,
         int gracePeriodSeconds,
-        Func<BufferedSegmentStream> factory)
+        Func<CancellationToken, BufferedSegmentStream> factory)
     {
         // Fast path: entry already exists
         if (s_entries.TryGetValue(davItemId, out var existing))
@@ -72,7 +73,10 @@ public static class SharedStreamManager
 
         try
         {
-            var innerStream = factory();
+            // Create an entry-scoped CTS so the pump's inner stream survives
+            // individual request cancellations — only cancelled when the entry itself is disposed
+            var entryCts = new CancellationTokenSource();
+            var innerStream = factory(entryCts.Token);
 
             var entry = new SharedStreamEntry(
                 innerStream,
@@ -82,7 +86,8 @@ public static class SharedStreamManager
                 streamLength,
                 ringBufferSize,
                 gracePeriodSeconds,
-                Evict
+                Evict,
+                entryCts
             );
 
             // Try to add — if another thread raced us, clean up our entry and attach to theirs

@@ -21,6 +21,7 @@ public class SharedStreamEntry : IDisposable
     private readonly Guid _davItemId;
     private readonly int _gracePeriodSeconds;
     private readonly Action<Guid> _evictCallback; // Calls SharedStreamManager.Evict
+    private readonly CancellationTokenSource _entryCts; // Entry-scoped cancellation, independent of any request
 
     private long _writePosition; // Absolute byte offset of next write
     private int _readerCount;
@@ -58,7 +59,8 @@ public class SharedStreamEntry : IDisposable
         long streamLength,
         int ringBufferSize,
         int gracePeriodSeconds,
-        Action<Guid> evictCallback)
+        Action<Guid> evictCallback,
+        CancellationTokenSource entryCts)
     {
         _innerStream = innerStream;
         _slot = slot;
@@ -70,6 +72,7 @@ public class SharedStreamEntry : IDisposable
         _ringBuffer = new byte[ringBufferSize];
         _gracePeriodSeconds = gracePeriodSeconds;
         _evictCallback = evictCallback;
+        _entryCts = entryCts;
         _readerCount = 1; // First reader is being created by the caller
     }
 
@@ -357,6 +360,8 @@ public class SharedStreamEntry : IDisposable
 
     private void CleanupResources()
     {
+        try { _entryCts.Cancel(); } catch { /* best effort */ }
+
         try
         {
             _innerStream.Dispose();
@@ -368,6 +373,7 @@ public class SharedStreamEntry : IDisposable
 
         _slot.Release();
         _pumpGate.Dispose();
+        try { _entryCts.Dispose(); } catch { /* best effort */ }
         Log.Debug("[SharedStreamEntry] Resources cleaned up, semaphore slot released. DavItemId={DavItemId}", _davItemId);
     }
 

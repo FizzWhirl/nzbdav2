@@ -180,6 +180,14 @@ public class ConfigManager
         );
     }
 
+    public int GetMaxConcurrentBufferedStreams()
+    {
+        return int.Parse(
+            StringUtil.EmptyToNull(GetConfigValue("usenet.max-concurrent-buffered-streams"))
+            ?? "2"
+        );
+    }
+
     public LogEventLevel? GetLogLevel()
     {
         var val = GetConfigValue("general.log-level");

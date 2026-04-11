@@ -56,4 +56,23 @@ ENV NZBDAV_VERSION=${NZBDAV_VERSION}
 ENV NODE_ENV=production
 ENV LOG_LEVEL=warning
 
+# .NET Garbage Collection defaults — tuned for memory-constrained deployments.
+# These can be overridden in your docker-compose.yml environment section.
+#
+# DOTNET_GCServer: GC mode.
+#   0 = Workstation GC — aggressive collection, returns memory to OS quickly.
+#       Best for 1-2GB RAM systems.
+#   1 = Server GC — holds onto memory for throughput. Better for 4GB+ systems.
+#
+# DOTNET_GCHeapHardLimit: Max managed heap size in hex bytes.
+#   Prevents unbounded memory growth. GC collects more aggressively near the limit.
+#   Examples: 0x20000000 = 512MB, 0x40000000 = 1GB, 0x80000000 = 2GB
+#
+# Recommended configurations:
+#   1GB VPS:  DOTNET_GCServer=0  DOTNET_GCHeapHardLimit=0x20000000  (512MB)
+#   2GB VPS:  DOTNET_GCServer=0  DOTNET_GCHeapHardLimit=0x40000000  (1GB)
+#   4GB+ NAS: DOTNET_GCServer=1  DOTNET_GCHeapHardLimit=0x80000000  (2GB)
+ENV DOTNET_GCServer=0
+ENV DOTNET_GCHeapHardLimit=0x20000000
+
 CMD ["/entrypoint.sh"]

@@ -275,21 +275,24 @@ public class UsenetStreamingClient
         var segmentIds = nzbFile.GetSegmentIds();
         var fileSize = await _client.GetFileSizeAsync(nzbFile, linkedCt.Token).ConfigureAwait(false);
         var bufferSize = _configManager.GetStreamBufferSize();
-        return new NzbFileStream(segmentIds, fileSize, _client, concurrentConnections, usageContext, bufferSize: bufferSize);
+        return new NzbFileStream(segmentIds, fileSize, _client, concurrentConnections, usageContext, bufferSize: bufferSize,
+            sharedStreamBufferSize: _configManager.GetSharedStreamBufferSize(), sharedStreamGracePeriod: _configManager.GetSharedStreamGracePeriod());
     }
 
     public NzbFileStream GetFileStream(NzbFile nzbFile, long fileSize, int concurrentConnections, long[]? segmentSizes = null)
     {
         var bufferSize = _configManager.GetStreamBufferSize();
         var usageContext = new ConnectionUsageContext(ConnectionUsageType.Streaming);
-        return new NzbFileStream(nzbFile.GetSegmentIds(), fileSize, _client, concurrentConnections, usageContext, bufferSize: bufferSize, segmentSizes: segmentSizes);
+        return new NzbFileStream(nzbFile.GetSegmentIds(), fileSize, _client, concurrentConnections, usageContext, bufferSize: bufferSize, segmentSizes: segmentSizes,
+            sharedStreamBufferSize: _configManager.GetSharedStreamBufferSize(), sharedStreamGracePeriod: _configManager.GetSharedStreamGracePeriod());
     }
 
     public NzbFileStream GetFileStream(string[] segmentIds, long fileSize, int concurrentConnections, ConnectionUsageContext? usageContext = null, bool useBufferedStreaming = true, int? bufferSize = null, long[]? segmentSizes = null, Dictionary<int, string[]>? segmentFallbacks = null)
     {
         // Use config value if not specified
         var actualBufferSize = bufferSize ?? _configManager.GetStreamBufferSize();
-        return new NzbFileStream(segmentIds, fileSize, _client, concurrentConnections, usageContext, useBufferedStreaming, actualBufferSize, segmentSizes, segmentFallbacks);
+        return new NzbFileStream(segmentIds, fileSize, _client, concurrentConnections, usageContext, useBufferedStreaming, actualBufferSize, segmentSizes, segmentFallbacks,
+            _configManager.GetSharedStreamBufferSize(), _configManager.GetSharedStreamGracePeriod());
     }
 
     public NzbFileStream GetFastFileStream(string[] segmentIds, long fileSize, int concurrentConnections, ConnectionUsageContext? usageContext = null)

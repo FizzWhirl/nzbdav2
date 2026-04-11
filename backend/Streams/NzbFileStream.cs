@@ -16,6 +16,8 @@ public class NzbFileStream : Stream
     private readonly int _bufferSize;
     private readonly long[]? _segmentOffsets; // Cumulative offsets for instant seeking
     private readonly Dictionary<int, string[]>? _segmentFallbacks;
+    private readonly int _sharedStreamBufferSize;
+    private readonly int _sharedStreamGracePeriod;
 
     private long _position = 0;
     private CombinedStream? _innerStream;
@@ -40,7 +42,9 @@ public class NzbFileStream : Stream
         bool useBufferedStreaming = true,
         int bufferSize = 20,  // Increased from 10 for better read-ahead buffering
         long[]? segmentSizes = null,
-        Dictionary<int, string[]>? segmentFallbacks = null
+        Dictionary<int, string[]>? segmentFallbacks = null,
+        int sharedStreamBufferSize = 15 * 1024 * 1024,
+        int sharedStreamGracePeriod = 10
     )
     {
         _usageContext = usageContext ?? new ConnectionUsageContext(ConnectionUsageType.Unknown);
@@ -53,6 +57,8 @@ public class NzbFileStream : Stream
         _useBufferedStreaming = useBufferedStreaming;
         _bufferSize = bufferSize;
         _segmentFallbacks = segmentFallbacks;
+        _sharedStreamBufferSize = sharedStreamBufferSize;
+        _sharedStreamGracePeriod = sharedStreamGracePeriod;
         _streamCts = new CancellationTokenSource();
 
         if (segmentSizes != null && segmentSizes.Length == fileSegmentIds.Length)
@@ -103,6 +109,19 @@ public class NzbFileStream : Stream
         if (read > 0)
         {
             _consecutiveSeeksToSameOffset = 0;
+        }
+
+        // Handle premature EOF: SharedStreamHandle returns 0 when reader detaches
+        // (fell behind ring buffer window). Recreate inner stream — will fall back to unbuffered.
+        if (read == 0 && _position < _fileSize)
+        {
+            Serilog.Log.Debug("[NzbFileStream] Premature EOF at position {Position}/{FileSize}, recreating inner stream", _position, _fileSize);
+            _innerStream?.Dispose();
+            _innerStream = null;
+            // Re-attempt the read with a new inner stream
+            _innerStream = await GetFileStream(_position, cancellationToken).ConfigureAwait(false);
+            read = await _innerStream.ReadAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+            _position += read;
         }
 
         if (_totalReadCount % 100 == 0)
@@ -263,22 +282,100 @@ public class NzbFileStream : Stream
             _usageContext.UsageType != ConnectionUsageType.Queue &&
             _usageContext.UsageType != ConnectionUsageType.QueueAnalysis;
 
-        // Use buffered streaming if configured for better performance
+        // Calculate the byte offset where this stream starts
+        var segmentByteOffset = _segmentOffsets != null
+            ? _segmentOffsets[firstSegmentIndex]
+            : firstSegmentIndex * (_fileSize / _fileSegmentIds.Length);
+        var totalBaseOffset = (_usageContext.DetailsObject?.BaseByteOffset ?? 0) + segmentByteOffset;
+
+        // Try shared stream path first (for streaming requests with a DavItemId)
+        var davItemId = _usageContext.DetailsObject?.DavItemId;
+        if (shouldUseBufferedStreaming && _concurrentConnections >= 3 && _fileSegmentIds.Length > _concurrentConnections
+            && davItemId.HasValue)
+        {
+            // Try to attach to an existing shared stream
+            var existingHandle = SharedStreamManager.TryAttach(davItemId.Value, totalBaseOffset);
+            if (existingHandle != null)
+            {
+                Serilog.Log.Debug("[NzbFileStream] Attached to existing shared stream for DavItemId={DavItemId} at offset {Offset}",
+                    davItemId.Value, totalBaseOffset);
+                _contextScope = _streamCts.Token.SetScopedContext(_usageContext);
+                _cancellationRegistration = ct.Register(() =>
+                {
+                    if (!_disposed) { try { _streamCts.Cancel(); } catch (ObjectDisposedException) { } }
+                });
+                return new CombinedStream(new[] { Task.FromResult<Stream>(existingHandle) });
+            }
+
+            // Try to create a new shared stream entry
+            var sharedHandle = SharedStreamManager.GetOrCreate(
+                davItemId.Value,
+                totalBaseOffset,
+                _fileSize,
+                _sharedStreamBufferSize,
+                _sharedStreamGracePeriod,
+                () =>
+                {
+                    var detailsObj = new ConnectionUsageDetails
+                    {
+                        Text = _usageContext.Details ?? "",
+                        JobName = _usageContext.DetailsObject?.JobName,
+                        AffinityKey = _usageContext.DetailsObject?.AffinityKey,
+                        DavItemId = _usageContext.DetailsObject?.DavItemId,
+                        FileDate = _usageContext.DetailsObject?.FileDate,
+                        FileSize = _usageContext.DetailsObject?.FileSize ?? _fileSize,
+                        BaseByteOffset = totalBaseOffset
+                    };
+                    var bufferedContext = new ConnectionUsageContext(
+                        ConnectionUsageType.BufferedStreaming, detailsObj);
+
+                    var remainingSegments = _fileSegmentIds[firstSegmentIndex..];
+                    var remainingSize = _segmentOffsets != null
+                        ? _fileSize - _segmentOffsets[firstSegmentIndex]
+                        : _fileSize - firstSegmentIndex * (_fileSize / _fileSegmentIds.Length);
+
+                    long[]? remainingSegmentSizes = null;
+                    if (_segmentOffsets != null)
+                    {
+                        remainingSegmentSizes = new long[remainingSegments.Length];
+                        for (int i = 0; i < remainingSegments.Length; i++)
+                        {
+                            int originalIndex = firstSegmentIndex + i;
+                            if (originalIndex + 1 < _segmentOffsets.Length)
+                                remainingSegmentSizes[i] = _segmentOffsets[originalIndex + 1] - _segmentOffsets[originalIndex];
+                        }
+                    }
+
+                    _contextScope = _streamCts.Token.SetScopedContext(bufferedContext);
+                    var bufferedContextCt = _streamCts.Token;
+                    var bufferedStream = new BufferedSegmentStream(
+                        remainingSegments, remainingSize, _client,
+                        _concurrentConnections, _bufferSize, bufferedContextCt,
+                        bufferedContext, remainingSegmentSizes, _segmentFallbacks, firstSegmentIndex);
+                    // Do NOT call SetAcquiredSlot — SharedStreamEntry manages the slot
+                    return bufferedStream;
+                });
+
+            if (sharedHandle != null)
+            {
+                Serilog.Log.Debug("[NzbFileStream] Created new shared stream for DavItemId={DavItemId} at offset {Offset}",
+                    davItemId.Value, totalBaseOffset);
+                _cancellationRegistration = ct.Register(() =>
+                {
+                    if (!_disposed) { try { _streamCts.Cancel(); } catch (ObjectDisposedException) { } }
+                });
+                return new CombinedStream(new[] { Task.FromResult<Stream>(sharedHandle) });
+            }
+            // Fall through to direct BufferedSegmentStream or unbuffered
+        }
+
+        // Direct BufferedSegmentStream path (no DavItemId, or shared stream not available)
         var acquiredSlot = shouldUseBufferedStreaming && _concurrentConnections >= 3 && _fileSegmentIds.Length > _concurrentConnections
             ? BufferedSegmentStream.TryAcquireSlot() : null;
         if (acquiredSlot != null)
         {
             try
             {
-                // Set BufferedStreaming context - this will be the ONLY ConnectionUsageContext
-                // Calculate the byte offset where this stream starts within this NZB file
-                var segmentByteOffset = _segmentOffsets != null
-                    ? _segmentOffsets[firstSegmentIndex]
-                    : firstSegmentIndex * (_fileSize / _fileSegmentIds.Length);
-
-                // Add any incoming base offset (for multipart files, this is the cumulative offset across parts)
-                var totalBaseOffset = (_usageContext.DetailsObject?.BaseByteOffset ?? 0) + segmentByteOffset;
-
                 var detailsObj = new ConnectionUsageDetails
                 {
                     Text = _usageContext.Details ?? "",
@@ -286,9 +383,8 @@ public class NzbFileStream : Stream
                     AffinityKey = _usageContext.DetailsObject?.AffinityKey,
                     DavItemId = _usageContext.DetailsObject?.DavItemId,
                     FileDate = _usageContext.DetailsObject?.FileDate,
-                    // Use the original FileSize from context if set (for multipart files), otherwise use stream size
                     FileSize = _usageContext.DetailsObject?.FileSize ?? _fileSize,
-                    BaseByteOffset = totalBaseOffset  // Starting offset for this partial stream in the combined file
+                    BaseByteOffset = totalBaseOffset
                 };
                 var bufferedContext = new ConnectionUsageContext(
                     ConnectionUsageType.BufferedStreaming,
@@ -320,7 +416,7 @@ public class NzbFileStream : Stream
                 var bufferedContextCt = _streamCts.Token;
                 var bufferedStream = new BufferedSegmentStream(
                     remainingSegments,
-                    remainingSize, // Use exact size if available
+                    remainingSize,
                     _client,
                     _concurrentConnections,
                     _bufferSize,
@@ -332,8 +428,6 @@ public class NzbFileStream : Stream
                 );
                 bufferedStream.SetAcquiredSlot(acquiredSlot);
 
-                // Link cancellation from parent to child manually (one-way, doesn't copy contexts)
-                // Safe cancellation: only cancel if not already disposed
                 _cancellationRegistration = ct.Register(() =>
                 {
                     if (!_disposed)

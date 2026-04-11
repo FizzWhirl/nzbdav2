@@ -188,6 +188,23 @@ public class ConfigManager
         );
     }
 
+    public int GetSharedStreamGracePeriod()
+    {
+        return int.Parse(
+            StringUtil.EmptyToNull(GetConfigValue("usenet.shared-stream-grace-period"))
+            ?? "10"
+        );
+    }
+
+    public int GetSharedStreamBufferSize()
+    {
+        var mb = int.Parse(
+            StringUtil.EmptyToNull(GetConfigValue("usenet.shared-stream-buffer-size"))
+            ?? "15"
+        );
+        return Math.Max(2, mb) * 1024 * 1024; // Convert MB to bytes, minimum 2MB
+    }
+
     public LogEventLevel? GetLogLevel()
     {
         var val = GetConfigValue("general.log-level");

@@ -264,81 +264,91 @@ public class NzbFileStream : Stream
             _usageContext.UsageType != ConnectionUsageType.QueueAnalysis;
 
         // Use buffered streaming if configured for better performance
-        if (shouldUseBufferedStreaming && _concurrentConnections >= 3 && _fileSegmentIds.Length > _concurrentConnections
-            && BufferedSegmentStream.TryAcquireSlot())
+        var acquiredSlot = shouldUseBufferedStreaming && _concurrentConnections >= 3 && _fileSegmentIds.Length > _concurrentConnections
+            ? BufferedSegmentStream.TryAcquireSlot() : null;
+        if (acquiredSlot != null)
         {
-            // Set BufferedStreaming context - this will be the ONLY ConnectionUsageContext
-            // Calculate the byte offset where this stream starts within this NZB file
-            var segmentByteOffset = _segmentOffsets != null
-                ? _segmentOffsets[firstSegmentIndex]
-                : firstSegmentIndex * (_fileSize / _fileSegmentIds.Length);
-
-            // Add any incoming base offset (for multipart files, this is the cumulative offset across parts)
-            var totalBaseOffset = (_usageContext.DetailsObject?.BaseByteOffset ?? 0) + segmentByteOffset;
-
-            var detailsObj = new ConnectionUsageDetails
+            try
             {
-                Text = _usageContext.Details ?? "",
-                JobName = _usageContext.DetailsObject?.JobName,
-                AffinityKey = _usageContext.DetailsObject?.AffinityKey,
-                DavItemId = _usageContext.DetailsObject?.DavItemId,
-                FileDate = _usageContext.DetailsObject?.FileDate,
-                // Use the original FileSize from context if set (for multipart files), otherwise use stream size
-                FileSize = _usageContext.DetailsObject?.FileSize ?? _fileSize,
-                BaseByteOffset = totalBaseOffset  // Starting offset for this partial stream in the combined file
-            };
-            var bufferedContext = new ConnectionUsageContext(
-                ConnectionUsageType.BufferedStreaming,
-                detailsObj
-            );
-            
-            var remainingSegments = _fileSegmentIds[firstSegmentIndex..];
-            var remainingSize = _segmentOffsets != null 
-                ? _fileSize - _segmentOffsets[firstSegmentIndex]
-                : _fileSize - firstSegmentIndex * (_fileSize / _fileSegmentIds.Length);
+                // Set BufferedStreaming context - this will be the ONLY ConnectionUsageContext
+                // Calculate the byte offset where this stream starts within this NZB file
+                var segmentByteOffset = _segmentOffsets != null
+                    ? _segmentOffsets[firstSegmentIndex]
+                    : firstSegmentIndex * (_fileSize / _fileSegmentIds.Length);
 
-            long[]? remainingSegmentSizes = null;
-            if (_segmentOffsets != null)
-            {
-                remainingSegmentSizes = new long[remainingSegments.Length];
-                for (int i = 0; i < remainingSegments.Length; i++)
+                // Add any incoming base offset (for multipart files, this is the cumulative offset across parts)
+                var totalBaseOffset = (_usageContext.DetailsObject?.BaseByteOffset ?? 0) + segmentByteOffset;
+
+                var detailsObj = new ConnectionUsageDetails
                 {
-                    int originalIndex = firstSegmentIndex + i;
-                    if (originalIndex + 1 < _segmentOffsets.Length)
+                    Text = _usageContext.Details ?? "",
+                    JobName = _usageContext.DetailsObject?.JobName,
+                    AffinityKey = _usageContext.DetailsObject?.AffinityKey,
+                    DavItemId = _usageContext.DetailsObject?.DavItemId,
+                    FileDate = _usageContext.DetailsObject?.FileDate,
+                    // Use the original FileSize from context if set (for multipart files), otherwise use stream size
+                    FileSize = _usageContext.DetailsObject?.FileSize ?? _fileSize,
+                    BaseByteOffset = totalBaseOffset  // Starting offset for this partial stream in the combined file
+                };
+                var bufferedContext = new ConnectionUsageContext(
+                    ConnectionUsageType.BufferedStreaming,
+                    detailsObj
+                );
+
+                var remainingSegments = _fileSegmentIds[firstSegmentIndex..];
+                var remainingSize = _segmentOffsets != null
+                    ? _fileSize - _segmentOffsets[firstSegmentIndex]
+                    : _fileSize - firstSegmentIndex * (_fileSize / _fileSegmentIds.Length);
+
+                long[]? remainingSegmentSizes = null;
+                if (_segmentOffsets != null)
+                {
+                    remainingSegmentSizes = new long[remainingSegments.Length];
+                    for (int i = 0; i < remainingSegments.Length; i++)
                     {
-                        remainingSegmentSizes[i] = _segmentOffsets[originalIndex + 1] - _segmentOffsets[originalIndex];
+                        int originalIndex = firstSegmentIndex + i;
+                        if (originalIndex + 1 < _segmentOffsets.Length)
+                        {
+                            remainingSegmentSizes[i] = _segmentOffsets[originalIndex + 1] - _segmentOffsets[originalIndex];
+                        }
                     }
                 }
-            }
 
-            Serilog.Log.Debug("[NzbFileStream] Creating BufferedSegmentStream for {SegmentCount} segments, approximated size: {ApproximateSize}, concurrent connections: {ConcurrentConnections}, buffer size: {BufferSize}",
-                remainingSegments.Length, remainingSize, _concurrentConnections, _bufferSize);
-            _contextScope = _streamCts.Token.SetScopedContext(bufferedContext);
-            var bufferedContextCt = _streamCts.Token;
-            var bufferedStream = new BufferedSegmentStream(
-                remainingSegments,
-                remainingSize, // Use exact size if available
-                _client,
-                _concurrentConnections,
-                _bufferSize,
-                bufferedContextCt,
-                bufferedContext,
-                remainingSegmentSizes,
-                _segmentFallbacks,
-                firstSegmentIndex
-            );
+                Serilog.Log.Debug("[NzbFileStream] Creating BufferedSegmentStream for {SegmentCount} segments, approximated size: {ApproximateSize}, concurrent connections: {ConcurrentConnections}, buffer size: {BufferSize}",
+                    remainingSegments.Length, remainingSize, _concurrentConnections, _bufferSize);
+                _contextScope = _streamCts.Token.SetScopedContext(bufferedContext);
+                var bufferedContextCt = _streamCts.Token;
+                var bufferedStream = new BufferedSegmentStream(
+                    remainingSegments,
+                    remainingSize, // Use exact size if available
+                    _client,
+                    _concurrentConnections,
+                    _bufferSize,
+                    bufferedContextCt,
+                    bufferedContext,
+                    remainingSegmentSizes,
+                    _segmentFallbacks,
+                    firstSegmentIndex
+                );
+                bufferedStream.SetAcquiredSlot(acquiredSlot);
 
-            // Link cancellation from parent to child manually (one-way, doesn't copy contexts)
-            // Safe cancellation: only cancel if not already disposed
-            _cancellationRegistration = ct.Register(() =>
-            {
-                if (!_disposed)
+                // Link cancellation from parent to child manually (one-way, doesn't copy contexts)
+                // Safe cancellation: only cancel if not already disposed
+                _cancellationRegistration = ct.Register(() =>
                 {
-                    try { _streamCts.Cancel(); } catch (ObjectDisposedException) { }
-                }
-            });
+                    if (!_disposed)
+                    {
+                        try { _streamCts.Cancel(); } catch (ObjectDisposedException) { }
+                    }
+                });
 
-            return new CombinedStream(new[] { Task.FromResult<Stream>(bufferedStream) });
+                return new CombinedStream(new[] { Task.FromResult<Stream>(bufferedStream) });
+            }
+            catch
+            {
+                acquiredSlot.Release();
+                throw;
+            }
         }
 
         // Fallback to original implementation for small files or low concurrency

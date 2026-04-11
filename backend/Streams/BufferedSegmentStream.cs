@@ -19,17 +19,23 @@ namespace NzbWebDAV.Streams;
 public class BufferedSegmentStream : Stream
 {
     // Concurrent stream cap — limits how many BufferedSegmentStreams can exist simultaneously
-    private static SemaphoreSlim s_concurrentStreamSlots = new(2, 2);
-    private bool _holdsSlot;
+    private static volatile SemaphoreSlim s_concurrentStreamSlots = new(2, 2);
+    private SemaphoreSlim? _acquiredSemaphore; // Tracks which semaphore instance we acquired from
 
     public static void SetMaxConcurrentStreams(int max)
     {
         s_concurrentStreamSlots = new SemaphoreSlim(max, max);
     }
 
-    public static bool TryAcquireSlot()
+    public static SemaphoreSlim? TryAcquireSlot()
     {
-        return s_concurrentStreamSlots.Wait(0);
+        var semaphore = s_concurrentStreamSlots;
+        return semaphore.Wait(0) ? semaphore : null;
+    }
+
+    public void SetAcquiredSlot(SemaphoreSlim semaphore)
+    {
+        _acquiredSemaphore = semaphore;
     }
 
     // Enable detailed timing for benchmarks
@@ -351,7 +357,7 @@ public class BufferedSegmentStream : Stream
         // cause significant memory pressure (e.g., 250 segments = ~500MB).
         bufferSegmentCount = Math.Max(bufferSegmentCount, concurrentConnections * 2);
 
-        _holdsSlot = true;
+        // _acquiredSemaphore is set externally via SetAcquiredSlot after construction
 
         // Create bounded channel for buffering
         var channelOptions = new BoundedChannelOptions(bufferSegmentCount)
@@ -1492,11 +1498,8 @@ public class BufferedSegmentStream : Stream
             _linkedCts.Dispose();
 
             // Release concurrent stream slot
-            if (_holdsSlot)
-            {
-                _holdsSlot = false;
-                s_concurrentStreamSlots.Release();
-            }
+            var sem = Interlocked.Exchange(ref _acquiredSemaphore, null);
+            sem?.Release();
         }
         _disposed = true;
         base.Dispose(disposing);
@@ -1531,11 +1534,8 @@ public class BufferedSegmentStream : Stream
         _linkedCts.Dispose();
 
         // Release concurrent stream slot
-        if (_holdsSlot)
-        {
-            _holdsSlot = false;
-            s_concurrentStreamSlots.Release();
-        }
+        var sem = Interlocked.Exchange(ref _acquiredSemaphore, null);
+        sem?.Release();
 
         _disposed = true;
         GC.SuppressFinalize(this);

@@ -941,6 +941,13 @@ public class BufferedSegmentStream : Stream
             }
 
             _bufferChannel.Writer.TryComplete(); // Use TryComplete to avoid exception if already closed
+
+            // Clean up any segments still in slots (not yet written to channel)
+            for (var i = 0; i < segmentSlots.Length; i++)
+            {
+                var remaining = Interlocked.Exchange(ref segmentSlots[i], null);
+                remaining?.Dispose();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1464,6 +1471,10 @@ public class BufferedSegmentStream : Stream
             _currentSegment?.Dispose();
             _currentSegment = null;
 
+            // Drain any segments remaining in the buffer channel to return ArrayPool buffers
+            while (_bufferChannel.Reader.TryRead(out var segment))
+                segment.Dispose();
+
             // Dispose context scopes
             foreach (var scope in _contextScopes)
                 scope?.Dispose();
@@ -1491,6 +1502,10 @@ public class BufferedSegmentStream : Stream
 
         _currentSegment?.Dispose();
         _currentSegment = null;
+
+        // Drain any segments remaining in the buffer channel to return ArrayPool buffers
+        while (_bufferChannel.Reader.TryRead(out var segment))
+            segment.Dispose();
 
         // Dispose context scopes
         foreach (var scope in _contextScopes)

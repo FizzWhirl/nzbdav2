@@ -385,4 +385,20 @@ public class SharedStreamEntry : IDisposable
             CleanupResources();
         }
     }
+
+    /// <summary>
+    /// Clean up resources without evicting from SharedStreamManager.
+    /// Used when this entry lost a TryAdd race and was never registered in the dictionary.
+    /// </summary>
+    internal void DisposeWithoutEvict()
+    {
+        lock (_stateLock)
+        {
+            if (_state == EntryState.Disposed) return;
+            _state = EntryState.Disposed;
+        }
+
+        CleanupResources();
+    }
 }
+

@@ -85,10 +85,11 @@ public static class SharedStreamManager
                 Evict
             );
 
-            // Try to add — if another thread raced us, dispose our entry and attach to theirs
+            // Try to add — if another thread raced us, clean up our entry and attach to theirs
             if (!s_entries.TryAdd(davItemId, entry))
             {
-                entry.Dispose();
+                // Don't call Dispose — that would evict the winner's entry from the dictionary!
+                entry.DisposeWithoutEvict();
                 // Try the winner's entry
                 if (s_entries.TryGetValue(davItemId, out var winner))
                 {

@@ -333,8 +333,10 @@ public class BufferedSegmentStream : Stream
         _segmentFallbacks = segmentFallbacks;
         _segmentIndexOffset = segmentIndexOffset;
         _client = client;
-        // Ensure buffer is large enough to handle stalls and jitter better.
-        bufferSegmentCount = Math.Max(bufferSegmentCount, concurrentConnections * 10);
+        // Ensure buffer is large enough for concurrent workers, but don't over-allocate.
+        // Each buffered segment holds a ~1MB ArrayPool byte array, so large buffers
+        // cause significant memory pressure (e.g., 250 segments = ~500MB).
+        bufferSegmentCount = Math.Max(bufferSegmentCount, concurrentConnections * 2);
 
         // Create bounded channel for buffering
         var channelOptions = new BoundedChannelOptions(bufferSegmentCount)

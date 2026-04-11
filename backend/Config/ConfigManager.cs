@@ -176,7 +176,7 @@ public class ConfigManager
         return int.Parse(
             StringUtil.EmptyToNull(GetConfigValue("usenet.stream-buffer-size"))
             ?? StringUtil.EmptyToNull(Environment.GetEnvironmentVariable("STREAM_BUFFER_SIZE"))
-            ?? "200"
+            ?? "20"
         );
     }
 

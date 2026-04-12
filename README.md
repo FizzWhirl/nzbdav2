@@ -116,6 +116,14 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.0 (2026-04-12)
+*   **Feature**: Shared stream system — multiple concurrent HTTP requests for the same file now share a single `BufferedSegmentStream` instead of each creating their own. When Stremio sends parallel probe + streaming requests, only the first creates the underlying Usenet stream; subsequent requests attach as readers to the same ring buffer. Includes configurable grace period (default 10s) to keep the stream alive between reader transitions, and configurable buffer size (default 32MB).
+*   **Feature**: Concurrent stream cap — limits how many `BufferedSegmentStream` instances can exist simultaneously (configurable via `usenet.max-concurrent-buffered-streams`, default 2). Prevents retry storms from spawning unbounded streams that exhaust memory.
+*   **Feature**: GC tuning for memory-constrained deployments — Dockerfile now sets `DOTNET_GCConserveMemory=9` and `DOTNET_GCHeapHardLimit` to keep the .NET GC aggressive about reclaiming memory in Docker containers.
+*   **Fix**: Streaming memory leak — replaced `ArrayPool<byte>` with direct byte array allocation in `BufferedSegmentStream`. The shared pool retained large buffers indefinitely, causing memory to grow with each stream and never shrink. Also fixed undisposed segments not being drained on stream disposal.
+*   **Fix**: Orphaned stream safety net — added 60-second idle timeout watchdog to `BufferedSegmentStream`. If no `ReadAsync` calls arrive for 60 seconds (indicating the HTTP response write is stuck due to a client disconnect not propagating through a reverse proxy), the stream self-cancels its workers and releases permits immediately.
+*   **Fix**: Explicit cancellation in `NzbFileStream` disposal — `_streamCts.Cancel()` is now called before `_streamCts.Dispose()` in both sync and async disposal paths, ensuring cancellation notification reaches dependent code even if the normal disposal chain stalls.
+
 ## v0.6.23 (2026-04-09)
 *   **Feature**: New `QueueAnalysis` connection type with its own capped semaphore (default: half of queue connections, min 2). Isolates the file-size analysis phase from regular queue processing and streaming, preventing analysis of bad NZBs from saturating the connection pool. Configurable via `QUEUE_ANALYSIS_MAX_CONNECTIONS` env var.
 *   **Fix**: DMCA/takedown fast-fail in `AnalyzeNzbAsync`. When Smart Analysis detects article-not-found errors, a confirmation check probes a mid-NZB segment before committing to a full scan. If confirmed missing, the item fails immediately instead of scanning hundreds of dead segments. Prevents multi-minute connection pool burns on DMCA'd content.

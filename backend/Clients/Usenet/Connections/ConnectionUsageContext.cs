@@ -145,5 +145,6 @@ public enum ConnectionUsageType
     Repair = 4,
     BufferedStreaming = 5,
     Analysis = 6,
-    QueueAnalysis = 7
+    QueueAnalysis = 7,
+    QueueRarProcessing = 8
 }

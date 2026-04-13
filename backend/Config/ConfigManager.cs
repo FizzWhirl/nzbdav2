@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using NzbWebDAV.Clients.Usenet.Concurrency;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
 using NzbWebDAV.Utils;
@@ -256,6 +257,32 @@ public class ConfigManager
             StringUtil.EmptyToNull(GetConfigValue("api.max-queue-connections"))
             ?? "1" // Default to 1 to maximize streaming connections
         );
+    }
+
+    public int GetStreamingReserve()
+    {
+        return int.Parse(
+            StringUtil.EmptyToNull(GetConfigValue("usenet.streaming-reserve"))
+            ?? "5"
+        );
+    }
+
+    public SemaphorePriorityOdds GetStreamingPriority()
+    {
+        var stringValue = StringUtil.EmptyToNull(GetConfigValue("usenet.streaming-priority"));
+        var numericalValue = int.Parse(stringValue ?? "80");
+        return new SemaphorePriorityOdds() { HighPriorityOdds = numericalValue };
+    }
+
+    public int GetMaxDownloadConnections()
+    {
+        var stringValue = StringUtil.EmptyToNull(GetConfigValue("usenet.max-download-connections"));
+        if (stringValue != null)
+        {
+            return int.Parse(stringValue);
+        }
+        var providerConfig = GetUsenetProviderConfig();
+        return Math.Min(providerConfig.TotalPooledConnections, 15);
     }
 
     /// <summary>

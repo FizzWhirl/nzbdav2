@@ -27,7 +27,7 @@ public static class FetchFirstSegmentsStep
     {
         var logger = new ComponentLogger(LogComponents.Queue, configManager);
         var totalFiles = nzbFiles.Count(x => x.Segments.Count > 0);
-        var maxConcurrency = configManager.GetMaxQueueConnections();
+        var maxConcurrency = configManager.GetMaxDownloadConnections() + 5;
         var timeoutSeconds = configManager.GetUsenetOperationTimeout();
 
         logger.Information("Starting fetch for {TotalFiles} files (concurrency: {Concurrency}, timeout: {Timeout}s)",

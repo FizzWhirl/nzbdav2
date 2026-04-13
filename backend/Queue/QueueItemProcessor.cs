@@ -161,8 +161,8 @@ public class QueueItemProcessor(
 
         // GlobalOperationLimiter now handles all connection limits - no need for reserved connections
         var providerConfig = configManager.GetUsenetProviderConfig();
-        var concurrency = configManager.GetMaxQueueConnections();
-        Log.Information("[Queue] Processing '{JobName}': TotalConnections={TotalConnections}, MaxQueueConnections={MaxQueueConnections}", queueItem.JobName, providerConfig.TotalPooledConnections, concurrency);
+        var concurrency = configManager.GetMaxDownloadConnections() + 5;
+        Log.Information("[Queue] Processing '{JobName}': TotalConnections={TotalConnections}, DownloadConcurrency={Concurrency}", queueItem.JobName, providerConfig.TotalPooledConnections, concurrency);
         
         // Create a linked token for context propagation (more robust than setting on existing token)
         using var queueCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -255,7 +255,7 @@ public class QueueItemProcessor(
             fileProcessors.Count, queueItem.JobName);
 
         // Safe limit: totalConnections / maxConnectionsPerFile = 145 / 5 = 29
-        var fileConcurrency = Math.Max(1, Math.Min(concurrency, providerConfig.TotalPooledConnections / 5));
+        var fileConcurrency = configManager.GetMaxDownloadConnections() + 5;
         Log.Debug("[QueueItemProcessor] Step 2: File processing concurrency: {FileConcurrency} for {JobName}", fileConcurrency, queueItem.JobName);
 
         var part2Progress = progress

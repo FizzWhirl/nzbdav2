@@ -254,7 +254,6 @@ public class QueueItemProcessor(
         Log.Information("[QueueItemProcessor] Step 2: Created {ProcessorCount} file processors for {JobName} (progress 50-100%)",
             fileProcessors.Count, queueItem.JobName);
 
-        // Safe limit: totalConnections / maxConnectionsPerFile = 145 / 5 = 29
         var fileConcurrency = configManager.GetMaxDownloadConnections() + 5;
         Log.Debug("[QueueItemProcessor] Step 2: File processing concurrency: {FileConcurrency} for {JobName}", fileConcurrency, queueItem.JobName);
 

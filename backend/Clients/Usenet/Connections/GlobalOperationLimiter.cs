@@ -254,6 +254,7 @@ public class GlobalOperationLimiter : IDisposable
             usageType == ConnectionUsageType.Repair ||
             usageType == ConnectionUsageType.Analysis ||
             usageType == ConnectionUsageType.QueueAnalysis ||
+            usageType == ConnectionUsageType.QueueRarProcessing ||
             usageType == ConnectionUsageType.Streaming ||
             usageType == ConnectionUsageType.BufferedStreaming)
         {

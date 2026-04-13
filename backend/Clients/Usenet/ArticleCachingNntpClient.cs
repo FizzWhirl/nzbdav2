@@ -125,5 +125,6 @@ public class ArticleCachingNntpClient : WrappingNntpClient
                 delay = Math.Min(delay * 2, 10000);
             }
         }
+        Serilog.Log.Warning("[ArticleCache] Failed to delete temp cache directory after 5 retries: {CacheDir}", cacheDir);
     }
 }

@@ -7,6 +7,11 @@ namespace NzbWebDAV.Clients.Usenet.Concurrency;
 /// </summary>
 public class SemaphorePriorityOdds
 {
-    public int HighPriorityOdds { get; set; } = 100;
+    private int _highPriorityOdds = 100;
+    public int HighPriorityOdds
+    {
+        get => _highPriorityOdds;
+        set => _highPriorityOdds = Math.Clamp(value, 1, 99);
+    }
     public int LowPriorityOdds => 100 - HighPriorityOdds;
 }

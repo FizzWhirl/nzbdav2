@@ -253,7 +253,12 @@ public class RarProcessor(
             filesize = await usenet.GetFileSizeAsync(fileInfo.NzbFile, ct).ConfigureAwait(false);
         }
 
-        var usageContext = ct.GetContext<ConnectionUsageContext>();
+        // Create a QueueRarProcessing context so NzbFileStream allows buffered streaming
+        // (Queue and QueueAnalysis contexts disable buffering, but QueueRarProcessing does not)
+        var parentContext = ct.GetContext<ConnectionUsageContext>();
+        var usageContext = parentContext.DetailsObject != null
+            ? new ConnectionUsageContext(ConnectionUsageType.QueueRarProcessing, parentContext.DetailsObject)
+            : new ConnectionUsageContext(ConnectionUsageType.QueueRarProcessing, parentContext.Details);
         var segments = fileInfo.NzbFile.GetSegmentIds();
 
         // Use multiple connections with buffered streaming for faster header reading

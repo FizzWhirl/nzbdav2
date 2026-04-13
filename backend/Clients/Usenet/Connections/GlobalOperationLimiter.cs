@@ -1,3 +1,5 @@
+// backend/Clients/Usenet/Connections/GlobalOperationLimiter.cs
+using NzbWebDAV.Clients.Usenet.Concurrency;
 using NzbWebDAV.Config;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Logging;
@@ -6,86 +8,103 @@ using Serilog;
 namespace NzbWebDAV.Clients.Usenet.Connections;
 
 /// <summary>
-/// Global operation limiter that enforces per-operation limits with QoS-style ballooning
-/// across ALL providers (not per-provider).
+/// Global operation limiter using a shared PrioritizedSemaphore with streaming reserve.
+/// Streaming (High priority) always has guaranteed slots. Queue (Low priority) can use
+/// the full pool when idle, yields gracefully under contention.
 /// </summary>
 public class GlobalOperationLimiter : IDisposable
 {
-    private readonly Dictionary<ConnectionUsageType, int> _guaranteedLimits;
+    private readonly PrioritizedSemaphore _sharedPool;
+    private readonly SemaphoreSlim _lowPriorityGate;
     private readonly Dictionary<ConnectionUsageType, int> _currentUsage = new();
     private readonly object _lock = new();
-    private readonly SemaphoreSlim _queueSemaphore;
-    private readonly SemaphoreSlim _healthCheckSemaphore;
-    private readonly SemaphoreSlim _streamingSemaphore;
-    private readonly SemaphoreSlim _queueAnalysisSemaphore;
+    private readonly int _totalConnections;
+    private readonly int _streamingReserve;
     private readonly ConfigManager? _configManager;
 
+    public GlobalOperationLimiter(
+        int totalConnections,
+        int streamingReserve,
+        SemaphorePriorityOdds priorityOdds,
+        ConfigManager? configManager = null)
+    {
+        _configManager = configManager;
+        _totalConnections = Math.Max(1, totalConnections);
+        _streamingReserve = Math.Max(1, Math.Min(streamingReserve, _totalConnections - 1));
+
+        _sharedPool = new PrioritizedSemaphore(_totalConnections, _totalConnections, priorityOdds);
+
+        // Low-priority gate: allows up to (total - reserve) concurrent low-priority operations.
+        // This guarantees that 'streamingReserve' slots are always available for High-priority.
+        var lowPriorityMax = _totalConnections - _streamingReserve;
+        _lowPriorityGate = new SemaphoreSlim(lowPriorityMax, lowPriorityMax);
+
+        // Initialize usage tracking for all known types
+        foreach (var type in Enum.GetValues<ConnectionUsageType>())
+        {
+            _currentUsage[type] = 0;
+        }
+
+        Log.Information("[GlobalPool] Initialized: TotalConnections={Total}, StreamingReserve={Reserve}, LowPriorityMax={LowMax}, StreamingPriority={Priority}%",
+            _totalConnections, _streamingReserve, lowPriorityMax, priorityOdds.HighPriorityOdds);
+    }
+
+    // Backwards-compatible constructor for callers that haven't been updated yet
     public GlobalOperationLimiter(
         int maxQueueConnections,
         int maxHealthCheckConnections,
         int totalConnections,
         ConfigManager? configManager = null)
+        : this(
+            totalConnections,
+            streamingReserve: configManager?.GetStreamingReserve() ?? 5,
+            priorityOdds: configManager?.GetStreamingPriority() ?? new SemaphorePriorityOdds { HighPriorityOdds = 80 },
+            configManager)
     {
-        _configManager = configManager;
-
-        // Ensure values are at least 1 to prevent SemaphoreSlim errors
-        maxQueueConnections = Math.Max(1, maxQueueConnections);
-        maxHealthCheckConnections = Math.Max(1, maxHealthCheckConnections);
-
-        var envQueueAnalysis = Environment.GetEnvironmentVariable("QUEUE_ANALYSIS_MAX_CONNECTIONS");
-        var maxQueueAnalysisConnections = int.TryParse(envQueueAnalysis, out var parsedQA) && parsedQA > 0
-            ? parsedQA
-            : Math.Max(2, maxQueueConnections / 2);
-
-        var maxStreamingConnections = Math.Max(1, totalConnections - maxQueueConnections - maxHealthCheckConnections);
-
-        _guaranteedLimits = new Dictionary<ConnectionUsageType, int>
+        // Log deprecation if max-queue-connections was explicitly set
+        if (configManager != null && maxQueueConnections != 1)
         {
-            { ConnectionUsageType.Queue, maxQueueConnections },
-            { ConnectionUsageType.HealthCheck, maxHealthCheckConnections },
-            { ConnectionUsageType.Streaming, maxStreamingConnections },
-            { ConnectionUsageType.BufferedStreaming, maxStreamingConnections },
-            { ConnectionUsageType.Repair, maxHealthCheckConnections }, // Share with HealthCheck
-            { ConnectionUsageType.Analysis, maxHealthCheckConnections }, // Share with HealthCheck
-            { ConnectionUsageType.QueueAnalysis, maxQueueAnalysisConnections },
-            { ConnectionUsageType.Unknown, maxStreamingConnections }
-        };
-
-        // Initialize usage tracking
-        foreach (var type in _guaranteedLimits.Keys)
-        {
-            _currentUsage[type] = 0;
+            Log.Warning("[GlobalPool] api.max-queue-connections is deprecated. Queue now shares the full connection pool with priority-based scheduling. " +
+                        "Use usenet.streaming-reserve (default 5) and usenet.streaming-priority (default 80) instead.");
         }
-
-        // Create semaphores for guaranteed limits (these never change)
-        _queueSemaphore = new SemaphoreSlim(maxQueueConnections, maxQueueConnections);
-        _healthCheckSemaphore = new SemaphoreSlim(maxHealthCheckConnections, maxHealthCheckConnections);
-        _streamingSemaphore = new SemaphoreSlim(maxStreamingConnections, maxStreamingConnections);
-        _queueAnalysisSemaphore = new SemaphoreSlim(maxQueueAnalysisConnections, maxQueueAnalysisConnections);
-
-        // Serilog.Log.Information($"[GlobalOperationLimiter] Initialized: Queue={maxQueueConnections}, HealthCheck={maxHealthCheckConnections}, Streaming={maxStreamingConnections}, Total={totalConnections}");
     }
 
     /// <summary>
-    /// Acquires a permit for the given operation type. Must be released via ReleasePermit.
-    /// CRITICAL: This method respects cancellation tokens to prevent deadlocks when tasks timeout.
+    /// Acquires a permit for the given operation type. Must be released via OperationPermit.Dispose().
     /// </summary>
     public async Task<OperationPermit> AcquirePermitAsync(ConnectionUsageType usageType, CancellationToken cancellationToken = default)
     {
-        var semaphore = GetSemaphoreForType(usageType);
-        var guaranteedLimit = _guaranteedLimits[usageType];
+        var priority = GetPriorityForType(usageType);
 
-        // Extract context to get file/job details
         var context = cancellationToken.GetContext<ConnectionUsageContext>();
         var fileDetails = context.Details;
 
-        LogDebugForType(usageType, "Requesting permit for {UsageType}. Current usage: {UsageBreakdown}. Semaphore available: {SemaphoreAvailable}",
-            usageType, GetUsageBreakdown(), semaphore.CurrentCount);
+        LogDebugForType(usageType, "Requesting permit for {UsageType}. Priority: {Priority}. Current usage: {UsageBreakdown}",
+            usageType, priority, GetUsageBreakdown());
 
         var waitStartTime = DateTime.UtcNow;
 
-        // Wait for the operation-specific semaphore - MUST respect cancellation token to prevent deadlocks!
-        await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // Low-priority callers must first acquire the reserve gate to ensure
+        // streaming always has 'streamingReserve' slots available
+        bool acquiredLowPriorityGate = false;
+        if (priority == SemaphorePriority.Low)
+        {
+            await _lowPriorityGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquiredLowPriorityGate = true;
+        }
+
+        try
+        {
+            // Acquire from the shared pool with appropriate priority
+            await _sharedPool.WaitAsync(priority, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // If shared pool acquisition fails (cancellation), release the low-priority gate
+            if (acquiredLowPriorityGate)
+                _lowPriorityGate.Release();
+            throw;
+        }
 
         var waitElapsed = DateTime.UtcNow - waitStartTime;
 
@@ -101,33 +120,33 @@ public class GlobalOperationLimiter : IDisposable
         {
             if (fileDetails != null)
             {
-                Serilog.Log.Debug("[GlobalPool] Acquired permit for {UsageType} after waiting {WaitSeconds}s. File: {FileDetails}. Current usage: {CurrentUsage}/{GuaranteedLimit}. Total: {UsageBreakdown}",
-                    usageType, waitElapsed.TotalSeconds, fileDetails, currentUsage, guaranteedLimit, GetUsageBreakdown());
+                Log.Debug("[GlobalPool] Acquired permit for {UsageType} after waiting {WaitSeconds:F1}s. File: {FileDetails}. Current usage: {CurrentUsage}. Total: {UsageBreakdown}",
+                    usageType, waitElapsed.TotalSeconds, fileDetails, currentUsage, GetUsageBreakdown());
             }
             else
             {
-                Serilog.Log.Debug("[GlobalPool] Acquired permit for {UsageType} after waiting {WaitSeconds}s. Current usage: {CurrentUsage}/{GuaranteedLimit}. Total: {UsageBreakdown}",
-                    usageType, waitElapsed.TotalSeconds, currentUsage, guaranteedLimit, GetUsageBreakdown());
+                Log.Debug("[GlobalPool] Acquired permit for {UsageType} after waiting {WaitSeconds:F1}s. Current usage: {CurrentUsage}. Total: {UsageBreakdown}",
+                    usageType, waitElapsed.TotalSeconds, currentUsage, GetUsageBreakdown());
             }
         }
         else
         {
             if (fileDetails != null)
             {
-                LogDebugForType(usageType, "Acquired permit for {UsageType}. File: {FileDetails}. Current usage: {CurrentUsage}/{GuaranteedLimit}. Total: {UsageBreakdown}",
-                    usageType, fileDetails, currentUsage, guaranteedLimit, GetUsageBreakdown());
+                LogDebugForType(usageType, "Acquired permit for {UsageType}. File: {FileDetails}. Current usage: {CurrentUsage}. Total: {UsageBreakdown}",
+                    usageType, fileDetails, currentUsage, GetUsageBreakdown());
             }
             else
             {
-                LogDebugForType(usageType, "Acquired permit for {UsageType}. Current usage: {CurrentUsage}/{GuaranteedLimit}. Total: {UsageBreakdown}",
-                    usageType, currentUsage, guaranteedLimit, GetUsageBreakdown());
+                LogDebugForType(usageType, "Acquired permit for {UsageType}. Current usage: {CurrentUsage}. Total: {UsageBreakdown}",
+                    usageType, currentUsage, GetUsageBreakdown());
             }
         }
 
-        return new OperationPermit(this, usageType, semaphore, DateTime.UtcNow, fileDetails);
+        return new OperationPermit(this, usageType, acquiredLowPriorityGate, DateTime.UtcNow, fileDetails);
     }
 
-    private void ReleasePermit(ConnectionUsageType usageType, SemaphoreSlim semaphore, DateTime acquiredAt, string? fileDetails)
+    private void ReleasePermit(ConnectionUsageType usageType, bool releaseLowPriorityGate, DateTime acquiredAt, string? fileDetails)
     {
         var heldDuration = DateTime.UtcNow - acquiredAt;
 
@@ -140,24 +159,27 @@ public class GlobalOperationLimiter : IDisposable
             }
             else
             {
-                Serilog.Log.Error("[GlobalPool] CRITICAL: Attempted to release permit for {UsageType} but usage counter is already 0! This indicates a double-release bug.",
+                Log.Error("[GlobalPool] CRITICAL: Attempted to release permit for {UsageType} but usage counter is already 0!",
                     usageType);
             }
             currentUsage = _currentUsage[usageType];
         }
 
-        semaphore.Release();
+        // Release shared pool first, then low-priority gate
+        _sharedPool.Release();
+        if (releaseLowPriorityGate)
+            _lowPriorityGate.Release();
 
         if (heldDuration.TotalMinutes > 5)
         {
             if (fileDetails != null)
             {
-                Serilog.Log.Warning("[GlobalPool] Released permit for {UsageType} after holding for {HeldMinutes:F1} minutes. File: {FileDetails}. Current usage: {CurrentUsage}. Total: {UsageBreakdown}",
+                Log.Warning("[GlobalPool] Released permit for {UsageType} after holding for {HeldMinutes:F1} minutes. File: {FileDetails}. Current usage: {CurrentUsage}. Total: {UsageBreakdown}",
                     usageType, heldDuration.TotalMinutes, fileDetails, currentUsage, GetUsageBreakdown());
             }
             else
             {
-                Serilog.Log.Warning("[GlobalPool] Released permit for {UsageType} after holding for {HeldMinutes:F1} minutes. Current usage: {CurrentUsage}. Total: {UsageBreakdown}",
+                Log.Warning("[GlobalPool] Released permit for {UsageType} after holding for {HeldMinutes:F1} minutes. Current usage: {CurrentUsage}. Total: {UsageBreakdown}",
                     usageType, heldDuration.TotalMinutes, currentUsage, GetUsageBreakdown());
             }
         }
@@ -189,18 +211,13 @@ public class GlobalOperationLimiter : IDisposable
         }
     }
 
-    private SemaphoreSlim GetSemaphoreForType(ConnectionUsageType type)
+    private static SemaphorePriority GetPriorityForType(ConnectionUsageType type)
     {
         return type switch
         {
-            ConnectionUsageType.Queue => _queueSemaphore,
-            ConnectionUsageType.QueueAnalysis => _queueAnalysisSemaphore,
-            ConnectionUsageType.HealthCheck => _healthCheckSemaphore,
-            ConnectionUsageType.Repair => _healthCheckSemaphore, // Share with HealthCheck
-            ConnectionUsageType.Analysis => _healthCheckSemaphore, // Share with HealthCheck
-            ConnectionUsageType.Streaming => _streamingSemaphore,
-            ConnectionUsageType.BufferedStreaming => _streamingSemaphore,
-            _ => _streamingSemaphore
+            ConnectionUsageType.Streaming => SemaphorePriority.High,
+            ConnectionUsageType.BufferedStreaming => SemaphorePriority.High,
+            _ => SemaphorePriority.Low
         };
     }
 
@@ -220,20 +237,19 @@ public class GlobalOperationLimiter : IDisposable
     {
         if (_configManager == null)
         {
-            Serilog.Log.Debug("[GlobalPool] " + message, args);
+            Log.Debug("[GlobalPool] " + message, args);
             return;
         }
 
         var component = GetComponentForType(usageType);
         if (_configManager.IsDebugLogEnabled(component))
         {
-            Serilog.Log.Debug("[GlobalPool] " + message, args);
+            Log.Debug("[GlobalPool] " + message, args);
         }
     }
 
     private void LogInfoForType(ConnectionUsageType usageType, string message, params object[] args)
     {
-        // HealthCheck and Streaming operations should log at Debug level to reduce noise
         if (usageType == ConnectionUsageType.HealthCheck ||
             usageType == ConnectionUsageType.Repair ||
             usageType == ConnectionUsageType.Analysis ||
@@ -245,8 +261,6 @@ public class GlobalOperationLimiter : IDisposable
             return;
         }
 
-        // Information logs should ALWAYS show regardless of component debug settings
-        // Only Debug logs are filtered by component
         Log.Information("[GlobalPool] " + message, args);
     }
 
@@ -255,6 +269,7 @@ public class GlobalOperationLimiter : IDisposable
         return usageType switch
         {
             ConnectionUsageType.Queue => LogComponents.Queue,
+            ConnectionUsageType.QueueRarProcessing => LogComponents.Queue,
             ConnectionUsageType.QueueAnalysis => LogComponents.Queue,
             ConnectionUsageType.HealthCheck => LogComponents.HealthCheck,
             ConnectionUsageType.Repair => LogComponents.HealthCheck,
@@ -267,42 +282,37 @@ public class GlobalOperationLimiter : IDisposable
 
     public void Dispose()
     {
-        _queueSemaphore.Dispose();
-        _healthCheckSemaphore.Dispose();
-        _streamingSemaphore.Dispose();
-        _queueAnalysisSemaphore.Dispose();
+        _sharedPool.Dispose();
+        _lowPriorityGate.Dispose();
         GC.SuppressFinalize(this);
     }
 
     /// <summary>
     /// Represents a permit to perform an operation. Must be disposed to release the permit.
-    /// CRITICAL: This is a class (reference type) to prevent struct copying issues that cause permit leaks.
     /// </summary>
     public sealed class OperationPermit : IDisposable
     {
         private readonly GlobalOperationLimiter _limiter;
         private readonly ConnectionUsageType _usageType;
-        private readonly SemaphoreSlim _semaphore;
+        private readonly bool _releaseLowPriorityGate;
         private readonly DateTime _acquiredAt;
         private readonly string? _fileDetails;
-        private int _disposed; // 0 = not disposed, 1 = disposed
+        private int _disposed;
 
-        internal OperationPermit(GlobalOperationLimiter limiter, ConnectionUsageType usageType, SemaphoreSlim semaphore, DateTime acquiredAt, string? fileDetails)
+        internal OperationPermit(GlobalOperationLimiter limiter, ConnectionUsageType usageType, bool releaseLowPriorityGate, DateTime acquiredAt, string? fileDetails)
         {
             _limiter = limiter;
             _usageType = usageType;
-            _semaphore = semaphore;
+            _releaseLowPriorityGate = releaseLowPriorityGate;
             _acquiredAt = acquiredAt;
             _fileDetails = fileDetails;
         }
 
         public void Dispose()
         {
-            // Thread-safe dispose guard: only release permit once
-            // Prevents double-dispose bugs that caused Queue permit leaks
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
-                _limiter.ReleasePermit(_usageType, _semaphore, _acquiredAt, _fileDetails);
+                _limiter.ReleasePermit(_usageType, _releaseLowPriorityGate, _acquiredAt, _fileDetails);
             }
         }
     }

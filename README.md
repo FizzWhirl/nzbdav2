@@ -116,6 +116,14 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.1 (2026-04-13)
+*   **Feature**: Hybrid connection pool — replace hard-partitioned connection semaphores with priority-based shared pool (`PrioritizedSemaphore`). Queue processing uses full connection capacity when not streaming; streaming gets guaranteed reserve slots (configurable via `usenet.streaming-reserve`, default 5) and priority scheduling (configurable via `usenet.streaming-priority`, default 80%).
+*   **Feature**: Buffered multi-connection streaming during RAR header parsing via new `QueueRarProcessing` context — RAR end-of-archive seeks now pre-fetch segments instead of one-at-a-time lazy fetches.
+*   **Feature**: Per-queue-item article caching — segments fetched in Step 1 (first-segment identification) are cached to temp files and reused in Step 2 (RAR header parsing) without additional network round-trips.
+*   **Feature**: Queue concurrency caps raised from 1 to `GetMaxDownloadConnections() + 5` — the `PrioritizedSemaphore` is the real gate now.
+*   **Config**: New settings: `usenet.streaming-reserve` (default 5), `usenet.streaming-priority` (default 80), `usenet.max-download-connections` (default min(totalPooled, 15)).
+*   **Config**: `api.max-queue-connections` deprecated — logs warning if explicitly set; no longer controls a semaphore.
+
 ## v0.7.0 (2026-04-12)
 *   **Feature**: Shared stream system — multiple concurrent HTTP requests for the same file now share a single `BufferedSegmentStream` instead of each creating their own. When Stremio sends parallel probe + streaming requests, only the first creates the underlying Usenet stream; subsequent requests attach as readers to the same ring buffer. Includes configurable grace period (default 10s) to keep the stream alive between reader transitions, and configurable buffer size (default 32MB).
 *   **Feature**: Concurrent stream cap — limits how many `BufferedSegmentStream` instances can exist simultaneously (configurable via `usenet.max-concurrent-buffered-streams`, default 2). Prevents retry storms from spawning unbounded streams that exhaust memory.

@@ -18,6 +18,7 @@ namespace NzbWebDAV.Clients.Usenet;
 public class UsenetStreamingClient
 {
     private readonly CachingNntpClient _client;
+    private ArticleCachingNntpClient? _articleCache;
     private readonly WebsocketManager _websocketManager;
     private readonly ConfigManager _configManager;
     private readonly BandwidthService _bandwidthService;
@@ -309,9 +310,31 @@ public class UsenetStreamingClient
         return GetFileStream(segmentIds, fileSize, concurrentConnections, usageContext, useBufferedStreaming: false, segmentSizes: segmentSizes);
     }
 
+    /// <summary>
+    /// Enables article caching for the duration of a queue item's processing.
+    /// Cached segments are reused across steps (e.g., first-segment fetch in Step 1
+    /// reused by RAR header parsing in Step 2). Dispose to clean up temp files.
+    /// </summary>
+    public IDisposable EnableArticleCaching()
+    {
+        var cache = new ArticleCachingNntpClient(_client, leaveOpen: true);
+        _articleCache = cache;
+        return new DisposableAction(() =>
+        {
+            _articleCache = null;
+            cache.Dispose();
+        });
+    }
+
+    private class DisposableAction(Action action) : IDisposable
+    {
+        public void Dispose() => action();
+    }
+
     public Task<YencHeaderStream> GetSegmentStreamAsync(string segmentId, bool includeHeaders, CancellationToken ct)
     {
-        return _client.GetSegmentStreamAsync(segmentId, includeHeaders, ct);
+        INntpClient client = _articleCache ?? (INntpClient)_client;
+        return client.GetSegmentStreamAsync(segmentId, includeHeaders, ct);
     }
 
     public Task<long> GetFileSizeAsync(NzbFile file, CancellationToken cancellationToken)

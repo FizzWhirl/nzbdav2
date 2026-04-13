@@ -110,6 +110,7 @@ public class QueueManager : IDisposable
         Log.Information("[QueueManager] ProcessQueueAsync loop started");
         while (!ct.IsCancellationRequested)
         {
+            IDisposable? articleCacheScope = null;
             try
             {
                 // get the next queue-item from the database
@@ -149,6 +150,7 @@ public class QueueManager : IDisposable
                     queueItem.Id, queueItem.JobName, queueItem.Priority, queueItem.PauseUntil);
                 // process the queue-item
                 using var queueItemCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                articleCacheScope = _usenetClient.EnableArticleCaching();
                 await LockAsync(() =>
                 {
                     Log.Debug("[QueueManager] Beginning processing task for queue item: {QueueItemId}", queueItem.Id);
@@ -192,6 +194,7 @@ public class QueueManager : IDisposable
             }
             finally
             {
+                articleCacheScope?.Dispose();
                 Log.Debug("[QueueManager] Clearing in-progress queue item");
                 await LockAsync(() => { _inProgressQueueItem = null; }).ConfigureAwait(false);
                 Log.Debug("[QueueManager] Loop iteration complete, checking for next item...");

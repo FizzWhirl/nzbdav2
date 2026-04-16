@@ -36,9 +36,6 @@ public static class FetchFirstSegmentsStep
         var startTime = DateTimeOffset.UtcNow;
         var completed = 0;
         var failed = 0;
-        
-        // Track critical failures to ensure they aren't masked by cancellations
-        var criticalFailure = (Exception?)null;
 
         var result = await nzbFiles
             .Where(x => x.Segments.Count > 0)
@@ -46,13 +43,6 @@ public static class FetchFirstSegmentsStep
                 var fileStart = DateTimeOffset.UtcNow;
                 try
                 {
-                    // If we already hit a critical failure (like Missing Articles), don't start new work
-                    if (criticalFailure != null) 
-                    {
-                        // Throw OperationCanceledException to skip this item gracefully in the pipeline
-                        throw new OperationCanceledException("Skipping due to critical failure in another task");
-                    }
-
                     var fileResult = await FetchFirstSegment(x, client, configManager, cancellationToken).ConfigureAwait(false);
                     var duration = (DateTimeOffset.UtcNow - fileStart).TotalSeconds;
                     
@@ -64,35 +54,26 @@ public static class FetchFirstSegmentsStep
                     }
                     return new { Result = fileResult, Duration = duration, Name = x.FileName };
                 }
-                catch (UsenetArticleNotFoundException ex)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // Prioritize missing articles as the critical failure reason
-                    Interlocked.CompareExchange(ref criticalFailure, ex, null);
-                    Interlocked.Increment(ref failed);
-                    logger.Warning("Failed to fetch first segment for {FileName}: {Error}", x.FileName, ex.Message);
+                    // Parent cancellation — propagate to abort all work
                     throw;
                 }
                 catch (Exception ex)
                 {
                     Interlocked.Increment(ref failed);
                     logger.Warning("Failed to fetch first segment for {FileName}: {Error}", x.FileName, ex.Message);
-                    throw;
+                    return null;
                 }
             })
             .WithConcurrencyAsync(maxConcurrency)
             .GetAllAsync(cancellationToken, progress).ConfigureAwait(false);
 
-        // If we had a critical failure, rethrow it now to ensure it bubbles up correctly
-        if (criticalFailure != null)
-        {
-            logger.Error("Rethrowing critical failure: {Message}", criticalFailure.Message);
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(criticalFailure).Throw();
-        }
-
         var elapsed = (DateTimeOffset.UtcNow - startTime).TotalSeconds;
         logger.Information("Completed {Completed}/{Total} files in {Elapsed:F1}s ({Failed} failed)",
             completed, totalFiles, elapsed, failed);
-
+        // Filter out failed files (nulls)
+        result = result.Where(x => x != null).ToList();
         // Log the slowest files to help identify bottlenecks
         var slowFiles = result
             .OrderByDescending(x => x.Duration)
@@ -156,26 +137,15 @@ public static class FetchFirstSegmentsStep
                 ? buffer.AsSpan(0, totalRead).ToArray()
                 : buffer;
 
-            // Perform smart analysis to get total file size accurately and quickly
-            // This avoids slow scans later in RarProcessor
-            // OPTIMIZATION: Skip smart analysis for RAR/Par2 files - they get sizes from Par2 descriptors
-            // This prevents connection exhaustion during large NZB imports with many RAR parts
+            // Skip smart analysis during FetchFirstSegments to avoid Queue permit contention.
+            // Smart analysis STAT requests need Queue permits, but we're already holding one for the stream.
+            // With maxQueueConnections tasks all holding stream permits, STATs deadlock waiting for permits.
+            // Step 1d handles missing file sizes using QueueAnalysis permits (separate pool).
+            // NzbFileStream handles missing segment sizes via lazy InterpolationSearch on demand.
             long[]? smartSizes = null;
-            var isBenchmark = Environment.GetEnvironmentVariable("BENCHMARK") == "true" || Environment.GetEnvironmentVariable("BENCHMARK") == "1";
-            var isRarOrPar2 = FilenameUtil.IsRarFile(nzbFile.FileName) ||
-                              nzbFile.FileName.EndsWith(".par2", StringComparison.OrdinalIgnoreCase);
-
-            if (nzbFile.Segments.Count > 1 && !isBenchmark && !isRarOrPar2)
+            if (nzbFile.Segments.Count == 1)
             {
-                try {
-                    smartSizes = await client.AnalyzeNzbAsync(nzbFile.GetSegmentIds(), 1, null, timeoutCts.Token, useSmartAnalysis: true).ConfigureAwait(false);
-                } catch (Exception ex) {
-                    logger.Warning("Smart analysis failed for {FileName}: {Message}", nzbFile.FileName, ex.Message);
-                }
-            }
-            else if (nzbFile.Segments.Count == 1)
-            {
-                smartSizes = new[] { stream.Header!.PartSize };
+                smartSizes = new[] { stream.Header?.PartSize ?? 0 };
             }
 
             var elapsed = (DateTimeOffset.UtcNow - startTime).TotalSeconds;
@@ -213,13 +183,6 @@ public static class FetchFirstSegmentsStep
             var elapsed = (DateTimeOffset.UtcNow - startTime).TotalSeconds;
             logger.Debug("Missing first segment for {FileName} (took {Elapsed:F2}s)",
                 nzbFile.FileName, elapsed);
-
-            // Fail fast for important files (RARs, Videos, etc.) as we cannot stream them without headers.
-            if (FilenameUtil.IsImportantFileType(nzbFile.FileName))
-            {
-                Log.Error($"[FetchFirst] Critical file {nzbFile.FileName} is missing first segment. Failing job.");
-                throw;
-            }
 
             return new NzbFileWithFirstSegment
             {

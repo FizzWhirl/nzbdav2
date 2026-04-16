@@ -62,17 +62,38 @@ public class DatabaseStoreNzbFile(
             nzbAnalysisService.TriggerAnalysisInBackground(file.Id, file.SegmentIds);
         }
 
-        Serilog.Log.Debug("[DatabaseStoreNzbFile] Opening stream for {FileName} ({Id})", Name, id);
+        // Check if this is a lightweight analysis request (from ffprobe via MediaAnalysisService)
+        var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
+        var concurrentConnections = isAnalysisMode ? 2 : configManager.GetTotalStreamingConnections();
+        var bufferSize = isAnalysisMode ? 4 : configManager.GetStreamBufferSize();
 
-        // Use total streaming connections for worker count - the global semaphore limits actual concurrent fetches
-        // This ensures a single stream can utilize the full connection pool
+        if (isAnalysisMode)
+        {
+            // Create an analysis usage context with limited resources
+            usageContext = new ConnectionUsageContext(
+                ConnectionUsageType.Analysis,
+                new ConnectionUsageDetails
+                {
+                    Text = davNzbFile.Path,
+                    JobName = davNzbFile.Name,
+                    DavItemId = davNzbFile.Id
+                }
+            );
+            Serilog.Log.Debug("[DatabaseStoreNzbFile] Analysis mode: Opening lightweight stream for {FileName} ({Id}) (workers={Workers}, buffer={Buffer})",
+                Name, id, concurrentConnections, bufferSize);
+        }
+        else
+        {
+            Serilog.Log.Debug("[DatabaseStoreNzbFile] Opening stream for {FileName} ({Id})", Name, id);
+        }
+
         return usenetClient.GetFileStream(
             file.SegmentIds,
             FileSize,
-            configManager.GetTotalStreamingConnections(),
+            concurrentConnections,
             usageContext,
             configManager.UseBufferedStreaming(),
-            configManager.GetStreamBufferSize(),
+            bufferSize,
             file.GetSegmentSizes(),
             file.SegmentFallbacks
         );

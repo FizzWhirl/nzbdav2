@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -277,25 +278,129 @@ public class QueueItemProcessor(
         Log.Information("[QueueItemProcessor] Step 2 complete: File processing finished for {JobName}. Results: {ResultCount}, Elapsed: {ElapsedSeconds}s",
             queueItem.JobName, fileProcessingResults.Count, step2Elapsed.TotalSeconds);
 
-        // step 3 -- Optionally check full article existence
+        // step 3 -- Per-file smart article existence probe (checks ~3 segments per file).
+        //           Running per-file ensures the uniformity check works (segment sizes are uniform within a file).
+        //           Detects DMCA/takedown fast. For partial missing articles, ffprobe in Step 5 is the definitive check.
         var checkedFullHealth = false;
+        var triggerMediaAnalysis = false;
+        var probePassedNames = new ConcurrentBag<string>();
+        var dmcaFileNames = new ConcurrentBag<string>();
         if (configManager.IsEnsureArticleExistenceEnabled())
         {
-            var articlesToCheck = fileInfos
-                .Where(x => x.IsRar || FilenameUtil.IsImportantFileType(x.FileName))
-                .SelectMany(x => x.NzbFile.GetSegmentIds())
-                .ToList();
-            Log.Information("[QueueItemProcessor] Step 3: Starting article existence check for {JobName}. Articles: {ArticleCount} (progress 100+)",
-                queueItem.JobName, articlesToCheck.Count);
             var step3StartTime = DateTime.UtcNow;
+            var fileSegments = fileProcessingResults
+                .Select(GetResultSegmentIdsAndName)
+                .Where(x => x.SegmentIds.Length > 0)
+                .ToList();
+
+            var totalSegmentCount = fileSegments.Sum(x => x.SegmentIds.Length);
+
+            Log.Information("[QueueItemProcessor] Step 3: Starting per-file smart article probe for {JobName}. Files: {FileCount}, Articles: {ArticleCount} (progress 100+)",
+                queueItem.JobName, fileSegments.Count, totalSegmentCount);
+
             var part3Progress = progress
                 .Offset(100)
-                .ToPercentage(articlesToCheck.Count);
-            await usenetClient.CheckAllSegmentsAsync(articlesToCheck, concurrency, part3Progress, queueCt).ConfigureAwait(false);
+                .ToPercentage(totalSegmentCount);
+
+            var processedSegments = 0;
+            var probeFailures = 0;
+            var dmcaCount = 0;
+
+            // 180s overall backstop, 15s per-file timeout, 8 concurrent probes
+            using var overallProbeCts = CancellationTokenSource.CreateLinkedTokenSource(queueCt);
+            overallProbeCts.CancelAfter(TimeSpan.FromSeconds(180));
+
+            try
+            {
+                await Parallel.ForEachAsync(
+                    fileSegments,
+                    new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = overallProbeCts.Token },
+                    async (file, ct) =>
+                    {
+                        // Retry once on transient failures (connection errors trigger full-scan fallback which may timeout)
+                        for (var attempt = 0; attempt < 2; attempt++)
+                        {
+                            using var fileCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                            fileCts.CancelAfter(TimeSpan.FromSeconds(15));
+
+                            try
+                            {
+                                await usenetClient.AnalyzeNzbAsync(file.SegmentIds, concurrency, null, fileCts.Token, useSmartAnalysis: true).ConfigureAwait(false);
+                                probePassedNames.Add(file.FileName);
+                                break; // Success — exit retry loop
+                            }
+                            catch (UsenetArticleNotFoundException)
+                            {
+                                Interlocked.Increment(ref probeFailures);
+                                break; // Definitive — no retry
+                            }
+                            catch (NonRetryableDownloadException)
+                            {
+                                Interlocked.Increment(ref dmcaCount);
+                                dmcaFileNames.Add(file.FileName);
+                                break; // Definitive DMCA — no retry, but continue probing other files
+                            }
+                            catch (OperationCanceledException) when (!queueCt.IsCancellationRequested)
+                            {
+                                if (attempt == 0)
+                                {
+                                    Log.Debug("[QueueItemProcessor] Step 3: Retrying probe for {FileName} after timeout", file.FileName);
+                                    continue; // Retry once
+                                }
+                                Interlocked.Increment(ref probeFailures);
+                            }
+                            catch (Exception ex)
+                            {
+                                if (attempt == 0)
+                                {
+                                    Log.Debug("[QueueItemProcessor] Step 3: Retrying probe for {FileName} after error: {Error}", file.FileName, ex.Message);
+                                    continue; // Retry once
+                                }
+                                Log.Warning(ex, "[QueueItemProcessor] Step 3: Probe failed for {FileName} after retry", file.FileName);
+                                Interlocked.Increment(ref probeFailures);
+                            }
+                        }
+
+                        var processed = Interlocked.Add(ref processedSegments, file.SegmentIds.Length);
+                        ((IProgress<int>?)part3Progress)?.Report(processed);
+                    }).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!queueCt.IsCancellationRequested)
+            {
+                Log.Warning("[QueueItemProcessor] Step 3: Overall probe timeout (180s) for {JobName}. Will use ffprobe to verify file integrity.",
+                    queueItem.JobName);
+                triggerMediaAnalysis = true;
+            }
+
+            var dmcaCountFinal = Volatile.Read(ref dmcaCount);
+            if (dmcaCountFinal > 0)
+            {
+                if (dmcaCountFinal >= fileSegments.Count)
+                {
+                    Log.Error("[QueueItemProcessor] Step 3: All {DmcaCount} files confirmed DMCA/takedown for {JobName}",
+                        dmcaCountFinal, queueItem.JobName);
+                    throw new NonRetryableDownloadException($"DMCA/takedown pattern detected — all {dmcaCountFinal} files are taken down for {queueItem.JobName}");
+                }
+
+                Log.Warning("[QueueItemProcessor] Step 3: {DmcaCount}/{FileCount} files confirmed DMCA/takedown for {JobName}. Continuing with remaining files.",
+                    dmcaCountFinal, fileSegments.Count, queueItem.JobName);
+                triggerMediaAnalysis = true; // Enter Step 5 to clean up DMCA'd files from DB
+            }
+
+            if (probeFailures > 0)
+            {
+                Log.Warning("[QueueItemProcessor] Step 3: {FailCount}/{FileCount} files had probe issues for {JobName}. Will run ffprobe to verify integrity.",
+                    probeFailures, fileSegments.Count, queueItem.JobName);
+                triggerMediaAnalysis = true;
+            }
+            else if (!triggerMediaAnalysis)
+            {
+                checkedFullHealth = true;
+            }
+
             var step3Elapsed = DateTime.UtcNow - step3StartTime;
-            Log.Information("[QueueItemProcessor] Step 3 complete: Article existence check finished for {JobName}. Elapsed: {ElapsedSeconds}s",
-                queueItem.JobName, step3Elapsed.TotalSeconds);
-            checkedFullHealth = true;
+            Log.Information("[QueueItemProcessor] Step 3 complete: Per-file article probe finished for {JobName}. FullHealth: {FullHealth}, TriggerAnalysis: {TriggerAnalysis}, Failures: {Failures}/{Total}, DMCA: {DmcaCount}, Elapsed: {Elapsed}s",
+                queueItem.JobName, checkedFullHealth, triggerMediaAnalysis, probeFailures, fileSegments.Count, dmcaCountFinal, step3Elapsed.TotalSeconds);
         }
         else
         {
@@ -305,6 +410,7 @@ public class QueueItemProcessor(
         // Scope 2: Final DB update
         Log.Information("[QueueItemProcessor] Step 4: Starting database update for {JobName}...", queueItem.JobName);
         var step4StartTime = DateTime.UtcNow;
+        Guid? mountFolderId = null;
         using (var scope = scopeFactory.CreateScope())
         {
             var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
@@ -314,6 +420,7 @@ public class QueueItemProcessor(
                 Log.Debug("[QueueItemProcessor] Step 4a: Creating category and mount folders for {JobName}...", queueItem.JobName);
                 var categoryFolder = await GetOrCreateCategoryFolder(dbClient).ConfigureAwait(false);
                 var mountFolder = await CreateMountFolder(dbClient, categoryFolder, existingMountFolder, duplicateNzbBehavior).ConfigureAwait(false);
+                mountFolderId = mountFolder.Id;
 
                 Log.Debug("[QueueItemProcessor] Step 4b: Running aggregators for {JobName}...", queueItem.JobName);
                 new RarAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
@@ -347,6 +454,136 @@ public class QueueItemProcessor(
         var step4Elapsed = DateTime.UtcNow - step4StartTime;
         Log.Information("[QueueItemProcessor] Step 4 complete: Database update finished for {JobName}. Elapsed: {ElapsedSeconds}s",
             queueItem.JobName, step4Elapsed.TotalSeconds);
+
+        // step 5 -- Run ffprobe to verify media integrity when health check found missing articles.
+        //           Corrupt files are removed from the database so Radarr/Sonarr won't import them.
+        if (triggerMediaAnalysis)
+        {
+            Log.Information("[QueueItemProcessor] Step 5: Running media analysis (ffprobe) for files in {JobName} to verify playability...",
+                queueItem.JobName);
+
+            using var analysisScope = scopeFactory.CreateScope();
+            var dbContext = analysisScope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
+            var mediaAnalysis = analysisScope.ServiceProvider.GetRequiredService<MediaAnalysisService>();
+
+            var allItems = await dbContext.Items
+                .Where(i => i.ParentId == mountFolderId && i.Type != DavItem.ItemType.Directory)
+                .Select(i => new { i.Id, i.Name })
+                .ToListAsync().ConfigureAwait(false);
+
+            // Only run ffprobe on media files (video/audio) that didn't pass the Step 3 smart probe
+            // and aren't confirmed DMCA'd (those are removed from DB directly)
+            var passedProbeSet = new HashSet<string>(probePassedNames, StringComparer.OrdinalIgnoreCase);
+            var dmcaNameSet = new HashSet<string>(dmcaFileNames, StringComparer.OrdinalIgnoreCase);
+            var mediaFiles = allItems.Where(i => FilenameUtil.IsMediaFile(i.Name)).ToList();
+
+            // Remove DMCA'd files from the database — they're confirmed dead
+            if (dmcaNameSet.Count > 0)
+            {
+                var dmcaItemIds = allItems.Where(i => dmcaNameSet.Contains(i.Name)).Select(i => i.Id).ToList();
+                if (dmcaItemIds.Count > 0)
+                {
+                    var dmcaDeleted = await dbContext.Items
+                        .Where(i => dmcaItemIds.Contains(i.Id))
+                        .ExecuteDeleteAsync().ConfigureAwait(false);
+                    Log.Information("[QueueItemProcessor] Step 5: Removed {Deleted} DMCA/takedown files from {JobName}",
+                        dmcaDeleted, queueItem.JobName);
+                }
+            }
+
+            var filesToCheck = mediaFiles.Where(i => !passedProbeSet.Contains(i.Name) && !dmcaNameSet.Contains(i.Name)).ToList();
+
+            Log.Information("[QueueItemProcessor] Step 5: Checking {CheckCount}/{MediaCount} media files with ffprobe (skipping {SkipCount} that passed Step 3 probe)",
+                filesToCheck.Count, mediaFiles.Count, mediaFiles.Count - filesToCheck.Count);
+
+            if (filesToCheck.Count == 0)
+            {
+                Log.Information("[QueueItemProcessor] Step 5: All media files passed Step 3 probe — no ffprobe needed for {JobName}", queueItem.JobName);
+            }
+            else
+            {
+                var corruptIds = new ConcurrentBag<Guid>();
+                var analysisSemaphore = new SemaphoreSlim(2, 2); // Run up to 2 ffprobe analyses in parallel
+
+                await Parallel.ForEachAsync(filesToCheck, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = queueCt }, async (item, ct) =>
+                {
+                    await analysisSemaphore.WaitAsync(ct).ConfigureAwait(false);
+                    try
+                    {
+                        Log.Debug("[QueueItemProcessor] Step 5: Analyzing {FileName}...", item.Name);
+
+                        // Show in active analyses UI via websocket
+                        websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress,
+                            $"{item.Id}|start|{item.Name}|{queueItem.JobName}");
+
+                        // Suppress NzbAnalysisService from being triggered by the WebDAV GET that ffprobe makes.
+                        using var suppression = NzbAnalysisService.SuppressAnalysisFor(item.Id);
+                        var result = await mediaAnalysis.AnalyzeMediaAsync(item.Id, ct).ConfigureAwait(false);
+
+                        // Report result to active analyses UI
+                        string historyResult;
+                        string historyDetails;
+                        switch (result)
+                        {
+                            case MediaAnalysisResult.Failed:
+                                Log.Warning("[QueueItemProcessor] Step 5: {FileName} failed media analysis — marking for removal", item.Name);
+                                corruptIds.Add(item.Id);
+                                websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|error");
+                                historyResult = "Failed";
+                                historyDetails = "Media integrity check failed — file corrupt or unplayable";
+                                break;
+                            case MediaAnalysisResult.Timeout:
+                                Log.Warning("[QueueItemProcessor] Step 5: {FileName} timed out during analysis — keeping file", item.Name);
+                                websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
+                                historyResult = "Pending";
+                                historyDetails = "Media integrity check timed out — file kept for retry";
+                                break;
+                            default:
+                                Log.Information("[QueueItemProcessor] Step 5: {FileName} passed media analysis", item.Name);
+                                websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
+                                historyResult = "Success";
+                                historyDetails = "Media integrity check passed";
+                                break;
+                        }
+
+                        // Save to analysis history (use lock for EF Core DbContext thread safety)
+                        lock (dbContext)
+                        {
+                            dbContext.AnalysisHistoryItems.Add(new AnalysisHistoryItem
+                            {
+                                DavItemId = item.Id,
+                                FileName = item.Name,
+                                JobName = queueItem.JobName,
+                                Result = historyResult,
+                                Details = historyDetails,
+                                CreatedAt = DateTimeOffset.UtcNow
+                            });
+                        }
+                        // SaveChanges after each to avoid holding data in memory for large batches
+                        lock (dbContext) { dbContext.SaveChanges(); }
+                    }
+                    finally
+                    {
+                        analysisSemaphore.Release();
+                    }
+                }).ConfigureAwait(false);
+
+                if (!corruptIds.IsEmpty)
+                {
+                    var corruptIdList = corruptIds.ToList();
+                    var deleted = await dbContext.Items
+                        .Where(i => corruptIdList.Contains(i.Id))
+                        .ExecuteDeleteAsync().ConfigureAwait(false);
+                    Log.Information("[QueueItemProcessor] Step 5 complete: Removed {Deleted} corrupt files from {JobName}. {Healthy}/{Total} media files remain.",
+                        deleted, queueItem.JobName, filesToCheck.Count - corruptIdList.Count, filesToCheck.Count);
+                }
+                else
+                {
+                    Log.Information("[QueueItemProcessor] Step 5 complete: All {Count} checked media files passed analysis for {JobName}",
+                        filesToCheck.Count, queueItem.JobName);
+                }
+            }
+        }
     }
 
     private IEnumerable<BaseProcessor> GetFileProcessors
@@ -660,4 +897,15 @@ public class QueueItemProcessor(
             Log.Debug("Could not refresh monitored downloads for Arr instance: {ArrHost}. {Message}", arrClient.Host, e.Message);
         }
     }
+
+    private static (string[] SegmentIds, string FileName) GetResultSegmentIdsAndName(BaseProcessor.Result result) => result switch
+    {
+        FileProcessor.Result fp => (fp.NzbFile.GetSegmentIds(), fp.FileName),
+        RarProcessor.Result rp => (rp.StoredFileSegments.SelectMany(s => s.NzbFile.GetSegmentIds()).ToArray(),
+            rp.StoredFileSegments.FirstOrDefault()?.ArchiveName ?? "unknown.rar"),
+        SevenZipProcessor.Result sz => (sz.SevenZipFiles.SelectMany(f => f.DavMultipartFileMeta.FileParts.SelectMany(p => p.SegmentIds)).ToArray(),
+            sz.SevenZipFiles.FirstOrDefault()?.PathWithinArchive ?? "unknown.7z"),
+        MultipartMkvProcessor.Result mkv => (mkv.Parts.SelectMany(p => p.SegmentIds).ToArray(), mkv.Filename),
+        _ => ([], "unknown")
+    };
 }

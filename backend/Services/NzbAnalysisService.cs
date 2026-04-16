@@ -32,14 +32,27 @@ public class NzbAnalysisService(
 {
     private static readonly ConcurrentDictionary<Guid, AnalysisInfo> _activeAnalyses = new();
     private static readonly ConcurrentDictionary<Guid, int> _ffprobeRetryAttempts = new();
+    private static readonly ConcurrentDictionary<Guid, byte> _suppressedFileIds = new();
     private readonly SemaphoreSlim _concurrencyLimiter = new(configManager.GetMaxConcurrentAnalyses(), configManager.GetMaxConcurrentAnalyses());
 
     public IEnumerable<AnalysisInfo> GetActiveAnalyses() => _activeAnalyses.Values;
+
+    /// <summary>
+    /// Suppresses NzbAnalysisService from being triggered for the given file ID.
+    /// Used by Step 5 (QueueItemProcessor) to prevent the WebDAV GET handler from
+    /// spawning duplicate background analyses when ffprobe reads files via HTTP.
+    /// </summary>
+    public static IDisposable SuppressAnalysisFor(Guid fileId)
+    {
+        _suppressedFileIds.TryAdd(fileId, 0);
+        return new SuppressToken(fileId);
+    }
 
     public void TriggerAnalysisInBackground(Guid fileId, string[]? segmentIds, bool force = false)
     {
         if (!force && !configManager.IsAnalysisEnabled()) return;
         if (_activeAnalyses.ContainsKey(fileId)) return;
+        if (_suppressedFileIds.ContainsKey(fileId)) return;
         _ = Task.Run(async () => await PerformAnalysis(fileId, segmentIds, force).ConfigureAwait(false));
     }
 
@@ -216,5 +229,10 @@ public class NzbAnalysisService(
         {
             Log.Error(ex, "[NzbAnalysisService] Failed to save analysis history for {FileName}", fileName);
         }
+    }
+
+    private sealed class SuppressToken(Guid fileId) : IDisposable
+    {
+        public void Dispose() => _suppressedFileIds.TryRemove(fileId, out _);
     }
 }

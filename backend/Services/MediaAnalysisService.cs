@@ -1,7 +1,8 @@
 using System.Diagnostics;
-using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using NzbWebDAV.Database;
+using NzbWebDAV.Database.Models;
 using Serilog;
 
 namespace NzbWebDAV.Services;
@@ -25,9 +26,7 @@ public class MediaAnalysisService(
         var item = await dbContext.Items.FindAsync([davItemId], ct).ConfigureAwait(false);
         if (item == null) return MediaAnalysisResult.Failed;
 
-        // 2. Construct URL — use the WebDAV HTTP endpoint with X-Analysis-Mode header.
-        // The header tells DatabaseStoreNzbFile to use limited workers (2) instead of full pool (50),
-        // preventing OOM while still allowing ffprobe to seek via HTTP range requests (needed for moov atoms).
+        // 2. Construct URL for ffprobe (still needed for metadata)
         var encodedPath = string.Join("/", item.Path.Split('/').Select(Uri.EscapeDataString));
         var webDavUrl = $"http://localhost:8080{encodedPath}";
 
@@ -61,9 +60,22 @@ public class MediaAnalysisService(
         else
         {
              item.MediaInfo = result;
-             item.IsCorrupted = false;
-             item.CorruptionReason = null;
-             analysisResult = MediaAnalysisResult.Success;
+
+             // Metadata probe passed — now run decode checks at 75% and 90% to verify integrity
+             var integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, ct).ConfigureAwait(false);
+             if (integrityErrors != null)
+             {
+                 Log.Warning("[MediaAnalysis] Decode check failed for {Name}: {Errors}", item.Name, integrityErrors);
+                 item.IsCorrupted = true;
+                 item.CorruptionReason = $"Decode integrity check failed: {integrityErrors}";
+                 analysisResult = MediaAnalysisResult.Failed;
+             }
+             else
+             {
+                 item.IsCorrupted = false;
+                 item.CorruptionReason = null;
+                 analysisResult = MediaAnalysisResult.Success;
+             }
         }
 
         if (analysisResult != MediaAnalysisResult.Timeout)
@@ -102,7 +114,7 @@ public class MediaAnalysisService(
             var outputTask = process.StandardOutput.ReadToEndAsync(ct);
             var errorTask = process.StandardError.ReadToEndAsync(ct);
 
-            // Wait for exit with timeout (90 seconds — allows time for moov atom seeks on large files)
+            // Wait for exit with timeout (90 seconds)
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(90));
 
@@ -135,6 +147,108 @@ public class MediaAnalysisService(
         {
             Log.Error(ex, "[MediaAnalysis] Failed to run ffprobe");
             return (null, timedOut: false);
+        }
+    }
+
+    /// <summary>
+    /// Decodes 5s at 75% and 90% of the file to verify data integrity.
+    /// Two check points near the end catch truncated files where data is only partially available.
+    /// </summary>
+    private async Task<string?> RunDecodeCheckAsync(string url, string ffprobeJson, string fileName, CancellationToken ct)
+    {
+        double duration;
+        try
+        {
+            using var doc = JsonDocument.Parse(ffprobeJson);
+            var durationStr = doc.RootElement
+                .GetProperty("format")
+                .GetProperty("duration")
+                .GetString();
+            if (!double.TryParse(durationStr, System.Globalization.CultureInfo.InvariantCulture, out duration) || duration < 30)
+            {
+                Log.Debug("[MediaAnalysis] Skipping decode check — duration too short or unknown ({Duration}s)", durationStr);
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[MediaAnalysis] Could not parse duration from ffprobe output — skipping decode check");
+            return null;
+        }
+
+        // Check at 75% and 90% — catches files truncated at different points
+        double[] checkPoints = [0.75, 0.90];
+        foreach (var pct in checkPoints)
+        {
+            var seekPosition = (duration * pct).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+            var label = $"{(int)(pct * 100)}%";
+            Log.Information("[MediaAnalysis] Decode check ({Label}): -ss {SeekPos} -t 5 for {Name}", label, seekPosition, fileName);
+
+            var result = await RunSingleDecodeAsync(url, seekPosition, label, fileName, ct).ConfigureAwait(false);
+            if (result != null)
+                return result;
+        }
+
+        return null;
+    }
+
+    private async Task<string?> RunSingleDecodeAsync(string url, string seekPosition, string label, string fileName, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg",
+                    Arguments = $"-headers \"X-Analysis-Mode: true\r\n\" -ss {seekPosition} -i \"{url}\" -t 5 -v error -f null -",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+
+            process.Start();
+
+            var errorTask = process.StandardError.ReadToEndAsync(ct);
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(90));
+
+            try
+            {
+                await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                try { process.Kill(); } catch { /* already exited */ }
+                sw.Stop();
+                Log.Warning("[MediaAnalysis] Decode check ({Label}) timed out (90s, {Elapsed}ms) for {Name}", label, sw.ElapsedMilliseconds, fileName);
+                return $"[timeout] decode timed out at {label} (90s)";
+            }
+
+            var error = await errorTask.ConfigureAwait(false);
+            sw.Stop();
+
+            // Check both exit code AND stderr — ffmpeg can exit 0 while reporting real errors
+            // (e.g., "Stream ends prematurely", "partial file") for truncated files
+            if (process.ExitCode == 0 && string.IsNullOrWhiteSpace(error))
+            {
+                Log.Information("[MediaAnalysis] Decode check ({Label}) passed ({Elapsed}ms) for {Name}", label, sw.ElapsedMilliseconds, fileName);
+                return null;
+            }
+
+            var errorDetail = string.IsNullOrWhiteSpace(error) ? $"ffmpeg exit code {process.ExitCode}" : error.Trim();
+            if (errorDetail.Length > 200) errorDetail = errorDetail[..200];
+            Log.Warning("[MediaAnalysis] Decode check ({Label}) failed for {Name}: {Error}", label, fileName, errorDetail);
+            return errorDetail;
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return $"[error] {ex.Message}";
         }
     }
 }

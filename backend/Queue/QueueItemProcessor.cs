@@ -284,6 +284,7 @@ public class QueueItemProcessor(
         var checkedFullHealth = false;
         var triggerMediaAnalysis = false;
         var probePassedNames = new ConcurrentBag<string>();
+        var probeFailedNames = new ConcurrentBag<string>();
         var dmcaFileNames = new ConcurrentBag<string>();
         if (configManager.IsEnsureArticleExistenceEnabled())
         {
@@ -332,6 +333,7 @@ public class QueueItemProcessor(
                             catch (UsenetArticleNotFoundException)
                             {
                                 Interlocked.Increment(ref probeFailures);
+                                probeFailedNames.Add(file.FileName);
                                 break; // Definitive — no retry
                             }
                             catch (NonRetryableDownloadException)
@@ -455,9 +457,9 @@ public class QueueItemProcessor(
         Log.Information("[QueueItemProcessor] Step 4 complete: Database update finished for {JobName}. Elapsed: {ElapsedSeconds}s",
             queueItem.JobName, step4Elapsed.TotalSeconds);
 
-        // step 5 -- Run ffprobe to verify media integrity when health check found missing articles.
+        // step 5 -- Run ffprobe + decode check on all media files to verify integrity.
         //           Corrupt files are removed from the database so Radarr/Sonarr won't import them.
-        if (triggerMediaAnalysis)
+        //           Always runs: Step 3 spot-checks catch missing articles, but only decode catches corrupt content.
         {
             Log.Information("[QueueItemProcessor] Step 5: Running media analysis (ffprobe) for files in {JobName} to verify playability...",
                 queueItem.JobName);
@@ -471,10 +473,10 @@ public class QueueItemProcessor(
                 .Select(i => new { i.Id, i.Name })
                 .ToListAsync().ConfigureAwait(false);
 
-            // Only run ffprobe on media files (video/audio) that didn't pass the Step 3 smart probe
-            // and aren't confirmed DMCA'd (those are removed from DB directly)
+            // Only run ffprobe on media files not confirmed DMCA'd or probe-failed
             var passedProbeSet = new HashSet<string>(probePassedNames, StringComparer.OrdinalIgnoreCase);
             var dmcaNameSet = new HashSet<string>(dmcaFileNames, StringComparer.OrdinalIgnoreCase);
+            var failedProbeSet = new HashSet<string>(probeFailedNames, StringComparer.OrdinalIgnoreCase);
             var mediaFiles = allItems.Where(i => FilenameUtil.IsMediaFile(i.Name)).ToList();
 
             // Remove DMCA'd files from the database — they're confirmed dead
@@ -491,21 +493,46 @@ public class QueueItemProcessor(
                 }
             }
 
-            var filesToCheck = mediaFiles.Where(i => !passedProbeSet.Contains(i.Name) && !dmcaNameSet.Contains(i.Name)).ToList();
+            // Mark probe-failed files (missing articles) as corrupt directly — no need for ffprobe
+            if (failedProbeSet.Count > 0)
+            {
+                var failedItemIds = mediaFiles.Where(i => failedProbeSet.Contains(i.Name)).Select(i => i.Id).ToList();
+                if (failedItemIds.Count > 0)
+                {
+                    foreach (var id in failedItemIds)
+                    {
+                        var item = await dbContext.Items.FindAsync([id], queueCt).ConfigureAwait(false);
+                        if (item != null)
+                        {
+                            item.IsCorrupted = true;
+                            item.CorruptionReason = "Missing Usenet articles detected by Step 3 spot-check";
+                        }
+                    }
+                    await dbContext.SaveChangesAsync(queueCt).ConfigureAwait(false);
 
-            Log.Information("[QueueItemProcessor] Step 5: Checking {CheckCount}/{MediaCount} media files with ffprobe (skipping {SkipCount} that passed Step 3 probe)",
-                filesToCheck.Count, mediaFiles.Count, mediaFiles.Count - filesToCheck.Count);
+                    var probeFailedDeleted = await dbContext.Items
+                        .Where(i => failedItemIds.Contains(i.Id))
+                        .ExecuteDeleteAsync().ConfigureAwait(false);
+                    Log.Information("[QueueItemProcessor] Step 5: Removed {Deleted} probe-failed files (missing articles) from {JobName}",
+                        probeFailedDeleted, queueItem.JobName);
+                }
+            }
+
+            var filesToCheck = mediaFiles.Where(i => !dmcaNameSet.Contains(i.Name) && !failedProbeSet.Contains(i.Name)).ToList();
+
+            Log.Information("[QueueItemProcessor] Step 5: Checking {CheckCount}/{MediaCount} media files with ffprobe + decode check (skipping {DmcaCount} DMCA, {FailedCount} probe-failed)",
+                filesToCheck.Count, mediaFiles.Count, dmcaNameSet.Count, failedProbeSet.Count);
 
             if (filesToCheck.Count == 0)
             {
-                Log.Information("[QueueItemProcessor] Step 5: All media files passed Step 3 probe — no ffprobe needed for {JobName}", queueItem.JobName);
+                Log.Information("[QueueItemProcessor] Step 5: No media files to check for {JobName}", queueItem.JobName);
             }
             else
             {
                 var corruptIds = new ConcurrentBag<Guid>();
-                var analysisSemaphore = new SemaphoreSlim(2, 2); // Run up to 2 ffprobe analyses in parallel
+                var analysisSemaphore = new SemaphoreSlim(10, 10); // Run up to 10 analyses in parallel (ffprobe + decode check
 
-                await Parallel.ForEachAsync(filesToCheck, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = queueCt }, async (item, ct) =>
+                await Parallel.ForEachAsync(filesToCheck, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = queueCt }, async (item, ct) =>
                 {
                     await analysisSemaphore.WaitAsync(ct).ConfigureAwait(false);
                     try
@@ -582,6 +609,30 @@ public class QueueItemProcessor(
                     Log.Information("[QueueItemProcessor] Step 5 complete: All {Count} checked media files passed analysis for {JobName}",
                         filesToCheck.Count, queueItem.JobName);
                 }
+            }
+
+            // After Step 5 verification, mark all surviving items as health-checked.
+            // This prevents them from appearing as "pending" in the health queue,
+            // since Step 5's ffprobe + decode is more thorough than a STAT health check.
+            var utcNow = DateTimeOffset.UtcNow;
+            var survivingItems = await dbContext.Items
+                .Where(i => i.ParentId == mountFolderId && i.Type != DavItem.ItemType.Directory)
+                .ToListAsync(queueCt).ConfigureAwait(false);
+
+            foreach (var item in survivingItems)
+            {
+                item.LastHealthCheck = utcNow;
+                if (item.ReleaseDate != null)
+                {
+                    item.NextHealthCheck = item.ReleaseDate.Value + 2 * (utcNow - item.ReleaseDate.Value);
+                }
+            }
+
+            if (survivingItems.Count > 0)
+            {
+                await dbContext.SaveChangesAsync(queueCt).ConfigureAwait(false);
+                Log.Information("[QueueItemProcessor] Step 5: Updated health check timestamps on {Count} surviving items for {JobName}",
+                    survivingItems.Count, queueItem.JobName);
             }
         }
     }

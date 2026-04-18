@@ -64,14 +64,14 @@ public class DatabaseStoreNzbFile(
 
         // Check if this is a lightweight analysis request (from ffprobe via MediaAnalysisService)
         var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
-        var concurrentConnections = isAnalysisMode ? 2 : configManager.GetTotalStreamingConnections();
+        var concurrentConnections = isAnalysisMode ? 4 : configManager.GetTotalStreamingConnections();
         var bufferSize = isAnalysisMode ? 4 : configManager.GetStreamBufferSize();
 
         if (isAnalysisMode)
         {
-            // Create an analysis usage context with limited resources
+            // Use queue analysis connections for media integrity checks during queue processing
             usageContext = new ConnectionUsageContext(
-                ConnectionUsageType.Analysis,
+                ConnectionUsageType.QueueAnalysis,
                 new ConnectionUsageDetails
                 {
                     Text = davNzbFile.Path,

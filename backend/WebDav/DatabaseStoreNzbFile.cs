@@ -90,7 +90,11 @@ public class DatabaseStoreNzbFile(
         }
         else
         {
-            Serilog.Log.Debug("[DatabaseStoreNzbFile] Opening stream for {FileName} ({Id})", Name, id);
+            var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var userAgent = httpContext.Request.Headers.UserAgent.ToString();
+            var rangeHeader = httpContext.Request.Headers.Range.ToString();
+            Serilog.Log.Information("[DatabaseStoreNzbFile] Opening stream for {FileName} ({Id}) — Client: {ClientIp}, UA: {UserAgent}, Range: {Range}",
+                Name, id, clientIp, userAgent, rangeHeader);
         }
 
         // Preview mode: use zero grace period so SharedStreamManager immediately releases

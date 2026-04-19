@@ -159,8 +159,8 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable
                 }
             }
 
-            TriggerConnectionPoolChangedEvent();
             _activeConnections[connectionId] = new ActiveConnectionInfo(item.Connection, usageContext, DateTimeOffset.UtcNow);
+            TriggerConnectionPoolChangedEvent();
 
             return BuildLock(item.Connection, connectionId);
         }
@@ -245,9 +245,9 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable
         }
 
         Interlocked.Increment(ref _live);
-        TriggerConnectionPoolChangedEvent();
 
         _activeConnections[connectionId] = new ActiveConnectionInfo(conn, usageContext, DateTimeOffset.UtcNow);
+        TriggerConnectionPoolChangedEvent();
         return BuildLock(conn, connectionId);
 
         ConnectionLock<T> BuildLock(T c, string connId)

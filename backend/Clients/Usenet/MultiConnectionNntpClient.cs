@@ -209,12 +209,9 @@ public class MultiConnectionNntpClient : INntpClient
         timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(currentTimeoutMs));
 
         // Propagate the connection usage context to the new linked token
+        // Always propagate — even Unknown — so ConnectionPool sees consistent context
         var originalUsageContext = cancellationToken.GetContext<ConnectionUsageContext>();
-        IDisposable? timeoutContextScope = null;
-        if (originalUsageContext.UsageType != ConnectionUsageType.Unknown)
-        {
-            timeoutContextScope = timeoutCts.Token.SetScopedContext(originalUsageContext);
-        }
+        using var timeoutContextScope = timeoutCts.Token.SetScopedContext(originalUsageContext);
 
         ConnectionLock<INntpClient>? connectionLock = null;
         bool success = false;
@@ -328,7 +325,6 @@ public class MultiConnectionNntpClient : INntpClient
                     finally
                     {
                         _lastActivity = DateTimeOffset.UtcNow;
-                        timeoutContextScope?.Dispose(); // Dispose the scoped context if it was created
                         // If we failed to create the stream (success == false), we must cleanup here.
                         if (!success)
                         {
@@ -374,12 +370,9 @@ public class MultiConnectionNntpClient : INntpClient
         timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(currentTimeoutMs));
 
         // Propagate the connection usage context to the new linked token
+        // Always propagate — even Unknown — so ConnectionPool sees consistent context
         var originalUsageContext = cancellationToken.GetContext<ConnectionUsageContext>();
-        IDisposable? timeoutContextScope = null;
-        if (originalUsageContext.UsageType != ConnectionUsageType.Unknown)
-        {
-            timeoutContextScope = timeoutCts.Token.SetScopedContext(originalUsageContext);
-        }
+        using var timeoutContextScope = timeoutCts.Token.SetScopedContext(originalUsageContext);
 
         var startTime = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -463,7 +456,6 @@ public class MultiConnectionNntpClient : INntpClient
         finally
         {
             _lastActivity = DateTimeOffset.UtcNow;
-            timeoutContextScope?.Dispose(); // Dispose the scoped context if it was created
             // Release global permit
             globalPermit?.Dispose();
         }

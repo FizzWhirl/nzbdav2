@@ -157,6 +157,18 @@ public class MediaAnalysisService(
                 return (null, timedOut: false);
             }
 
+            // ffprobe can exit 0 while printing real errors to stderr (e.g. 401 Unauthorized, corrupt streams)
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                Log.Warning("[MediaAnalysis] ffprobe exited 0 but had stderr: {Error}", error.Trim());
+                // Still return the output if we got valid JSON — stderr warnings don't always mean failure
+                // But if output is empty/invalid, treat as failure
+                if (string.IsNullOrWhiteSpace(output) || !output.TrimStart().StartsWith("{"))
+                {
+                    return (null, timedOut: false);
+                }
+            }
+
             return (output, timedOut: false);
         }
         catch (Exception ex)

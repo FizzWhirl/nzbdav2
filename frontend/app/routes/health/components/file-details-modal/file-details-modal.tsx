@@ -22,8 +22,11 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
     const [testingDownload, setTestingDownload] = useState(false);
     const [repairingClassification, setRepairingClassification] = useState(false);
     const [flushingCache, setFlushingCache] = useState(false);
+    const [showPreview, setShowPreview] = useState(false);
     const { addToast } = useToast();
     const { confirm } = useConfirm();
+
+    const previewType = fileDetails ? getPreviewType(fileDetails.name) : null;
 
     const handleFlushRcloneCache = async () => {
         if (!fileDetails) return;
@@ -96,7 +99,7 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
     };
 
     return (
-        <Modal show={show} onHide={onHide} size="lg">
+        <Modal show={show} onHide={onHide} onExited={() => setShowPreview(false)} size="lg">
             <Modal.Header closeButton>
                 <Modal.Title>File Details</Modal.Title>
             </Modal.Header>
@@ -149,6 +152,16 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                                     <i className="bi bi-download me-1"></i>
                                                     Download File
                                                 </a>
+                                                {previewType && (
+                                                    <button
+                                                        className={`btn btn-sm ${showPreview ? 'btn-success' : 'btn-outline-success'}`}
+                                                        onClick={() => setShowPreview(prev => !prev)}
+                                                        title={`Preview ${previewType} in browser`}
+                                                    >
+                                                        <i className={`bi ${previewType === 'video' ? 'bi-play-circle' : 'bi-music-note-beamed'} me-1`}></i>
+                                                        {showPreview ? 'Hide Preview' : 'Preview'}
+                                                    </button>
+                                                )}
                                                 {fileDetails.nzbDownloadUrl && (
                                                     <a
                                                         href={fileDetails.nzbDownloadUrl}
@@ -219,6 +232,33 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                             </div>
                                         </td>
                                     </tr>
+                                    {showPreview && previewType && (
+                                        <tr>
+                                            <td colSpan={2} className={styles.valueCell}>
+                                                <div className={styles.previewContainer}>
+                                                    {previewType === 'video' ? (
+                                                        <video
+                                                            controls
+                                                            autoPlay
+                                                            className={styles.previewPlayer}
+                                                            src={fileDetails.downloadUrl}
+                                                        >
+                                                            Your browser does not support video playback.
+                                                        </video>
+                                                    ) : (
+                                                        <audio
+                                                            controls
+                                                            autoPlay
+                                                            className={styles.previewPlayer}
+                                                            src={fileDetails.downloadUrl}
+                                                        >
+                                                            Your browser does not support audio playback.
+                                                        </audio>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
                                     <tr>
                                         <td className={styles.labelCell}>File Size</td>
                                         <td className={styles.valueCell}>{formatBytes(fileDetails.fileSize)}</td>
@@ -634,4 +674,15 @@ function getRepairStatusText(status: number): string {
         case 3: return 'Action Needed';
         default: return 'Unknown';
     }
+}
+
+const VIDEO_EXTENSIONS = new Set(['.mkv', '.mp4', '.avi', '.webm', '.mov', '.m4v', '.ts', '.wmv']);
+const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.aac', '.ogg', '.wav', '.m4a', '.wma', '.opus']);
+
+function getPreviewType(name: string): 'video' | 'audio' | null {
+    const ext = name.toLowerCase().match(/\.[^.]+$/)?.[0];
+    if (!ext) return null;
+    if (VIDEO_EXTENSIONS.has(ext)) return 'video';
+    if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
+    return null;
 }

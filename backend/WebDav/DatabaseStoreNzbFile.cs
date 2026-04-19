@@ -64,8 +64,10 @@ public class DatabaseStoreNzbFile(
 
         // Check if this is a lightweight analysis request (from ffprobe via MediaAnalysisService)
         var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
-        var concurrentConnections = isAnalysisMode ? 4 : configManager.GetTotalStreamingConnections();
-        var bufferSize = isAnalysisMode ? 4 : configManager.GetStreamBufferSize();
+        var isPreviewMode = httpContext.Items.ContainsKey("PreviewMode");
+        var concurrentConnections = (isAnalysisMode || isPreviewMode) ? 4 : configManager.GetTotalStreamingConnections();
+        var bufferSize = (isAnalysisMode || isPreviewMode) ? 4 : configManager.GetStreamBufferSize();
+        var useBufferedStreaming = isPreviewMode ? false : configManager.UseBufferedStreaming();
 
         if (isAnalysisMode)
         {
@@ -82,6 +84,11 @@ public class DatabaseStoreNzbFile(
             Serilog.Log.Debug("[DatabaseStoreNzbFile] Analysis mode: Opening lightweight stream for {FileName} ({Id}) (workers={Workers}, buffer={Buffer})",
                 Name, id, concurrentConnections, bufferSize);
         }
+        else if (isPreviewMode)
+        {
+            Serilog.Log.Debug("[DatabaseStoreNzbFile] Preview mode: Opening unbuffered stream for {FileName} ({Id}) (workers={Workers})",
+                Name, id, concurrentConnections);
+        }
         else
         {
             Serilog.Log.Debug("[DatabaseStoreNzbFile] Opening stream for {FileName} ({Id})", Name, id);
@@ -92,7 +99,7 @@ public class DatabaseStoreNzbFile(
             FileSize,
             concurrentConnections,
             usageContext,
-            configManager.UseBufferedStreaming(),
+            useBufferedStreaming,
             bufferSize,
             file.GetSegmentSizes(),
             file.SegmentFallbacks

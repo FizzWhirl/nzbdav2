@@ -53,6 +53,12 @@
     padding: 0.5rem 0;
 }
 
+.previewNotice {
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+    margin-bottom: 0.5rem;
+}
+
 .previewPlayer {
     width: 100%;
     max-height: 400px;

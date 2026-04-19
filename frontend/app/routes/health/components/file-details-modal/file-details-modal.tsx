@@ -236,12 +236,18 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                         <tr>
                                             <td colSpan={2} className={styles.valueCell}>
                                                 <div className={styles.previewContainer}>
+                                                    <div className={styles.previewNotice}>
+                                                        <i className="bi bi-info-circle me-1"></i>
+                                                        Streaming from Usenet — seeking may take a moment to buffer
+                                                    </div>
                                                     {previewType === 'video' ? (
                                                         <video
                                                             controls
                                                             autoPlay
+                                                            playsInline
+                                                            preload="none"
                                                             className={styles.previewPlayer}
-                                                            src={fileDetails.downloadUrl}
+                                                            src={`${fileDetails.downloadUrl}${fileDetails.downloadUrl.includes('?') ? '&' : '?'}preview=true`}
                                                         >
                                                             Your browser does not support video playback.
                                                         </video>
@@ -249,8 +255,9 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                                         <audio
                                                             controls
                                                             autoPlay
+                                                            preload="none"
                                                             className={styles.previewPlayer}
-                                                            src={fileDetails.downloadUrl}
+                                                            src={`${fileDetails.downloadUrl}${fileDetails.downloadUrl.includes('?') ? '&' : '?'}preview=true`}
                                                         >
                                                             Your browser does not support audio playback.
                                                         </audio>

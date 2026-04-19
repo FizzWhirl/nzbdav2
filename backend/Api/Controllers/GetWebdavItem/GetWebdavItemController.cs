@@ -64,23 +64,36 @@ public class ListWebdavDirectoryController(DatabaseStore store, ConfigManager co
         try
         {
             HttpContext.Items["configManager"] = configManager;
+            if (HttpContext.Request.Query["preview"].FirstOrDefault()?.ToLower() == "true")
+                HttpContext.Items["PreviewMode"] = true;
             var request = new GetWebdavItemRequest(HttpContext);
             await using var response = await GetWebdavItem(request).ConfigureAwait(false);
             await response.CopyToAsync(Response.Body, bufferSize: 256 * 1024, HttpContext.RequestAborted).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected (e.g., browser seeking to new position) — nothing to do
+        }
         catch (UnauthorizedAccessException)
         {
-            Response.StatusCode = 401;
+            if (!Response.HasStarted)
+                Response.StatusCode = 401;
         }
         catch (BadHttpRequestException ex)
         {
-            Response.StatusCode = ex.StatusCode;
-            await Response.WriteAsync(ex.Message, HttpContext.RequestAborted).ConfigureAwait(false);
+            if (!Response.HasStarted)
+            {
+                Response.StatusCode = ex.StatusCode;
+                await Response.WriteAsync(ex.Message, HttpContext.RequestAborted).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
-            Response.StatusCode = 500;
-            await Response.WriteAsync($"Error streaming file: {ex.Message}", HttpContext.RequestAborted).ConfigureAwait(false);
+            if (!Response.HasStarted)
+            {
+                Response.StatusCode = 500;
+                await Response.WriteAsync($"Error streaming file: {ex.Message}", HttpContext.RequestAborted).ConfigureAwait(false);
+            }
         }
     }
 

@@ -318,7 +318,7 @@ public class NzbFileStream : Stream
                 {
                     var detailsObj = new ConnectionUsageDetails
                     {
-                        Text = _usageContext.Details ?? "",
+                        Text = _usageContext.DetailsObject?.Text ?? _usageContext.Details ?? "",
                         JobName = _usageContext.DetailsObject?.JobName,
                         AffinityKey = _usageContext.DetailsObject?.AffinityKey,
                         DavItemId = _usageContext.DetailsObject?.DavItemId,
@@ -380,7 +380,7 @@ public class NzbFileStream : Stream
             {
                 var detailsObj = new ConnectionUsageDetails
                 {
-                    Text = _usageContext.Details ?? "",
+                    Text = _usageContext.DetailsObject?.Text ?? _usageContext.Details ?? "",
                     JobName = _usageContext.DetailsObject?.JobName,
                     AffinityKey = _usageContext.DetailsObject?.AffinityKey,
                     DavItemId = _usageContext.DetailsObject?.DavItemId,

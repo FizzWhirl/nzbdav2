@@ -19,7 +19,8 @@ function getTypeLabel(type: number) {
         3: "Health",
         4: "Repair",
         5: "Buffer",
-        6: "Analysis"
+        6: "Analysis",
+        7: "Q.Analysis"
     };
     return map[type] || "Unknown";
 }
@@ -32,7 +33,8 @@ function getTypeColor(type: number) {
         3: "warning",
         4: "danger",
         5: "primary",
-        6: "light"
+        6: "light",
+        7: "info"
     };
     return map[type] || "secondary";
 }

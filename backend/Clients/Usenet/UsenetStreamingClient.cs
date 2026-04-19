@@ -128,14 +128,20 @@ public class UsenetStreamingClient
                         // This catches partial DMCA/takedown where first/last exist but mid-file articles are removed.
                         // Uses flag instead of throwing to avoid entering the DMCA confirmation catch block below
                         // (which assumes first/last are MISSING — here they exist).
+                        // Spot checks run in parallel to avoid exceeding the per-file timeout.
                         if (segmentIds.Length > 20)
                         {
                             var spotCheckPositions = new[] { 0.15, 0.30, 0.50, 0.70, 0.85 };
-                            foreach (var fraction in spotCheckPositions)
+                            var spotCheckTasks = spotCheckPositions.Select(async fraction =>
                             {
                                 var idx = (int)(segmentIds.Length * fraction);
                                 var statResult = await _client.StatAsync(segmentIds[idx], fastCheckCts.Token).ConfigureAwait(false);
-                                if (!statResult.ArticleExists)
+                                return (idx, fraction, statResult.ArticleExists);
+                            });
+                            var spotResults = await Task.WhenAll(spotCheckTasks).ConfigureAwait(false);
+                            foreach (var (idx, fraction, exists) in spotResults)
+                            {
+                                if (!exists)
                                 {
                                     spotCheckFailure = $"Mid-file article missing at index {idx}/{segmentIds.Length} ({(int)(fraction * 100)}%). Partial DMCA or corruption.";
                                     Serilog.Log.Warning("[UsenetStreamingClient] Smart Analysis: {Message}", spotCheckFailure);
@@ -157,6 +163,12 @@ public class UsenetStreamingClient
                         }
                     }
                 }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Parent timeout (e.g., 15s per-file timeout from QueueItemProcessor) — just propagate.
+                // The caller handles retry logic; no need to log a scary message here.
+                throw;
             }
             catch (Exception ex)
             {
@@ -327,12 +339,12 @@ public class UsenetStreamingClient
             sharedStreamBufferSize: _configManager.GetSharedStreamBufferSize(), sharedStreamGracePeriod: _configManager.GetSharedStreamGracePeriod());
     }
 
-    public NzbFileStream GetFileStream(string[] segmentIds, long fileSize, int concurrentConnections, ConnectionUsageContext? usageContext = null, bool useBufferedStreaming = true, int? bufferSize = null, long[]? segmentSizes = null, Dictionary<int, string[]>? segmentFallbacks = null)
+    public NzbFileStream GetFileStream(string[] segmentIds, long fileSize, int concurrentConnections, ConnectionUsageContext? usageContext = null, bool useBufferedStreaming = true, int? bufferSize = null, long[]? segmentSizes = null, Dictionary<int, string[]>? segmentFallbacks = null, int? sharedStreamGracePeriod = null)
     {
         // Use config value if not specified
         var actualBufferSize = bufferSize ?? _configManager.GetStreamBufferSize();
         return new NzbFileStream(segmentIds, fileSize, _client, concurrentConnections, usageContext, useBufferedStreaming, actualBufferSize, segmentSizes, segmentFallbacks,
-            _configManager.GetSharedStreamBufferSize(), _configManager.GetSharedStreamGracePeriod());
+            _configManager.GetSharedStreamBufferSize(), sharedStreamGracePeriod ?? _configManager.GetSharedStreamGracePeriod());
     }
 
     public NzbFileStream GetFastFileStream(string[] segmentIds, long fileSize, int concurrentConnections, ConnectionUsageContext? usageContext = null)

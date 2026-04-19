@@ -65,9 +65,8 @@ public class DatabaseStoreNzbFile(
         // Check if this is a lightweight analysis request (from ffprobe via MediaAnalysisService)
         var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
         var isPreviewMode = httpContext.Items.ContainsKey("PreviewMode");
-        var concurrentConnections = (isAnalysisMode || isPreviewMode) ? 4 : configManager.GetTotalStreamingConnections();
-        var bufferSize = (isAnalysisMode || isPreviewMode) ? 4 : configManager.GetStreamBufferSize();
-        var useBufferedStreaming = isPreviewMode ? false : configManager.UseBufferedStreaming();
+        var concurrentConnections = isAnalysisMode ? 4 : configManager.GetTotalStreamingConnections();
+        var bufferSize = isAnalysisMode ? 4 : configManager.GetStreamBufferSize();
 
         if (isAnalysisMode)
         {
@@ -86,23 +85,26 @@ public class DatabaseStoreNzbFile(
         }
         else if (isPreviewMode)
         {
-            Serilog.Log.Debug("[DatabaseStoreNzbFile] Preview mode: Opening unbuffered stream for {FileName} ({Id}) (workers={Workers})",
-                Name, id, concurrentConnections);
+            Serilog.Log.Debug("[DatabaseStoreNzbFile] Preview mode: Opening stream with zero grace period for {FileName} ({Id})",
+                Name, id);
         }
         else
         {
             Serilog.Log.Debug("[DatabaseStoreNzbFile] Opening stream for {FileName} ({Id})", Name, id);
         }
 
+        // Preview mode: use zero grace period so SharedStreamManager immediately releases
+        // permits when the browser seeks (aborts old request), instead of holding them for 10s
         return usenetClient.GetFileStream(
             file.SegmentIds,
             FileSize,
             concurrentConnections,
             usageContext,
-            useBufferedStreaming,
+            configManager.UseBufferedStreaming(),
             bufferSize,
             file.GetSegmentSizes(),
-            file.SegmentFallbacks
+            file.SegmentFallbacks,
+            sharedStreamGracePeriod: isPreviewMode ? 0 : null
         );
     }
 }

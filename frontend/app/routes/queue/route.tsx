@@ -341,7 +341,7 @@ export async function action({ request }: Route.ActionArgs) {
         if (error instanceof Error) {
             return { error: error.message };
         }
-        throw error;
+            return { error: String(error) };
     }
 }
 

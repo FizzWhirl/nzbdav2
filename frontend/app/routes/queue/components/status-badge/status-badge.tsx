@@ -23,7 +23,7 @@ export function StatusBadge({ status, percentage, error }: StatusBadgeProps) {
     // determine badge text
     let badgeText = statusLower;
     if (statusLower === "downloading" || percentNum > 0)
-        badgeText = `${percentNum > 100 ? percentNum - 100 : percentNum}%`;
+           badgeText = `${percentNum > 100 ? `Verifying ${percentNum - 100}` : percentNum}%`;
 
     // determine class name
     if (error?.startsWith("Article with message-id")) error = "Missing articles";

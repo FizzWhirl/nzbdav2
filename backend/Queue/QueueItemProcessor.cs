@@ -310,6 +310,9 @@ public class QueueItemProcessor(
             // 180s overall backstop, 15s per-file timeout, 8 concurrent probes
             using var overallProbeCts = CancellationTokenSource.CreateLinkedTokenSource(queueCt);
             overallProbeCts.CancelAfter(TimeSpan.FromSeconds(180));
+            // Propagate QueueAnalysis context for article probes (lighter limits than full Queue)
+            var probeContext = new ConnectionUsageContext(ConnectionUsageType.QueueAnalysis, queueItem.JobName);
+            using var _probeCtx = overallProbeCts.Token.SetScopedContext(probeContext);
 
             try
             {
@@ -323,6 +326,7 @@ public class QueueItemProcessor(
                         {
                             using var fileCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                             fileCts.CancelAfter(TimeSpan.FromSeconds(15));
+                            using var _fileCtx = fileCts.Token.SetScopedContext(probeContext);
 
                             try
                             {
@@ -409,49 +413,48 @@ public class QueueItemProcessor(
             Log.Debug("[QueueItemProcessor] Step 3: Skipping article existence check (disabled in config) for {JobName}", queueItem.JobName);
         }
 
-        // Scope 2: Final DB update
+        // Scope 2: Final DB update — create filesystem entries but keep queue item alive until Step 6
         Log.Information("[QueueItemProcessor] Step 4: Starting database update for {JobName}...", queueItem.JobName);
         var step4StartTime = DateTime.UtcNow;
         Guid? mountFolderId = null;
+        DavItem? mountFolder = null;
         using (var scope = scopeFactory.CreateScope())
         {
             var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
-            // update the database
-            await MarkQueueItemCompleted(dbClient, startTime, error: null, failureReason: null, databaseOperations: async () =>
+            dbClient.Ctx.ChangeTracker.Clear();
+
+            Log.Debug("[QueueItemProcessor] Step 4a: Creating category and mount folders for {JobName}...", queueItem.JobName);
+            var categoryFolder = await GetOrCreateCategoryFolder(dbClient).ConfigureAwait(false);
+            mountFolder = await CreateMountFolder(dbClient, categoryFolder, existingMountFolder, duplicateNzbBehavior).ConfigureAwait(false);
+            mountFolderId = mountFolder.Id;
+
+            Log.Debug("[QueueItemProcessor] Step 4b: Running aggregators for {JobName}...", queueItem.JobName);
+            new RarAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
+            new FileAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
+            new SevenZipAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
+            new MultipartMkvAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
+
+            Log.Debug("[QueueItemProcessor] Step 4c: Running post-processors for {JobName}...", queueItem.JobName);
+            // post-processing
+            new RenameDuplicatesPostProcessor(dbClient).RenameDuplicates();
+            new BlacklistedExtensionPostProcessor(configManager, dbClient).RemoveBlacklistedExtensions();
+
+            // validate media files found (video or audio)
+            if (configManager.IsEnsureImportableMediaEnabled())
             {
-                Log.Debug("[QueueItemProcessor] Step 4a: Creating category and mount folders for {JobName}...", queueItem.JobName);
-                var categoryFolder = await GetOrCreateCategoryFolder(dbClient).ConfigureAwait(false);
-                var mountFolder = await CreateMountFolder(dbClient, categoryFolder, existingMountFolder, duplicateNzbBehavior).ConfigureAwait(false);
-                mountFolderId = mountFolder.Id;
+                Log.Debug("[QueueItemProcessor] Step 4d: Validating importable media for {JobName}...", queueItem.JobName);
+                new EnsureImportableMediaValidator(dbClient).ThrowIfValidationFails();
+            }
 
-                Log.Debug("[QueueItemProcessor] Step 4b: Running aggregators for {JobName}...", queueItem.JobName);
-                new RarAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
-                new FileAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
-                new SevenZipAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
-                new MultipartMkvAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
+            // create strm files, if necessary
+            if (configManager.GetImportStrategy() == "strm")
+            {
+                Log.Debug("[QueueItemProcessor] Step 4e: Creating STRM files for {JobName}...", queueItem.JobName);
+                await new CreateStrmFilesPostProcessor(configManager, dbClient).CreateStrmFilesAsync().ConfigureAwait(false);
+            }
 
-                Log.Debug("[QueueItemProcessor] Step 4c: Running post-processors for {JobName}...", queueItem.JobName);
-                // post-processing
-                new RenameDuplicatesPostProcessor(dbClient).RenameDuplicates();
-                new BlacklistedExtensionPostProcessor(configManager, dbClient).RemoveBlacklistedExtensions();
-
-                // validate media files found (video or audio)
-                if (configManager.IsEnsureImportableMediaEnabled())
-                {
-                    Log.Debug("[QueueItemProcessor] Step 4d: Validating importable media for {JobName}...", queueItem.JobName);
-                    new EnsureImportableMediaValidator(dbClient).ThrowIfValidationFails();
-                }
-
-                // create strm files, if necessary
-                if (configManager.GetImportStrategy() == "strm")
-                {
-                    Log.Debug("[QueueItemProcessor] Step 4e: Creating STRM files for {JobName}...", queueItem.JobName);
-                    await new CreateStrmFilesPostProcessor(configManager, dbClient).CreateStrmFilesAsync().ConfigureAwait(false);
-                }
-
-                Log.Debug("[QueueItemProcessor] Step 4f: All database operations complete for {JobName}", queueItem.JobName);
-                return mountFolder;
-            }).ConfigureAwait(false);
+            Log.Debug("[QueueItemProcessor] Step 4f: All database operations complete for {JobName}", queueItem.JobName);
+            await dbClient.Ctx.SaveChangesAsync(queueCt).ConfigureAwait(false);
         }
         var step4Elapsed = DateTime.UtcNow - step4StartTime;
         Log.Information("[QueueItemProcessor] Step 4 complete: Database update finished for {JobName}. Elapsed: {ElapsedSeconds}s",
@@ -635,6 +638,15 @@ public class QueueItemProcessor(
                     survivingItems.Count, queueItem.JobName);
             }
         }
+
+        // Step 6: Move queue item to history now that ffprobe analysis is complete
+        Log.Information("[QueueItemProcessor] Step 6: Moving queue item to history for {JobName}...", queueItem.JobName);
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
+            await MarkQueueItemCompleted(dbClient, startTime, error: null, failureReason: null, mountFolder: mountFolder).ConfigureAwait(false);
+        }
+        Log.Information("[QueueItemProcessor] Step 6 complete: {JobName} moved to history", queueItem.JobName);
     }
 
     private IEnumerable<BaseProcessor> GetFileProcessors
@@ -852,14 +864,16 @@ public class QueueItemProcessor(
         DateTime startTime,
         string? error = null,
         string? failureReason = null,
-        Func<Task<DavItem?>>? databaseOperations = null
+        Func<Task<DavItem?>>? databaseOperations = null,
+        DavItem? mountFolder = null
     )
     {
         Log.Information("[QueueItemProcessor] MarkQueueItemCompleted called for {JobName} ({Id}). Error: {Error}",
             queueItem.JobName, queueItem.Id, error ?? "None");
 
         dbClient.Ctx.ChangeTracker.Clear();
-        var mountFolder = databaseOperations != null ? await databaseOperations.Invoke().ConfigureAwait(false) : null;
+        if (databaseOperations != null)
+            mountFolder = await databaseOperations.Invoke().ConfigureAwait(false);
         var historyItem = CreateHistoryItem(mountFolder, startTime, error, failureReason);
         var historySlot = GetHistoryResponse.HistorySlot.FromHistoryItem(historyItem, mountFolder, configManager);
 

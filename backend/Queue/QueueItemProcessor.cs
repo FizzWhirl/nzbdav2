@@ -286,6 +286,7 @@ public class QueueItemProcessor(
         var probePassedNames = new ConcurrentBag<string>();
         var probeFailedNames = new ConcurrentBag<string>();
         var dmcaFileNames = new ConcurrentBag<string>();
+        var probeTimedOut = false;
         if (configManager.IsEnsureArticleExistenceEnabled())
         {
             var step3StartTime = DateTime.UtcNow;
@@ -376,6 +377,7 @@ public class QueueItemProcessor(
                 Log.Warning("[QueueItemProcessor] Step 3: Overall probe timeout (180s) for {JobName}. Will use ffprobe to verify file integrity.",
                     queueItem.JobName);
                 triggerMediaAnalysis = true;
+                probeTimedOut = true;
             }
 
             var dmcaCountFinal = Volatile.Read(ref dmcaCount);
@@ -402,6 +404,18 @@ public class QueueItemProcessor(
             else if (!triggerMediaAnalysis)
             {
                 checkedFullHealth = true;
+            }
+
+            // If no files passed the probe and it wasn't just a timeout, the content is unavailable
+            if (!probeTimedOut && probePassedNames.IsEmpty && fileSegments.Count > 0)
+            {
+                var failedCount = probeFailedNames.Count;
+                var reason = dmcaCountFinal > 0
+                    ? $"{dmcaCountFinal}/{fileSegments.Count} files DMCA/taken down, {failedCount} others failed"
+                    : $"All {failedCount}/{fileSegments.Count} files failed article probe";
+                Log.Error("[QueueItemProcessor] Step 3: No files passed probe for {JobName}. Marking as failed. Reason: {Reason}",
+                    queueItem.JobName, reason);
+                throw new NonRetryableDownloadException($"No files are available: {reason}");
             }
 
             var step3Elapsed = DateTime.UtcNow - step3StartTime;
@@ -636,6 +650,18 @@ public class QueueItemProcessor(
                 await dbContext.SaveChangesAsync(queueCt).ConfigureAwait(false);
                 Log.Information("[QueueItemProcessor] Step 5: Updated health check timestamps on {Count} surviving items for {JobName}",
                     survivingItems.Count, queueItem.JobName);
+            }
+
+            // If we had media files but none survived Step 5, the NZB has no playable content — fail it
+            if (mediaFiles.Count > 0)
+            {
+                var survivingMediaCount = survivingItems.Count(i => FilenameUtil.IsMediaFile(i.Name));
+                if (survivingMediaCount == 0)
+                {
+                    Log.Error("[QueueItemProcessor] Step 5: All {MediaCount} media files were removed for {JobName}. Marking as failed.",
+                        mediaFiles.Count, queueItem.JobName);
+                    throw new NonRetryableDownloadException($"No playable media files remain after analysis — all {mediaFiles.Count} media file(s) were corrupt or unavailable");
+                }
             }
         }
 

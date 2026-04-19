@@ -171,7 +171,12 @@ public class StatsController(
                         isBackup = context.IsBackup,
                         isSecondary = context.IsSecondary,
                         isImported = context.IsImported,
-                        bufferedCount = context.DetailsObject?.BufferedCount
+                        bufferedCount = context.DetailsObject?.BufferedCount,
+                        bufferWindowStart = context.DetailsObject?.BufferWindowStart,
+                        bufferWindowEnd = context.DetailsObject?.BufferWindowEnd,
+                        totalSegments = context.DetailsObject?.TotalSegments,
+                        currentBytePosition = context.DetailsObject?.CurrentBytePosition,
+                        fileSize = context.DetailsObject?.FileSize
                     });
                 }
 

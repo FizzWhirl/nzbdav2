@@ -345,7 +345,7 @@ function ProviderCard({
                         ) : (
                             <div className="mt-1">
                                 {(() => {
-                                    const queue = displayGroups.filter(g => g.usageType === 1);
+                                    const queue = displayGroups.filter(g => [1, 7].includes(g.usageType));
                                     const health = displayGroups.filter(g => [3, 4].includes(g.usageType));
                                     const buffer = displayGroups.filter(g => g.usageType === 5);
                                     const other = displayGroups.filter(g => [0, 2, 6].includes(g.usageType));

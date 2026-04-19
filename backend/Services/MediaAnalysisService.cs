@@ -30,9 +30,16 @@ public class MediaAnalysisService(
         var encodedPath = string.Join("/", item.Path.Split('/').Select(Uri.EscapeDataString));
         var webDavUrl = $"http://localhost:8080{encodedPath}";
 
-        // 3. Run ffprobe with analysis mode header
+        // 3. Run ffprobe with analysis mode header (retry once on failure for transient issues)
         Log.Information("[MediaAnalysis] Running ffprobe on {Name} ({Id}) via HTTP with analysis mode", item.Name, davItemId);
         var (result, timedOut) = await RunFfprobeAsync(webDavUrl, ct).ConfigureAwait(false);
+
+        if (!timedOut && string.IsNullOrWhiteSpace(result))
+        {
+            Log.Warning("[MediaAnalysis] ffprobe failed for {Name} — retrying in 3s (transient provider issue?)", item.Name);
+            await Task.Delay(3000, ct).ConfigureAwait(false);
+            (result, timedOut) = await RunFfprobeAsync(webDavUrl, ct).ConfigureAwait(false);
+        }
 
         // 4. Update DB
         MediaAnalysisResult analysisResult;
@@ -63,9 +70,18 @@ public class MediaAnalysisService(
 
              // Metadata probe passed — now run decode checks at 75% and 90% to verify integrity
              var integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, ct).ConfigureAwait(false);
+
+             // Retry decode check once on failure — transient provider issues can cause false positives
              if (integrityErrors != null)
              {
-                 Log.Warning("[MediaAnalysis] Decode check failed for {Name}: {Errors}", item.Name, integrityErrors);
+                 Log.Warning("[MediaAnalysis] Decode check failed for {Name}: {Errors} — retrying in 3s", item.Name, integrityErrors);
+                 await Task.Delay(3000, ct).ConfigureAwait(false);
+                 integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, ct).ConfigureAwait(false);
+             }
+
+             if (integrityErrors != null)
+             {
+                 Log.Warning("[MediaAnalysis] Decode check failed on retry for {Name}: {Errors}", item.Name, integrityErrors);
                  item.IsCorrupted = true;
                  item.CorruptionReason = $"Decode integrity check failed: {integrityErrors}";
                  analysisResult = MediaAnalysisResult.Failed;
@@ -100,7 +116,7 @@ public class MediaAnalysisService(
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = "ffprobe",
-                    Arguments = $"-headers \"X-Analysis-Mode: true\r\n\" -v quiet -print_format json -show_format -show_streams -probesize 5000000 -analyzeduration 5000000 \"{url}\"",
+                    Arguments = $"-headers \"X-Analysis-Mode: true\r\n\" -v error -print_format json -show_format -show_streams -probesize 5000000 -analyzeduration 5000000 \"{url}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,

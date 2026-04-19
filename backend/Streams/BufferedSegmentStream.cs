@@ -1016,6 +1016,10 @@ public class BufferedSegmentStream : Stream
         // Track providers that failed for this segment to exclude on retries
         var excludedProviders = new HashSet<int>();
         var baseDetails = _usageContext?.DetailsObject;
+        // Track whether any transient (non-permanent) failure occurred during retries.
+        // If so, we cannot trust a subsequent UsenetArticleNotFoundException as truly permanent
+        // because the provider that HAS the article may have been unreachable (OOM, timeout, etc.).
+        var hadTransientFailure = false;
 
         for (int attempt = 0; attempt < maxRetries; attempt++)
         {
@@ -1217,10 +1221,32 @@ public class BufferedSegmentStream : Stream
                     }
                 }
 
-                // All fallbacks exhausted (or none available) - proceed to graceful degradation
-                Log.Warning("[BufferedStream] PERMANENT FAILURE: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}): Article not found (no fallbacks remaining). Proceeding to zero-fill.",
-                    jobName, index, segmentIds.Length, segmentId);
-                break;
+                // Exclude this provider so retry uses a different one
+                var failedProviderIndex = baseDetails?.CurrentProviderIndex;
+                if (failedProviderIndex.HasValue)
+                {
+                    excludedProviders.Add(failedProviderIndex.Value);
+                }
+
+                // Check if there are more providers to try before declaring permanent failure.
+                // Article may exist on a provider we haven't tried yet.
+                var multiClientInner = GetMultiProviderClient(client);
+                var totalProviders = multiClientInner?.Providers.Count ?? 1;
+
+                if (excludedProviders.Count < totalProviders && attempt < maxRetries - 1)
+                {
+                    // More providers available — retry with the failed provider excluded
+                    Log.Warning("[BufferedStream] ARTICLE NOT FOUND on provider {FailedProvider}: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}). Retrying on other providers ({Remaining} remaining). Attempt={Attempt}/{MaxRetries}",
+                        failedProviderIndex?.ToString() ?? "unknown", jobName, index, segmentIds.Length, segmentId, totalProviders - excludedProviders.Count, attempt + 1, maxRetries);
+                    // Continue to next iteration of retry loop
+                }
+                else
+                {
+                    // All providers have been tried, or no retries left
+                    Log.Warning("[BufferedStream] PERMANENT FAILURE: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}): Article not found on {TriedCount}/{TotalProviders} provider(s) (no fallbacks remaining). Proceeding to zero-fill.",
+                        jobName, index, segmentIds.Length, segmentId, excludedProviders.Count, totalProviders);
+                    break;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -1231,6 +1257,7 @@ public class BufferedSegmentStream : Stream
                 if (ct.IsCancellationRequested) throw new OperationCanceledException(ex.Message, ex, ct);
 
                 lastException = ex;
+                hadTransientFailure = true; // OOM, timeout, connection failure — transient infrastructure issue
 
                 // Track which provider failed so we exclude it on retry
                 var failedProviderIndex = baseDetails?.CurrentProviderIndex;
@@ -1272,24 +1299,43 @@ public class BufferedSegmentStream : Stream
         _corruptedSegments.Add((index, segmentId));
 
         // Report corruption back to database if we have a DavItemId
+        // Only mark as permanently corrupted for genuine article/data failures.
+        // Transient infrastructure failures (provider down, OOM, timeouts) should NOT
+        // permanently mark the file — they just trigger urgent health checks.
         if (_usageContext?.DetailsObject?.DavItemId != null)
         {
             var davItemId = _usageContext.Value.DetailsObject.DavItemId.Value;
+            // Only treat as permanent if the exception type indicates genuine data absence
+            // AND no transient failures occurred during retries. If any provider had a transient
+            // failure (OOM, timeout), we can't trust a 430 from another provider — the article
+            // may exist on the provider that was temporarily unreachable.
+            var isPermanentFailure = !hadTransientFailure
+                                  && (lastException is UsenetArticleNotFoundException
+                                      || lastException is InvalidDataException
+                                      || lastException is PermanentSegmentFailureException);
             var reason = $"Data missing/corrupt after {maxRetries} retries: {lastException?.Message ?? "Unknown error"}";
             _ = Task.Run(async () => {
                 try {
                     using var db = new DavDatabaseContext();
                     var item = await db.Items.FindAsync(davItemId);
                     if (item != null) {
-                        item.IsCorrupted = true;
-                        item.CorruptionReason = reason;
-                        // Trigger immediate urgent health check (HEAD)
+                        if (isPermanentFailure)
+                        {
+                            item.IsCorrupted = true;
+                            item.CorruptionReason = reason;
+                            Log.Information("[BufferedStream] Marked item {ItemId} as corrupted due to permanent segment failure: {Reason}", davItemId, lastException?.GetType().Name);
+                        }
+                        else
+                        {
+                            Log.Warning("[BufferedStream] Transient failure for item {ItemId} (not marking as corrupted): {Error}. HadTransientFailure={HadTransient}, LastExceptionType={ExType}. Scheduling urgent health check.",
+                                davItemId, lastException?.Message, hadTransientFailure, lastException?.GetType().Name);
+                        }
+                        // Always trigger immediate urgent health check regardless of failure type
                         item.NextHealthCheck = DateTimeOffset.MinValue;
                         await db.SaveChangesAsync();
-                        Log.Information("[BufferedStream] Marked item {ItemId} as corrupted and scheduled urgent health check due to terminal segment failure.", davItemId);
                     }
                 } catch (Exception dbEx) {
-                    Log.Error(dbEx, "[BufferedStream] Failed to mark item as corrupted in database.");
+                    Log.Error(dbEx, "[BufferedStream] Failed to update item corruption status in database.");
                 }
             });
         }

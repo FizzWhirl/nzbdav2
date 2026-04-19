@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using System.Net;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Builder;
 using NzbWebDAV.Utils;
 using Serilog;
 
@@ -23,6 +25,22 @@ public static class WebApplicationAuthExtensions
     public static void UseWebdavBasicAuthentication(this WebApplication app)
     {
         if (IsWebdavAuthDisabled()) return;
+
+        // Bypass Basic auth for internal analysis requests (ffprobe/ffmpeg) from localhost.
+        // These requests send X-Analysis-Mode: true but cannot provide Basic credentials.
+        app.Use(async (context, next) =>
+        {
+            if (context.Request.Headers.ContainsKey("X-Analysis-Mode") &&
+                context.Connection.RemoteIpAddress != null &&
+                IPAddress.IsLoopback(context.Connection.RemoteIpAddress))
+            {
+                context.User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.Name, "internal-analysis")],
+                    "InternalAnalysis"));
+            }
+            await next();
+        });
+
         app.UseAuthentication();
     }
 }

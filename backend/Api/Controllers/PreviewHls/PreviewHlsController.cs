@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using Microsoft.AspNetCore.Mvc;
+using NzbWebDAV.Api.Controllers.Preview;
 using NzbWebDAV.Api.Controllers.GetWebdavItem;
 using NzbWebDAV.Database;
 using NzbWebDAV.WebDav;
@@ -69,6 +70,7 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
 
         var startSeconds = segIndex * SegmentDurationSeconds;
         var inputUrl = BuildInternalViewUrl(item.Path);
+        using var previewProcessSlot = await PreviewProcessLimiter.AcquireAsync(HttpContext.RequestAborted).ConfigureAwait(false);
 
         var arguments = new List<string>
         {
@@ -114,7 +116,7 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = "ffmpeg",
+                FileName = ResolveExecutablePath("FFMPEG_PATH", "ffmpeg"),
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -129,7 +131,8 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
         if (!process.Start())
             return StatusCode(500, "Failed to start ffmpeg process.");
 
-        Log.Debug("[PreviewHls] Segment {SegIndex} (start={StartSeconds}s) for DavItemId={DavItemId}", segIndex, startSeconds, davItemId);
+        Log.Debug("[PreviewHls] Segment {SegIndex} (start={StartSeconds}s) for DavItemId={DavItemId} (preview ffmpeg slots max={MaxConcurrent})",
+            segIndex, startSeconds, davItemId, PreviewProcessLimiter.MaxConcurrent);
 
         var stderrTask = Task.Run(async () =>
         {
@@ -232,7 +235,7 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "ffprobe",
+                    FileName = ResolveExecutablePath("FFPROBE_PATH", "ffprobe"),
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -277,5 +280,11 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
         }
 
         return 0;
+    }
+
+    private static string ResolveExecutablePath(string envName, string defaultCommand)
+    {
+        var configured = Environment.GetEnvironmentVariable(envName);
+        return string.IsNullOrWhiteSpace(configured) ? defaultCommand : configured;
     }
 }

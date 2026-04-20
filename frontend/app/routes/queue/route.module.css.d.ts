@@ -1,10 +1,10 @@
 declare const styles: {
-  readonly "container": string;
-  readonly "section": string;
-  readonly "section-title": string;
   readonly "alert": string;
+  readonly "container": string;
   readonly "list": string;
   readonly "listItem": string;
+  readonly "section": string;
+  readonly "section-title": string;
 };
 export = styles;
 

@@ -6,7 +6,7 @@ import type {
     DirectoryItem, SearchResult, ConfigItem,
     HealthCheckQueueResponse, HealthCheckQueueItem,
     HealthCheckHistoryResponse, HealthCheckStats,
-    AnalysisItem, FileDetails, ProviderStatistic,
+    AnalysisItem, AnalysisHistoryItem, FileDetails, ProviderStatistic,
     HealthCheckInfoType, DashboardSummary
 } from "~/types/backend";
 import type { DashboardData } from "~/types/dashboard";

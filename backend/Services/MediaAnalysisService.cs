@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
+using NzbWebDAV.Utils;
 using Serilog;
 
 namespace NzbWebDAV.Services;
@@ -110,13 +111,14 @@ public class MediaAnalysisService(
     {
         try
         {
+            var headers = BuildAnalysisHeaders();
             var start = Stopwatch.StartNew();
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "ffprobe",
-                    Arguments = $"-headers \"X-Analysis-Mode: true\r\n\" -v error -print_format json -show_format -show_streams -probesize 5000000 -analyzeduration 5000000 \"{url}\"",
+                    FileName = ResolveExecutablePath("FFPROBE_PATH", "ffprobe"),
+                    Arguments = $"-headers \"{headers}\" -v error -print_format json -show_format -show_streams -probesize 5000000 -analyzeduration 5000000 \"{url}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -225,12 +227,13 @@ public class MediaAnalysisService(
         var sw = Stopwatch.StartNew();
         try
         {
+            var headers = BuildAnalysisHeaders();
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "ffmpeg",
-                    Arguments = $"-headers \"X-Analysis-Mode: true\r\n\" -ss {seekPosition} -i \"{url}\" -t 5 -v error -f null -",
+                    FileName = ResolveExecutablePath("FFMPEG_PATH", "ffmpeg"),
+                    Arguments = $"-headers \"{headers}\" -ss {seekPosition} -i \"{url}\" -t 5 -v error -f null -",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -278,5 +281,17 @@ public class MediaAnalysisService(
             sw.Stop();
             return $"[error] {ex.Message}";
         }
+    }
+
+    private static string BuildAnalysisHeaders()
+    {
+        var token = EnvironmentUtil.GetVariable("FRONTEND_BACKEND_API_KEY");
+        return $"X-Analysis-Mode: true\r\nX-Internal-Analysis-Auth: {token}\r\n";
+    }
+
+    private static string ResolveExecutablePath(string envName, string defaultCommand)
+    {
+        var configured = Environment.GetEnvironmentVariable(envName);
+        return string.IsNullOrWhiteSpace(configured) ? defaultCommand : configured;
     }
 }

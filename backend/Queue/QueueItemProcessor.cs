@@ -40,7 +40,6 @@ public class QueueItemProcessor(
 {
     public async Task ProcessAsync()
     {
-        Log.Warning("!!! DEBUG: QueueItemProcessor STARTING for {JobName} ({Id}) !!!", queueItem.JobName, queueItem.Id);
         Log.Information("[QueueItemProcessor] Starting processing for {JobName} ({Id})", queueItem.JobName, queueItem.Id);
         // initialize
         var startTime = DateTime.Now;
@@ -499,7 +498,6 @@ public class QueueItemProcessor(
                 .ToListAsync().ConfigureAwait(false);
 
             // Only run ffprobe on media files not confirmed DMCA'd or probe-failed
-            var passedProbeSet = new HashSet<string>(probePassedNames, StringComparer.OrdinalIgnoreCase);
             var dmcaNameSet = new HashSet<string>(dmcaFileNames, StringComparer.OrdinalIgnoreCase);
             var failedProbeSet = new HashSet<string>(probeFailedNames, StringComparer.OrdinalIgnoreCase);
             var mediaFiles = allItems.Where(i => FilenameUtil.IsMediaFile(i.Name)).ToList();
@@ -518,23 +516,12 @@ public class QueueItemProcessor(
                 }
             }
 
-            // Mark probe-failed files (missing articles) as corrupt directly — no need for ffprobe
+            // Remove probe-failed files (missing articles) directly — no need for ffprobe
             if (failedProbeSet.Count > 0)
             {
                 var failedItemIds = mediaFiles.Where(i => failedProbeSet.Contains(i.Name)).Select(i => i.Id).ToList();
                 if (failedItemIds.Count > 0)
                 {
-                    foreach (var id in failedItemIds)
-                    {
-                        var item = await dbContext.Items.FindAsync([id], queueCt).ConfigureAwait(false);
-                        if (item != null)
-                        {
-                            item.IsCorrupted = true;
-                            item.CorruptionReason = "Missing Usenet articles detected by Step 3 spot-check";
-                        }
-                    }
-                    await dbContext.SaveChangesAsync(queueCt).ConfigureAwait(false);
-
                     var probeFailedDeleted = await dbContext.Items
                         .Where(i => failedItemIds.Contains(i.Id))
                         .ExecuteDeleteAsync().ConfigureAwait(false);
@@ -555,69 +542,60 @@ public class QueueItemProcessor(
             else
             {
                 var corruptIds = new ConcurrentBag<Guid>();
-                var analysisSemaphore = new SemaphoreSlim(10, 10); // Run up to 10 analyses in parallel (ffprobe + decode check
 
                 await Parallel.ForEachAsync(filesToCheck, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = queueCt }, async (item, ct) =>
                 {
-                    await analysisSemaphore.WaitAsync(ct).ConfigureAwait(false);
-                    try
+                    Log.Debug("[QueueItemProcessor] Step 5: Analyzing {FileName}...", item.Name);
+
+                    // Show in active analyses UI via websocket
+                    websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress,
+                        $"{item.Id}|start|{item.Name}|{queueItem.JobName}");
+
+                    // Suppress NzbAnalysisService from being triggered by the WebDAV GET that ffprobe makes.
+                    using var suppression = NzbAnalysisService.SuppressAnalysisFor(item.Id);
+                    var result = await mediaAnalysis.AnalyzeMediaAsync(item.Id, ct).ConfigureAwait(false);
+
+                    // Report result to active analyses UI
+                    string historyResult;
+                    string historyDetails;
+                    switch (result)
                     {
-                        Log.Debug("[QueueItemProcessor] Step 5: Analyzing {FileName}...", item.Name);
-
-                        // Show in active analyses UI via websocket
-                        websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress,
-                            $"{item.Id}|start|{item.Name}|{queueItem.JobName}");
-
-                        // Suppress NzbAnalysisService from being triggered by the WebDAV GET that ffprobe makes.
-                        using var suppression = NzbAnalysisService.SuppressAnalysisFor(item.Id);
-                        var result = await mediaAnalysis.AnalyzeMediaAsync(item.Id, ct).ConfigureAwait(false);
-
-                        // Report result to active analyses UI
-                        string historyResult;
-                        string historyDetails;
-                        switch (result)
-                        {
-                            case MediaAnalysisResult.Failed:
-                                Log.Warning("[QueueItemProcessor] Step 5: {FileName} failed media analysis — marking for removal", item.Name);
-                                corruptIds.Add(item.Id);
-                                websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|error");
-                                historyResult = "Failed";
-                                historyDetails = "Media integrity check failed — file corrupt or unplayable";
-                                break;
-                            case MediaAnalysisResult.Timeout:
-                                Log.Warning("[QueueItemProcessor] Step 5: {FileName} timed out during analysis — keeping file", item.Name);
-                                websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
-                                historyResult = "Pending";
-                                historyDetails = "Media integrity check timed out — file kept for retry";
-                                break;
-                            default:
-                                Log.Information("[QueueItemProcessor] Step 5: {FileName} passed media analysis", item.Name);
-                                websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
-                                historyResult = "Success";
-                                historyDetails = "Media integrity check passed";
-                                break;
-                        }
-
-                        // Save to analysis history (use lock for EF Core DbContext thread safety)
-                        lock (dbContext)
-                        {
-                            dbContext.AnalysisHistoryItems.Add(new AnalysisHistoryItem
-                            {
-                                DavItemId = item.Id,
-                                FileName = item.Name,
-                                JobName = queueItem.JobName,
-                                Result = historyResult,
-                                Details = historyDetails,
-                                CreatedAt = DateTimeOffset.UtcNow
-                            });
-                        }
-                        // SaveChanges after each to avoid holding data in memory for large batches
-                        lock (dbContext) { dbContext.SaveChanges(); }
+                        case MediaAnalysisResult.Failed:
+                            Log.Warning("[QueueItemProcessor] Step 5: {FileName} failed media analysis — marking for removal", item.Name);
+                            corruptIds.Add(item.Id);
+                            websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|error");
+                            historyResult = "Failed";
+                            historyDetails = "Media integrity check failed — file corrupt or unplayable";
+                            break;
+                        case MediaAnalysisResult.Timeout:
+                            Log.Warning("[QueueItemProcessor] Step 5: {FileName} timed out during analysis — keeping file", item.Name);
+                            websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
+                            historyResult = "Pending";
+                            historyDetails = "Media integrity check timed out — file kept for retry";
+                            break;
+                        default:
+                            Log.Information("[QueueItemProcessor] Step 5: {FileName} passed media analysis", item.Name);
+                            websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
+                            historyResult = "Success";
+                            historyDetails = "Media integrity check passed";
+                            break;
                     }
-                    finally
+
+                    // Save to analysis history (use lock for EF Core DbContext thread safety)
+                    lock (dbContext)
                     {
-                        analysisSemaphore.Release();
+                        dbContext.AnalysisHistoryItems.Add(new AnalysisHistoryItem
+                        {
+                            DavItemId = item.Id,
+                            FileName = item.Name,
+                            JobName = queueItem.JobName,
+                            Result = historyResult,
+                            Details = historyDetails,
+                            CreatedAt = DateTimeOffset.UtcNow
+                        });
                     }
+                    // SaveChanges after each to avoid holding data in memory for large batches
+                    lock (dbContext) { dbContext.SaveChanges(); }
                 }).ConfigureAwait(false);
 
                 if (!corruptIds.IsEmpty)

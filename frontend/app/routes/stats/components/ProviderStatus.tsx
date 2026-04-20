@@ -2,7 +2,7 @@ import { Card, Row, Col, Table, Badge } from "react-bootstrap";
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { ProviderBandwidthSnapshot } from "~/types/bandwidth";
 import type { ConnectionUsageContext } from "~/types/connections";
-import type { FileDetails } from "~/types/file-details";
+import type { FileDetails } from "~/types/backend";
 import { FileDetailsModal } from "~/routes/health/components/file-details-modal/file-details-modal";
 import { useToast } from "~/context/ToastContext";
 
@@ -128,7 +128,7 @@ function ProviderCard({
             
             // Try to resolve ID if missing - check exact match, basename, and normalized name
             if (!effectiveId) {
-                const normalizedJobName = normalizeForGrouping(c.jobName);
+                const normalizedJobName = normalizeForGrouping(c.jobName ?? null);
                 const normalizedDetails = normalizeForGrouping(c.details);
 
                 if (c.jobName && nameToIdMap.has(c.jobName)) effectiveId = nameToIdMap.get(c.jobName);
@@ -387,7 +387,7 @@ function ProviderCard({
                                                                     {getTypeLabel(c.usageType)}
                                                                 </Badge>
                                                                 {c.bufferedCount !== undefined && c.bufferedCount !== null && (
-                                                                    <Badge bg="dark" border="secondary" className="flex-shrink-0 border" style={{fontSize: '0.55rem', marginTop: '3px', minWidth: '40px', padding: '2px 4px'}} title="Segments currently in memory buffer">
+                                                                    <Badge bg="dark" className="flex-shrink-0 border" style={{fontSize: '0.55rem', marginTop: '3px', minWidth: '40px', padding: '2px 4px'}} title="Segments currently in memory buffer">
                                                                         Buf: {c.bufferedCount}
                                                                     </Badge>
                                                                 )}
@@ -557,7 +557,7 @@ export function ProviderStatus({ bandwidth, connections }: Props) {
             const url = `/api/reset-provider-stats?jobName=${encodeURIComponent(jobName)}`;
             const response = await fetch(url, { method: 'POST' });
             if (response.ok) {
-                setSelectedFileDetails(prev => prev ? { ...prev, providerStats: [] } : null);
+                setSelectedFileDetails((prev: FileDetails | null) => prev ? { ...prev, providerStats: [] } : null);
                 addToast('Provider statistics for this file have been reset successfully.', 'success', 'Success');
             } else {
                 addToast('Failed to reset provider statistics.', 'danger', 'Error');

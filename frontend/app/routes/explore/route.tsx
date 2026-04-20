@@ -9,7 +9,6 @@ import { lookup as getMimeType } from 'mime-types';
 import { getDownloadKey } from "~/auth/downloads.server";
 import { Loading } from "../_index/components/loading/loading";
 import { formatFileSize } from "~/utils/file-size";
-import type { FileDetails } from "~/types/file-details";
 import { FileDetailsModal } from "../health/components/file-details-modal/file-details-modal";
 import { useToast } from "~/context/ToastContext";
 import { useConfirm } from "~/context/ConfirmContext";

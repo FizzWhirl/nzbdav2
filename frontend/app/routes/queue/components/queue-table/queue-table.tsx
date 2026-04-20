@@ -10,6 +10,12 @@ import { Alert, Button } from "react-bootstrap"
 
 export type QueueTableProps = {
     queueSlots: PresentationQueueSlot[],
+    totalCount?: number,
+    currentPage?: number,
+    pageSize?: number,
+    searchQuery?: string,
+    onPageChange?: (page: number) => void,
+    onSearchChange?: (query: string) => void,
     onIsSelectedChanged: (nzo_ids: Set<string>, isSelected: boolean) => void,
     onIsRemovingChanged: (nzo_ids: Set<string>, isRemoving: boolean) => void,
     onRemoved: (nzo_ids: Set<string>) => void,

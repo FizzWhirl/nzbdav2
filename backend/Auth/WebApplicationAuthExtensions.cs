@@ -1,5 +1,7 @@
 ﻿using System.Net;
+using System.Security.Cryptography;
 using System.Security.Claims;
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using NzbWebDAV.Utils;
 using Serilog;
@@ -27,12 +29,16 @@ public static class WebApplicationAuthExtensions
         if (IsWebdavAuthDisabled()) return;
 
         // Bypass Basic auth for internal analysis requests (ffprobe/ffmpeg) from localhost.
-        // These requests send X-Analysis-Mode: true but cannot provide Basic credentials.
+        // These requests must include both the analysis mode marker and the internal auth token.
         app.Use(async (context, next) =>
         {
-            if (context.Request.Headers.ContainsKey("X-Analysis-Mode") &&
-                context.Connection.RemoteIpAddress != null &&
-                IPAddress.IsLoopback(context.Connection.RemoteIpAddress))
+            var requestToken = context.Request.Headers["X-Internal-Analysis-Auth"].FirstOrDefault();
+            var expectedToken = EnvironmentUtil.GetVariable("FRONTEND_BACKEND_API_KEY");
+            var hasAnalysisMode = context.Request.Headers.ContainsKey("X-Analysis-Mode");
+            var isLoopback = context.Connection.RemoteIpAddress != null
+                             && IPAddress.IsLoopback(context.Connection.RemoteIpAddress);
+
+            if (hasAnalysisMode && isLoopback && IsTokenMatch(expectedToken, requestToken))
             {
                 context.User = new ClaimsPrincipal(new ClaimsIdentity(
                     [new Claim(ClaimTypes.Name, "internal-analysis")],
@@ -42,5 +48,15 @@ public static class WebApplicationAuthExtensions
         });
 
         app.UseAuthentication();
+    }
+
+    private static bool IsTokenMatch(string expectedToken, string? requestToken)
+    {
+        if (string.IsNullOrWhiteSpace(requestToken))
+            return false;
+
+        var expectedBytes = Encoding.UTF8.GetBytes(expectedToken);
+        var actualBytes = Encoding.UTF8.GetBytes(requestToken);
+        return CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
     }
 }

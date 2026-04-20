@@ -455,7 +455,7 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                     {onDelete && (
                                         <button
                                             className="btn btn-outline-danger btn-sm"
-                                            onClick={() => { onDelete(fileDetails.davItemId, fileDetails.fileName); onHide(); }}
+                                            onClick={() => { onDelete(fileDetails.davItemId, fileDetails.name); onHide(); }}
                                             title="Permanently delete this file from the DAV"
                                         >
                                             <i className="bi bi-trash me-1"></i>

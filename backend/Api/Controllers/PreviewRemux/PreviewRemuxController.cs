@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
+using NzbWebDAV.Api.Controllers.Preview;
 using NzbWebDAV.Database;
 using NWebDav.Server.Stores;
 using NzbWebDAV.WebDav;
@@ -20,6 +21,7 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
             return NotFound("File not found.");
 
         var startSeconds = Math.Max(0, start ?? 0);
+        using var previewProcessSlot = await PreviewProcessLimiter.AcquireAsync(HttpContext.RequestAborted).ConfigureAwait(false);
 
         // Use direct store stream to avoid nested HTTP/proxy edge cases while remuxing.
         HttpContext.Items["PreviewMode"] = true;
@@ -64,7 +66,7 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = "ffmpeg",
+                FileName = ResolveExecutablePath("FFMPEG_PATH", "ffmpeg"),
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -79,7 +81,8 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
         if (!process.Start())
             return StatusCode(500, "Failed to start remux process.");
 
-        Log.Debug("[PreviewRemux] Started ffmpeg remux for DavItemId={DavItemId}, start={StartSeconds}s", davItemId, startSeconds);
+        Log.Debug("[PreviewRemux] Started ffmpeg remux for DavItemId={DavItemId}, start={StartSeconds}s (preview ffmpeg slots max={MaxConcurrent})",
+            davItemId, startSeconds, PreviewProcessLimiter.MaxConcurrent);
 
         var stdinTask = Task.Run(async () =>
         {
@@ -147,5 +150,11 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
         }
 
         return new EmptyResult();
+    }
+
+    private static string ResolveExecutablePath(string envName, string defaultCommand)
+    {
+        var configured = Environment.GetEnvironmentVariable(envName);
+        return string.IsNullOrWhiteSpace(configured) ? defaultCommand : configured;
     }
 }

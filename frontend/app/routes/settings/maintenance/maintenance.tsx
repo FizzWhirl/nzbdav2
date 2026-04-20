@@ -11,7 +11,7 @@ type MaintenanceProps = {
 export function Maintenance({ savedConfig }: MaintenanceProps) {
     return (
         <div className={styles.container}>
-            <Accordion className={styles.accordion}>
+            <Accordion>
 
                 <Accordion.Item className={styles.accordionItem} eventKey="connection-management">
                     <Accordion.Header className={styles.accordionHeader}>

@@ -15,19 +15,18 @@ namespace NzbWebDAV.Api.Controllers.GetWebdavItem;
 [Route("view/{*path}")]
 public class ListWebdavDirectoryController(DatabaseStore store, ConfigManager configManager) : ControllerBase
 {
-
-    private async Task<Stream> GetWebdavItem(GetWebdavItemRequest request)
+    private async Task<Stream> GetWebdavItem(GetWebdavItemRequest request, CancellationToken cancellationToken)
     {
-        var item = await store.GetItemAsync(request.Item, HttpContext.RequestAborted).ConfigureAwait(false);
+        var item = await store.GetItemAsync(request.Item, cancellationToken).ConfigureAwait(false);
         if (item is null) throw new BadHttpRequestException("The file does not exist.");
         if (item is IStoreCollection) throw new BadHttpRequestException("The file does not exist.");
 
         // handle par2 preview
         if (Path.GetExtension(item.Name).ToLower() == ".par2" && configManager.IsPreviewPar2FilesEnabled())
-            return await GetPar2PreviewStream(item).ConfigureAwait(false);
+            return await GetPar2PreviewStream(item, cancellationToken).ConfigureAwait(false);
 
         // get the file stream and set the file-size in header
-        var stream = await item.GetReadableStreamAsync(HttpContext.RequestAborted).ConfigureAwait(false);
+        var stream = await item.GetReadableStreamAsync(cancellationToken).ConfigureAwait(false);
         var fileSize = stream.Length;
 
         // set content headers
@@ -38,15 +37,16 @@ public class ListWebdavDirectoryController(DatabaseStore store, ConfigManager co
         if (request.RangeStart is not null)
         {
             // compute
-            var end = request.RangeEnd ?? (fileSize - 1);
+            var start = request.RangeStart.Value;
+            var end = request.RangeEnd ?? fileSize - 1;
             var chunkSize = 1 + end - request.RangeStart!.Value;
 
             // seek
-            stream.Seek(request.RangeStart.Value, SeekOrigin.Begin);
-            if (request.RangeEnd is not null) stream = stream.LimitLength(chunkSize);
+            stream.Seek(start, SeekOrigin.Begin);
+            stream = stream.LimitLength(chunkSize);
 
             // set response headers
-            Response.Headers["Content-Range"] = $"bytes {request.RangeStart}-{end}/{fileSize}";
+            Response.Headers["Content-Range"] = $"bytes {start}-{end}/{fileSize}";
             Response.Headers["Content-Length"] = chunkSize.ToString();
             Response.StatusCode = 206;
         }
@@ -64,15 +64,22 @@ public class ListWebdavDirectoryController(DatabaseStore store, ConfigManager co
         try
         {
             HttpContext.Items["configManager"] = configManager;
-            if (HttpContext.Request.Query["preview"].FirstOrDefault()?.ToLower() == "true")
+
+            var isPreviewMode = HttpContext.Request.Query["preview"].FirstOrDefault()?.ToLower() == "true";
+            var isPreviewHlsMode = HttpContext.Request.Query["previewhls"].FirstOrDefault()?.ToLower() == "true"
+                || HttpContext.Request.Headers["X-Preview-Hls-Mode"].FirstOrDefault()?.ToLower() == "true";
+            if (isPreviewMode)
                 HttpContext.Items["PreviewMode"] = true;
+            if (isPreviewHlsMode)
+                HttpContext.Items["PreviewHlsMode"] = true;
+
             var request = new GetWebdavItemRequest(HttpContext);
-            await using var response = await GetWebdavItem(request).ConfigureAwait(false);
+            await using var response = await GetWebdavItem(request, HttpContext.RequestAborted).ConfigureAwait(false);
             await response.CopyToAsync(Response.Body, bufferSize: 256 * 1024, HttpContext.RequestAborted).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            // Client disconnected (e.g., browser seeking to new position) — nothing to do
+            // Client disconnected or request was canceled.
         }
         catch (UnauthorizedAccessException)
         {
@@ -116,17 +123,16 @@ public class ListWebdavDirectoryController(DatabaseStore store, ConfigManager co
     private static string GetContentType(string item)
     {
         var extension = Path.GetExtension(item).ToLower();
-        return extension == ".mkv" ? "video/webm"
-            : extension == ".rclonelink" ? "text/plain"
+        return extension == ".rclonelink" ? "text/plain"
             : extension == ".nfo" ? "text/plain"
             : ContentTypeUtil.GetContentType(Path.GetFileName(item));
     }
 
-    private async Task<Stream> GetPar2PreviewStream(IStoreItem item)
+    private async Task<Stream> GetPar2PreviewStream(IStoreItem item, CancellationToken cancellationToken)
     {
         Response.Headers.ContentType = "text/plain";
-        await using var stream = await item.GetReadableStreamAsync(HttpContext.RequestAborted).ConfigureAwait(false);
-        var fileDescriptors = await Par2.ReadFileDescriptions(stream, HttpContext.RequestAborted).GetAllAsync()
+        await using var stream = await item.GetReadableStreamAsync(cancellationToken).ConfigureAwait(false);
+        var fileDescriptors = await Par2.ReadFileDescriptions(stream, cancellationToken).GetAllAsync()
             .ConfigureAwait(false);
         return new MemoryStream(Encoding.UTF8.GetBytes(fileDescriptors.ToIndentedJson()));
     }

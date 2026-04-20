@@ -1,4 +1,5 @@
-import { useState } from "react";
+import Hls from "hls.js";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal, Table, Badge, Spinner, OverlayTrigger, Tooltip } from "react-bootstrap";
 import type { FileDetails } from "~/types/backend";
 import styles from "./file-details-modal.module.css";
@@ -23,10 +24,64 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
     const [repairingClassification, setRepairingClassification] = useState(false);
     const [flushingCache, setFlushingCache] = useState(false);
     const [showPreview, setShowPreview] = useState(false);
+    const videoPreviewRef = useRef<HTMLVideoElement | null>(null);
+    const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
     const { addToast } = useToast();
     const { confirm } = useConfirm();
 
     const previewType = fileDetails ? getPreviewType(fileDetails.name) : null;
+    const previewUnsupportedReason = fileDetails ? getPreviewUnsupportedReason(fileDetails.name) : null;
+
+    const getPreviewUrl = useCallback(() => {
+        if (!fileDetails) return "";
+        const separator = fileDetails.downloadUrl.includes("?") ? "&" : "?";
+        return `${fileDetails.downloadUrl}${separator}preview=true`;
+    }, [fileDetails]);
+
+    const getHlsPlaylistUrl = useCallback(() => {
+        if (!fileDetails) return "";
+        return `/api/preview/hls/${fileDetails.davItemId}/index.m3u8`;
+    }, [fileDetails]);
+
+    const stopPreviewPlayback = useCallback(() => {
+        const media = videoPreviewRef.current ?? audioPreviewRef.current;
+        if (media) {
+            media.pause();
+            media.removeAttribute("src");
+            media.load();
+        }
+    }, []);
+
+    const handleHideModal = () => {
+        stopPreviewPlayback();
+        setShowPreview(false);
+        onHide();
+    };
+
+    const handleTogglePreview = () => {
+        setShowPreview(prev => {
+            if (prev) stopPreviewPlayback();
+            return !prev;
+        });
+    };
+
+    useEffect(() => {
+        if (!showPreview)
+        {
+            stopPreviewPlayback();
+        }
+    }, [showPreview]);
+
+    useEffect(() => {
+        return () => {
+            stopPreviewPlayback();
+        };
+    }, []);
+
+    useEffect(() => {
+        stopPreviewPlayback();
+        setShowPreview(false);
+    }, [fileDetails?.davItemId]);
 
     const handleFlushRcloneCache = async () => {
         if (!fileDetails) return;
@@ -99,7 +154,7 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
     };
 
     return (
-        <Modal show={show} onHide={onHide} onExited={() => setShowPreview(false)} size="lg">
+        <Modal show={show} onHide={handleHideModal} size="lg">
             <Modal.Header closeButton>
                 <Modal.Title>File Details</Modal.Title>
             </Modal.Header>
@@ -155,11 +210,21 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                                 {previewType && (
                                                     <button
                                                         className={`btn btn-sm ${showPreview ? 'btn-success' : 'btn-outline-success'}`}
-                                                        onClick={() => setShowPreview(prev => !prev)}
+                                                        onClick={handleTogglePreview}
                                                         title={`Preview ${previewType} in browser`}
                                                     >
                                                         <i className={`bi ${previewType === 'video' ? 'bi-play-circle' : 'bi-music-note-beamed'} me-1`}></i>
                                                         {showPreview ? 'Hide Preview' : 'Preview'}
+                                                    </button>
+                                                )}
+                                                {!previewType && previewUnsupportedReason && (
+                                                    <button
+                                                        className={`btn btn-sm ${showPreview ? 'btn-warning' : 'btn-outline-warning'}`}
+                                                        onClick={handleTogglePreview}
+                                                        title={`${previewUnsupportedReason}. Uses ffmpeg remux proxy.`}
+                                                    >
+                                                        <i className="bi bi-film me-1"></i>
+                                                        {showPreview ? 'Hide Preview' : 'Preview (beta)'}
                                                     </button>
                                                 )}
                                                 {fileDetails.nzbDownloadUrl && (
@@ -232,35 +297,45 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                             </div>
                                         </td>
                                     </tr>
-                                    {showPreview && previewType && (
+                                    {showPreview && (previewType || previewUnsupportedReason) && (
                                         <tr>
                                             <td colSpan={2} className={styles.valueCell}>
                                                 <div className={styles.previewContainer}>
-                                                    <div className={styles.previewNotice}>
-                                                        <i className="bi bi-info-circle me-1"></i>
-                                                        Streaming from Usenet — seeking may take a moment to buffer
-                                                    </div>
                                                     {previewType === 'video' ? (
-                                                        <video
-                                                            controls
-                                                            autoPlay
-                                                            playsInline
-                                                            preload="none"
+                                                        <HlsVideoPlayer
+                                                            davItemId={fileDetails.davItemId}
+                                                            src={getHlsPlaylistUrl()}
                                                             className={styles.previewPlayer}
-                                                            src={`${fileDetails.downloadUrl}${fileDetails.downloadUrl.includes('?') ? '&' : '?'}preview=true`}
-                                                        >
-                                                            Your browser does not support video playback.
-                                                        </video>
-                                                    ) : (
+                                                            onEnded={() => {
+                                                                stopPreviewPlayback();
+                                                                setShowPreview(false);
+                                                            }}
+                                                        />
+                                                    ) : previewType === 'audio' ? (
                                                         <audio
+                                                            ref={audioPreviewRef}
                                                             controls
                                                             autoPlay
                                                             preload="none"
+                                                            onEnded={() => {
+                                                                stopPreviewPlayback();
+                                                                setShowPreview(false);
+                                                            }}
                                                             className={styles.previewPlayer}
-                                                            src={`${fileDetails.downloadUrl}${fileDetails.downloadUrl.includes('?') ? '&' : '?'}preview=true`}
+                                                            src={getPreviewUrl()}
                                                         >
                                                             Your browser does not support audio playback.
                                                         </audio>
+                                                    ) : (
+                                                        <HlsVideoPlayer
+                                                            davItemId={fileDetails.davItemId}
+                                                            src={getHlsPlaylistUrl()}
+                                                            className={styles.previewPlayer}
+                                                            onEnded={() => {
+                                                                stopPreviewPlayback();
+                                                                setShowPreview(false);
+                                                            }}
+                                                        />
                                                     )}
                                                 </div>
                                             </td>
@@ -683,8 +758,178 @@ function getRepairStatusText(status: number): string {
     }
 }
 
-const VIDEO_EXTENSIONS = new Set(['.mkv', '.mp4', '.avi', '.webm', '.mov', '.m4v', '.ts', '.wmv']);
-const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.aac', '.ogg', '.wav', '.m4a', '.wma', '.opus']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.m4v']);
+const AUDIO_EXTENSIONS = new Set(['.mp3', '.aac', '.ogg', '.wav', '.m4a', '.opus']);
+
+const UNSUPPORTED_PREVIEW_EXTENSIONS = new Set(['.mkv', '.avi', '.mov', '.ts', '.wmv', '.flac', '.wma']);
+
+// HLS.js-backed video player — handles unsupported containers via the HLS segmented endpoint.
+function HlsVideoPlayer({ src, davItemId, className, onEnded }: { src: string; davItemId: string; className?: string; onEnded?: () => void }) {
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const hlsRef = useRef<Hls | null>(null);
+    const [attemptIndex, setAttemptIndex] = useState(0);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+    type PlaybackMode = 'native-hls' | 'hlsjs' | 'remux';
+
+    const getAttemptOrder = (video: HTMLVideoElement): PlaybackMode[] => {
+        const order: PlaybackMode[] = [];
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            order.push('native-hls');
+        }
+        if (Hls.isSupported()) {
+            order.push('hlsjs');
+        }
+        order.push('remux');
+        return order;
+    };
+
+    const getModeLabel = (mode: PlaybackMode) => {
+        if (mode === 'native-hls') return 'native HLS';
+        if (mode === 'hlsjs') return 'HLS.js';
+        return 'compatibility remux';
+    };
+
+    const remuxUrl = `/api/preview/remux/${davItemId}`;
+
+    useEffect(() => {
+        setAttemptIndex(0);
+        setErrorMessage(null);
+    }, [src, remuxUrl]);
+
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video || !src) return;
+
+        const order = getAttemptOrder(video);
+        const currentMode = order[Math.min(attemptIndex, order.length - 1)];
+        let disposed = false;
+
+        const moveToNextMode = (reason: string) => {
+            if (disposed) return;
+
+            const nextIndex = attemptIndex + 1;
+            if (nextIndex < order.length) {
+                setErrorMessage(`Playback issue on ${getModeLabel(currentMode)}; trying ${getModeLabel(order[nextIndex])}.`);
+                setAttemptIndex(nextIndex);
+                return;
+            }
+
+            setErrorMessage(`Preview playback failed after trying all compatibility modes (${reason}).`);
+        };
+
+        const cleanupMedia = () => {
+            hlsRef.current?.destroy();
+            hlsRef.current = null;
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
+        };
+
+        if (currentMode === 'remux') {
+            video.src = remuxUrl;
+            const onError = () => moveToNextMode('remux playback error');
+            video.addEventListener('error', onError);
+            video.load();
+            void video.play().catch(() => { /* autoplay blocked — user can press play */ });
+
+            return () => {
+                disposed = true;
+                video.removeEventListener('error', onError);
+                cleanupMedia();
+            };
+        }
+
+        if (currentMode === 'native-hls') {
+            const onError = () => moveToNextMode('native HLS error');
+            video.addEventListener('error', onError);
+            video.src = src;
+            video.load();
+            void video.play().catch(() => { /* autoplay blocked — user can press play */ });
+
+            return () => {
+                disposed = true;
+                video.removeEventListener('error', onError);
+                cleanupMedia();
+            };
+        }
+
+        const hls = new Hls({
+            // Keep forward buffer healthy for network jitter and provider spikes.
+            maxBufferLength: 90,
+            maxMaxBufferLength: 180,
+            backBufferLength: 30,
+            capLevelToPlayerSize: true,
+            enableWorker: true,
+            fragLoadingTimeOut: 60000,
+            fragLoadingMaxRetry: 4,
+            fragLoadingRetryDelay: 2000,
+            manifestLoadingMaxRetry: 2,
+            levelLoadingMaxRetry: 4,
+        });
+
+        hlsRef.current = hls;
+        hls.loadSource(src);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            void video.play().catch(() => { /* autoplay blocked — user can press play */ });
+        });
+
+        let mediaRecoveryAttempts = 0;
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (!data.fatal) return;
+
+            console.error('[HlsVideoPlayer] Fatal HLS error:', data.type, data.details);
+
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                // Give transient network/provider issues a chance before switching modes.
+                hls.startLoad();
+                return;
+            }
+
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                mediaRecoveryAttempts++;
+                if (mediaRecoveryAttempts <= 2) {
+                    hls.recoverMediaError();
+                    return;
+                }
+
+                if (mediaRecoveryAttempts === 3) {
+                    hls.swapAudioCodec();
+                    hls.recoverMediaError();
+                    return;
+                }
+            }
+
+            moveToNextMode(`hls.js fatal ${data.type}`);
+        });
+
+        hls.on(Hls.Events.FRAG_CHANGED, () => {
+            mediaRecoveryAttempts = 0;
+        });
+
+        return () => {
+            disposed = true;
+            cleanupMedia();
+        }
+    }, [src, remuxUrl, attemptIndex]);
+
+    return (
+        <div className={styles.hlsPlayerShell}>
+            <video
+                ref={videoRef}
+                controls
+                playsInline
+                className={className}
+                onEnded={onEnded}
+            >
+                Your browser does not support video playback.
+            </video>
+            {errorMessage && <div className={styles.hlsError}>{errorMessage}</div>}
+        </div>
+    );
+}
 
 function getPreviewType(name: string): 'video' | 'audio' | null {
     const ext = name.toLowerCase().match(/\.[^.]+$/)?.[0];
@@ -692,4 +937,12 @@ function getPreviewType(name: string): 'video' | 'audio' | null {
     if (VIDEO_EXTENSIONS.has(ext)) return 'video';
     if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
     return null;
+}
+
+function getPreviewUnsupportedReason(name: string): string | null {
+    const ext = name.toLowerCase().match(/\.[^.]+$/)?.[0];
+    if (!ext) return null;
+    return UNSUPPORTED_PREVIEW_EXTENSIONS.has(ext)
+        ? `.${ext.slice(1)} is not reliably seekable in browser-native preview players`
+        : null;
 }

@@ -212,6 +212,14 @@ public class QueueItemProcessor(
         Log.Information("[QueueItemProcessor] Step 1a complete: Fetched {SegmentCount} first segments for {JobName}",
             segments.Count, queueItem.JobName);
 
+        // If we failed to fetch first segments for every file, treat this as transient infrastructure failure
+        // (e.g. provider outage / OOM / network) rather than a permanent bad NZB.
+        if (nzbFiles.Count > 0 && segments.Count == 0)
+        {
+            throw new RetryableDownloadException(
+                $"Could not fetch first segments for any NZB file in {queueItem.JobName}. Will retry.");
+        }
+
         Log.Debug("[QueueItemProcessor] Step 1b: Extracting Par2 file descriptors for {JobName}...", queueItem.JobName);
         var par2FileDescriptors = await GetPar2FileDescriptorsStep.GetPar2FileDescriptors(
             segments, usenetClient, queueCt).ConfigureAwait(false);

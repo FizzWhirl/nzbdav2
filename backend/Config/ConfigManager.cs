@@ -185,7 +185,7 @@ public class ConfigManager
     {
         return int.Parse(
             StringUtil.EmptyToNull(GetConfigValue("usenet.max-concurrent-buffered-streams"))
-            ?? "2"
+            ?? "4"
         );
     }
 

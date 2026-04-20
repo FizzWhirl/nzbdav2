@@ -330,16 +330,26 @@ public class MultiConnectionNntpClient : INntpClient
                         {
                             if (connectionLock != null)
                             {
-                                _ = connectionLock.Connection.WaitForReady(SigtermUtil.GetCancellationToken())
-                                    .ContinueWith(t =>
+                                _ = Task.Run(async () =>
+                                {
+                                    try
                                     {
-                                        if (t.IsFaulted)
-                                        {
-                                            _logger?.Debug("Background connection cleanup failed: {Message}", t.Exception?.InnerException?.Message);
-                                            connectionLock.Replace();
-                                        }
+                                        // Bound cleanup wait to avoid leaking active locks on fatal stream-setup failures
+                                        // (e.g. OOM) where NNTP drain may never complete.
+                                        using var cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
+                                        cleanupCts.CancelAfter(TimeSpan.FromMilliseconds(500));
+                                        await connectionLock.Connection.WaitForReady(cleanupCts.Token).ConfigureAwait(false);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger?.Debug("Background stream cleanup failed: {Message}. Forcing connection replacement.", ex.Message);
+                                        connectionLock.Replace();
+                                    }
+                                    finally
+                                    {
                                         connectionLock.Dispose();
-                                    });
+                                    }
+                                });
                             }
                         }
                         // Always dispose permit in finally block of the current recursive call
@@ -435,16 +445,25 @@ public class MultiConnectionNntpClient : INntpClient
                 // we intentionally do not pass the cancellation token to ContinueWith,
                 // since we want the continuation to always run.
                 if (!isDisposed)
-                    _ = connectionLock.Connection.WaitForReady(SigtermUtil.GetCancellationToken())
-                        .ContinueWith(t =>
+                    _ = Task.Run(async () =>
+                    {
+                        try
                         {
-                            if (t.IsFaulted)
-                            {
-                                _logger?.Debug("Background connection cleanup failed: {Message}", t.Exception?.InnerException?.Message);
-                                connectionLock.Replace();
-                            }
+                            // Bound cleanup wait to avoid stale active connections when drain hangs.
+                            using var cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
+                            cleanupCts.CancelAfter(TimeSpan.FromMilliseconds(500));
+                            await connectionLock.Connection.WaitForReady(cleanupCts.Token).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Debug("Background connection cleanup failed: {Message}. Forcing replacement.", ex.Message);
+                            connectionLock.Replace();
+                        }
+                        finally
+                        {
                             connectionLock.Dispose();
-                        });
+                        }
+                    });
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)

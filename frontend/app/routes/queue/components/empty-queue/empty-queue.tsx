@@ -4,6 +4,7 @@ import styles from "./empty-queue.module.css"
 import { useDropzone, type FileWithPath } from 'react-dropzone'
 import { className } from "~/utils/styling";
 import { useFetcher } from "react-router";
+import { Alert } from "react-bootstrap";
 
 export function EmptyQueue() {
     const fetcher = useFetcher();
@@ -34,6 +35,9 @@ export function EmptyQueue() {
             <div className={pageStyles["section-title"]}>
                 <h3>Queue</h3>
             </div>
+                {fetcher.data?.error && (
+                    <Alert variant="danger">{fetcher.data.error}</Alert>
+                )}
             <div {...className([styles.container, isDragActive && styles["drag-active"]])}  {...getRootProps()}>
                 <input {...getInputProps()} />
                 <input ref={inputRef} name="nzbFile" type="file" style={{ display: 'none' }} />

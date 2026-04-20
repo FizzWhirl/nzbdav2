@@ -134,12 +134,10 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
         Log.Debug("[PreviewHls] Segment {SegIndex} (start={StartSeconds}s) for DavItemId={DavItemId} (preview ffmpeg slots max={MaxConcurrent})",
             segIndex, startSeconds, davItemId, PreviewProcessLimiter.MaxConcurrent);
 
-        var stderrTask = Task.Run(async () =>
-        {
-            var stderr = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(stderr))
-                Log.Debug("[PreviewHls] ffmpeg stderr for segment {SegIndex} DavItemId={DavItemId}: {Stderr}", segIndex, davItemId, stderr.Trim());
-        });
+        var stderrTask = StreamStderrAsync(
+            process,
+            line => Log.Debug("[PreviewHls] ffmpeg stderr for segment {SegIndex} DavItemId={DavItemId}: {StderrLine}", segIndex, davItemId, line),
+            HttpContext.RequestAborted);
 
         using var abortRegistration = HttpContext.RequestAborted.Register(() =>
         {
@@ -286,5 +284,25 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
     {
         var configured = Environment.GetEnvironmentVariable(envName);
         return string.IsNullOrWhiteSpace(configured) ? defaultCommand : configured;
+    }
+
+    private static async Task StreamStderrAsync(Process process, Action<string> onLine, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var line = await process.StandardError.ReadLineAsync().ConfigureAwait(false);
+                if (line == null)
+                    break;
+
+                if (!string.IsNullOrWhiteSpace(line))
+                    onLine(line);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug("[PreviewHls] stderr stream closed early: {Message}", ex.Message);
+        }
     }
 }

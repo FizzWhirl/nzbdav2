@@ -100,14 +100,10 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
             }
         });
 
-        var stderrTask = Task.Run(async () =>
-        {
-            var stderr = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(stderr))
-            {
-                Log.Debug("[PreviewRemux] ffmpeg stderr for DavItemId={DavItemId}: {Stderr}", davItemId, stderr.Trim());
-            }
-        });
+        var stderrTask = StreamStderrAsync(
+            process,
+            line => Log.Debug("[PreviewRemux] ffmpeg stderr for DavItemId={DavItemId}: {StderrLine}", davItemId, line),
+            HttpContext.RequestAborted);
 
         using var abortRegistration = HttpContext.RequestAborted.Register(() =>
         {
@@ -156,5 +152,25 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
     {
         var configured = Environment.GetEnvironmentVariable(envName);
         return string.IsNullOrWhiteSpace(configured) ? defaultCommand : configured;
+    }
+
+    private static async Task StreamStderrAsync(Process process, Action<string> onLine, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var line = await process.StandardError.ReadLineAsync().ConfigureAwait(false);
+                if (line == null)
+                    break;
+
+                if (!string.IsNullOrWhiteSpace(line))
+                    onLine(line);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug("[PreviewRemux] stderr stream closed early: {Message}", ex.Message);
+        }
     }
 }

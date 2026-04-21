@@ -30,7 +30,10 @@ public class GlobalOperationLimiter : IDisposable
     {
         _configManager = configManager;
         _totalConnections = Math.Max(1, totalConnections);
-        _streamingReserve = Math.Max(1, Math.Min(streamingReserve, _totalConnections - 1));
+        // Reserve cannot exceed total-1, and for single-connection setups it must be 0.
+        _streamingReserve = _totalConnections <= 1
+            ? 0
+            : Math.Clamp(streamingReserve, 1, _totalConnections - 1);
 
         _sharedPool = new PrioritizedSemaphore(_totalConnections, _totalConnections, priorityOdds);
 

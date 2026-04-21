@@ -116,6 +116,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.2 (2026-04-21)
+*   **Fix**: Preview endpoints now reject non-file DavItem IDs up front (directories/roots), preventing HLS/remux requests from targeting invalid `/view` paths.
+*   **Reliability**: HLS and remux preview streaming no longer return empty HTTP 200 responses when `ffmpeg` exits with an error before emitting data; zero-output failures now return explicit 502 errors.
+*   **Maintenance**: Rebased feature/media-analysis-optimization onto latest `origin/main` and retained branch functionality on top of upstream queue/concurrency changes.
+
 ## v0.7.1 (2026-04-13)
 *   **Feature**: Hybrid connection pool — replace hard-partitioned connection semaphores with priority-based shared pool (`PrioritizedSemaphore`). Queue processing uses full connection capacity when not streaming; streaming gets guaranteed reserve slots (configurable via `usenet.streaming-reserve`, default 5) and priority scheduling (configurable via `usenet.streaming-priority`, default 80%).
 *   **Feature**: Buffered multi-connection streaming during RAR header parsing via new `QueueRarProcessing` context — RAR end-of-archive seeks now pre-fetch segments instead of one-at-a-time lazy fetches.

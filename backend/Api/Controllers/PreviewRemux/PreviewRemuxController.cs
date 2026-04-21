@@ -3,6 +3,7 @@ using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 using NzbWebDAV.Api.Controllers.Preview;
 using NzbWebDAV.Database;
+using NzbWebDAV.Database.Models;
 using NWebDav.Server.Stores;
 using NzbWebDAV.WebDav;
 using Serilog;
@@ -19,6 +20,9 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
         var item = await dbClient.GetFileById(davItemId.ToString()).ConfigureAwait(false);
         if (item == null)
             return NotFound("File not found.");
+
+        if (!IsPreviewableItemType(item.Type))
+            return BadRequest("Preview requires a file DavItemId (not a directory/root item).");
 
         var startSeconds = Math.Max(0, start ?? 0);
         using var previewProcessSlot = await PreviewProcessLimiter.AcquireAsync(HttpContext.RequestAborted).ConfigureAwait(false);
@@ -118,15 +122,30 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
             }
         });
 
-        Response.StatusCode = 200;
-        Response.ContentType = "video/mp4";
-        Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
-        Response.Headers["Pragma"] = "no-cache";
-        Response.Headers["Accept-Ranges"] = "none";
-
         try
         {
-            await process.StandardOutput.BaseStream.CopyToAsync(Response.Body, HttpContext.RequestAborted).ConfigureAwait(false);
+            var hadOutput = false;
+            var buffer = new byte[64 * 1024];
+
+            while (true)
+            {
+                var bytesRead = await process.StandardOutput.BaseStream.ReadAsync(buffer, HttpContext.RequestAborted).ConfigureAwait(false);
+                if (bytesRead <= 0)
+                    break;
+
+                if (!hadOutput)
+                {
+                    Response.StatusCode = 200;
+                    Response.ContentType = "video/mp4";
+                    Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+                    Response.Headers["Pragma"] = "no-cache";
+                    Response.Headers["Accept-Ranges"] = "none";
+                    hadOutput = true;
+                }
+
+                await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+
             await stdinTask.ConfigureAwait(false);
             await process.WaitForExitAsync(HttpContext.RequestAborted).ConfigureAwait(false);
             await stderrTask.ConfigureAwait(false);
@@ -134,7 +153,12 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
             if (process.ExitCode != 0)
             {
                 Log.Warning("[PreviewRemux] ffmpeg exited with code {ExitCode} for DavItemId={DavItemId}", process.ExitCode, davItemId);
+                if (!hadOutput)
+                    return StatusCode(502, "Failed to generate remux preview.");
             }
+
+            if (!hadOutput)
+                return StatusCode(502, "Remux preview generation produced no output.");
         }
         catch (OperationCanceledException)
         {
@@ -146,6 +170,13 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
         }
 
         return new EmptyResult();
+    }
+
+    private static bool IsPreviewableItemType(DavItem.ItemType type)
+    {
+        return type is DavItem.ItemType.NzbFile
+            or DavItem.ItemType.RarFile
+            or DavItem.ItemType.MultipartFile;
     }
 
     private static string ResolveExecutablePath(string envName, string defaultCommand)

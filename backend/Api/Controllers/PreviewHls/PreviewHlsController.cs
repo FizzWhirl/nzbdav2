@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using NzbWebDAV.Api.Controllers.Preview;
 using NzbWebDAV.Api.Controllers.GetWebdavItem;
 using NzbWebDAV.Database;
+using NzbWebDAV.Database.Models;
 using NzbWebDAV.WebDav;
 using NzbWebDAV.Utils;
 using Serilog;
@@ -25,6 +26,9 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
         var item = await dbClient.GetFileById(davItemId.ToString()).ConfigureAwait(false);
         if (item == null)
             return NotFound("File not found.");
+
+        if (!IsPreviewableItemType(item.Type))
+            return BadRequest("Preview requires a file DavItemId (not a directory/root item).");
 
         var duration = ParseDurationSeconds(item.MediaInfo);
         if (duration <= 0)
@@ -67,6 +71,9 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
         var item = await dbClient.GetFileById(davItemId.ToString()).ConfigureAwait(false);
         if (item == null)
             return NotFound("File not found.");
+
+        if (!IsPreviewableItemType(item.Type))
+            return BadRequest("Preview requires a file DavItemId (not a directory/root item).");
 
         var startSeconds = segIndex * SegmentDurationSeconds;
         var inputUrl = BuildInternalViewUrl(item.Path);
@@ -145,21 +152,43 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
             catch { /* best effort */ }
         });
 
-        Response.StatusCode = 200;
-        Response.ContentType = "video/mp2t";
-        Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
-        Response.Headers["Pragma"] = "no-cache";
-        // Important: tell HLS.js the segment has bytes (no Accept-Ranges)
-        Response.Headers["Accept-Ranges"] = "none";
-
         try
         {
-            await process.StandardOutput.BaseStream.CopyToAsync(Response.Body, HttpContext.RequestAborted).ConfigureAwait(false);
+            var hadOutput = false;
+            var buffer = new byte[64 * 1024];
+
+            while (true)
+            {
+                var bytesRead = await process.StandardOutput.BaseStream.ReadAsync(buffer, HttpContext.RequestAborted).ConfigureAwait(false);
+                if (bytesRead <= 0)
+                    break;
+
+                if (!hadOutput)
+                {
+                    Response.StatusCode = 200;
+                    Response.ContentType = "video/mp2t";
+                    Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+                    Response.Headers["Pragma"] = "no-cache";
+                    // Important: tell HLS.js the segment has bytes (no Accept-Ranges)
+                    Response.Headers["Accept-Ranges"] = "none";
+                    hadOutput = true;
+                }
+
+                await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+
             await process.WaitForExitAsync(HttpContext.RequestAborted).ConfigureAwait(false);
             await stderrTask.ConfigureAwait(false);
 
             if (process.ExitCode != 0)
+            {
                 Log.Warning("[PreviewHls] ffmpeg exited with code {ExitCode} for segment {SegIndex} DavItemId={DavItemId}", process.ExitCode, segIndex, davItemId);
+                if (!hadOutput)
+                    return StatusCode(502, "Failed to generate preview segment.");
+            }
+
+            if (!hadOutput)
+                return StatusCode(502, "Preview segment generation produced no output.");
         }
         catch (OperationCanceledException)
         {
@@ -174,6 +203,13 @@ public class PreviewHlsController(DavDatabaseClient dbClient, DatabaseStore stor
         }
 
         return new EmptyResult();
+    }
+
+    private static bool IsPreviewableItemType(DavItem.ItemType type)
+    {
+        return type is DavItem.ItemType.NzbFile
+            or DavItem.ItemType.RarFile
+            or DavItem.ItemType.MultipartFile;
     }
 
     private static string BuildInternalViewUrl(string itemPath)

@@ -57,8 +57,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-21-ROLLBACK-CLEANUP-TIMEOUT");
-        Log.Warning("  FIX: Reverted configurable cleanup timeout; restored fixed 500ms cleanup behavior");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-UNIFIED-ANALYSIS-CONCURRENCY");
+            Log.Warning("  FEATURE: Steps 3 and 5 now both follow analysis.max-concurrent");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

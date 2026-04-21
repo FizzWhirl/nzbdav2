@@ -294,13 +294,28 @@ public class QueueItemProcessor(
         var probeFailedNames = new ConcurrentBag<string>();
         var dmcaFileNames = new ConcurrentBag<string>();
         var probeTimedOut = false;
-        if (configManager.IsEnsureArticleExistenceEnabled())
+        var ensureArticleExistenceEnabled = configManager.IsEnsureArticleExistenceEnabled();
+        if (ensureArticleExistenceEnabled)
         {
             var step3StartTime = DateTime.UtcNow;
             var fileSegments = fileProcessingResults
                 .Select(GetResultSegmentIdsAndName)
                 .Where(x => x.SegmentIds.Length > 0)
                 .ToList();
+
+            if (configManager.HideSamples())
+            {
+                var beforeSampleFilterCount = fileSegments.Count;
+                fileSegments = fileSegments
+                    .Where(x => !FilenameUtil.IsSampleFileName(x.FileName))
+                    .ToList();
+                var skippedSampleProbeCount = beforeSampleFilterCount - fileSegments.Count;
+                if (skippedSampleProbeCount > 0)
+                {
+                    Log.Information("[QueueItemProcessor] Step 3: Skipping {SampleCount} sample files from smart article probe for {JobName}",
+                        skippedSampleProbeCount, queueItem.JobName);
+                }
+            }
 
             var totalSegmentCount = fileSegments.Sum(x => x.SegmentIds.Length);
 
@@ -315,18 +330,22 @@ public class QueueItemProcessor(
             var probeFailures = 0;
             var dmcaCount = 0;
 
-            // 180s overall backstop, 15s per-file timeout, 8 concurrent probes
+            // 180s overall backstop, 15s per-file timeout.
+            // Probe parallelism follows analysis.max-concurrent directly.
+            var smartProbeParallelism = configManager.GetMaxConcurrentAnalyses();
             using var overallProbeCts = CancellationTokenSource.CreateLinkedTokenSource(queueCt);
             overallProbeCts.CancelAfter(TimeSpan.FromSeconds(180));
             // Propagate QueueAnalysis context for article probes (lighter limits than full Queue)
             var probeContext = new ConnectionUsageContext(ConnectionUsageType.QueueAnalysis, queueItem.JobName);
             using var _probeCtx = overallProbeCts.Token.SetScopedContext(probeContext);
 
+            Log.Information("[QueueItemProcessor] Step 3: Smart article probe parallelism set to {Parallelism} from analysis.max-concurrent", smartProbeParallelism);
+
             try
             {
                 await Parallel.ForEachAsync(
                     fileSegments,
-                    new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = overallProbeCts.Token },
+                    new ParallelOptions { MaxDegreeOfParallelism = smartProbeParallelism, CancellationToken = overallProbeCts.Token },
                     async (file, ct) =>
                     {
                         // Retry once on transient failures (connection errors trigger full-scan fallback which may timeout)
@@ -487,7 +506,8 @@ public class QueueItemProcessor(
 
         // step 5 -- Run ffprobe + decode check on all media files to verify integrity.
         //           Corrupt files are removed from the database so Radarr/Sonarr won't import them.
-        //           Always runs: Step 3 spot-checks catch missing articles, but only decode catches corrupt content.
+        //           Only runs when api.ensure-article-existence is enabled.
+        if (ensureArticleExistenceEnabled)
         {
             Log.Information("[QueueItemProcessor] Step 5: Running media analysis (ffprobe) for files in {JobName} to verify playability...",
                 queueItem.JobName);
@@ -547,8 +567,11 @@ public class QueueItemProcessor(
             {
                 var corruptIds = new ConcurrentBag<Guid>();
                 var analysisHistoryRows = new ConcurrentBag<AnalysisHistoryItem>();
+                var mediaAnalysisParallelism = configManager.GetMaxConcurrentAnalyses();
 
-                await Parallel.ForEachAsync(filesToCheck, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = queueCt }, async (item, ct) =>
+                Log.Information("[QueueItemProcessor] Step 5: Media analysis parallelism set to {Parallelism} from analysis.max-concurrent", mediaAnalysisParallelism);
+
+                await Parallel.ForEachAsync(filesToCheck, new ParallelOptions { MaxDegreeOfParallelism = mediaAnalysisParallelism, CancellationToken = queueCt }, async (item, ct) =>
                 {
                     Log.Debug("[QueueItemProcessor] Step 5: Analyzing {FileName}...", item.Name);
 
@@ -655,6 +678,11 @@ public class QueueItemProcessor(
                     throw new NonRetryableDownloadException($"No playable media files remain after analysis — all {mediaFiles.Count} media file(s) were corrupt or unavailable");
                 }
             }
+        }
+        else
+        {
+            Log.Information("[QueueItemProcessor] Step 5: Skipping media analysis probe for {JobName} because api.ensure-article-existence is disabled",
+                queueItem.JobName);
         }
 
         // Step 6: Move queue item to history now that ffprobe analysis is complete

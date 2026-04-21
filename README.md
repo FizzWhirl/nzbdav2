@@ -116,6 +116,36 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.13 (2026-04-22)
+*   **Logic**: Queue Step 5 media analysis (`ffprobe` + decode checks) now uses `analysis.max-concurrent` instead of a separate hardcoded parallelism value.
+*   **Logic**: Queue Steps 3 and 5 now share the same frontend-exposed analysis concurrency setting.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-UNIFIED-ANALYSIS-CONCURRENCY`.
+
+## v0.7.12 (2026-04-22)
+*   **Logic**: Queue Step 5 media probing (`ffprobe` + decode checks) now runs only when `api.ensure-article-existence=true`.
+*   **Logic**: Queue Step 3 smart article probe now skips sample files when `usenet.hide-samples=true`.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-PROBE-GATING-SAMPLES`.
+
+## v0.7.11 (2026-04-22)
+*   **Logic**: Removed the smart article probe safety clamp so Queue Step 3 now uses `analysis.max-concurrent` directly.
+*   **Reliability**: Keeps probe concurrency behavior fully aligned with the single analysis tuning setting.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-PROBE-UNCAPPED`.
+
+## v0.7.10 (2026-04-22)
+*   **Logic**: Queue Step 3 smart article probe parallelism now follows `analysis.max-concurrent` instead of a separate hardcoded value.
+*   **Reliability**: Applied safety clamp (`1..8`) to probe parallelism to avoid runaway fan-out while still allowing tuning through a single setting.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-PROBE-LINK`.
+
+## v0.7.9 (2026-04-22)
+*   **Fix**: Reduced queue Step 3 per-file smart article probe parallelism from 8 to 4 (`Parallel.ForEachAsync MaxDegreeOfParallelism`) to lower concurrent `QueueAnalysis` pressure during large queue processing.
+*   **Reliability**: Helps reduce memory pressure spikes when many files are probed simultaneously in the same NZB job.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-QUEUE-PROBE-CAP-4`.
+
+## v0.7.8 (2026-04-21)
+*   **Fix**: Changed media decode integrity sampling points from 75%/90% to 10%/90% so corruption near the start of files is validated earlier.
+*   **Reliability**: Hardened Settings defaults by setting `analysis.max-concurrent` to `1` in the frontend defaults/fallback to match backend safe defaults and reduce OOM risk during mass analysis.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-OOM-HARDENING-PASS2`.
+
 ## v0.7.7 (2026-04-21)
 *   **Fix**: Reverted configurable `usenet.cleanup-timeout-ms` setting and restored fixed 500ms NNTP cleanup timeout behavior.
 *   **UI**: Removed "Connection Cleanup Timeout (ms)" from Settings → Usenet.

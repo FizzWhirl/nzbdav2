@@ -219,8 +219,8 @@ public class MediaAnalysisService(
             return null;
         }
 
-        // Check at 75% and 90% — catches files truncated at different points
-        double[] checkPoints = [0.75, 0.90];
+        // Check at 10% and 90% — 10% catches corrupt/incomplete starts, 90% catches truncated files
+        double[] checkPoints = [0.10, 0.90];
         foreach (var pct in checkPoints)
         {
             var seekPosition = (duration * pct).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);

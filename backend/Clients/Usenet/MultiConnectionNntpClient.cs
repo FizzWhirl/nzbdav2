@@ -33,6 +33,7 @@ public class MultiConnectionNntpClient : INntpClient
     private readonly int _providerIndex;
     private readonly string _host;
     private readonly int _operationTimeoutSeconds;
+    private readonly ConfigManager? _configManager;
     private DateTimeOffset _lastActivity = DateTimeOffset.UtcNow;
     private DateTimeOffset _lastLatencyRecordTime = DateTimeOffset.MinValue;
     private readonly Timer? _latencyMonitorTimer;
@@ -61,6 +62,7 @@ public class MultiConnectionNntpClient : INntpClient
         _providerIndex = providerIndex;
         _host = host ?? $"Provider {providerIndex}";
         _operationTimeoutSeconds = operationTimeoutSeconds;
+        _configManager = configManager;
         _logger = configManager != null ? new ComponentLogger(LogComponents.Usenet, configManager) : null;
 
         if (_providerIndex >= 0 && _bandwidthService != null && type != ProviderType.Disabled)
@@ -82,6 +84,11 @@ public class MultiConnectionNntpClient : INntpClient
         const int MinTimeoutMs = 45000;
         var dynamic = latency * 4;
         return (int)Math.Clamp(dynamic, MinTimeoutMs, _operationTimeoutSeconds * 1000);
+    }
+
+    private int GetCleanupTimeoutMs()
+    {
+        return _configManager?.GetUsenetCleanupTimeoutMs() ?? 500;
     }
 
     private void CheckLatency(object? state)
@@ -253,10 +260,11 @@ public class MultiConnectionNntpClient : INntpClient
                                             try
                                             {
                                                 // Wait for connection to be ready before returning to pool
-                                                // Use a short timeout (500ms) to allow quick draining of small/nearly-complete segments.
+                                                var cleanupTimeoutMs = GetCleanupTimeoutMs();
+                                                // Use a short cleanup timeout to avoid holding stale connections.
                                                 // If it takes longer, we kill the connection to ensure UI responsiveness during seeking.
                                                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
-                                                timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(500));
+                                                timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(cleanupTimeoutMs));
                                                 await connectionLock.Connection.WaitForReady(timeoutCts.Token).ConfigureAwait(false);
                                             }
                                             catch (IOException ex)
@@ -267,7 +275,7 @@ public class MultiConnectionNntpClient : INntpClient
                                             }
                                             catch (OperationCanceledException)
                                             {
-                                                _logger?.Debug("Connection cleanup timed out - forcing disposal to release resources.");
+                                                _logger?.Debug("Connection cleanup timed out after {TimeoutMs}ms - forcing disposal to release resources.", GetCleanupTimeoutMs());
                                                 connectionLock.Replace();
                                             }
                                             catch (ObjectDisposedException)
@@ -449,9 +457,10 @@ public class MultiConnectionNntpClient : INntpClient
                     {
                         try
                         {
+                            var cleanupTimeoutMs = GetCleanupTimeoutMs();
                             // Bound cleanup wait to avoid stale active connections when drain hangs.
                             using var cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
-                            cleanupCts.CancelAfter(TimeSpan.FromMilliseconds(500));
+                            cleanupCts.CancelAfter(TimeSpan.FromMilliseconds(cleanupTimeoutMs));
                             await connectionLock.Connection.WaitForReady(cleanupCts.Token).ConfigureAwait(false);
                         }
                         catch (Exception ex)

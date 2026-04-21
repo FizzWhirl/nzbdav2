@@ -10,6 +10,9 @@ public partial class FilenameUtil
     [GeneratedRegex(@"(?<rm>[\s-]*(?:(?<br>{{)|password=)(?<pw>.+)(?(br)}}))\.nzb$", RegexOptions.IgnoreCase)]
     public static partial Regex PasswordRegex();
 
+    [GeneratedRegex(@"(?:^|[\.\-_\s\[\]()])sample(?:$|[\.\-_\s\[\]()\d])", RegexOptions.IgnoreCase)]
+    private static partial Regex SampleTokenRegex();
+
     private static readonly HashSet<string> VideoExtensions =
     [
         ".webm", ".m4v", ".3gp", ".nsv", ".ty", ".strm", ".rm", ".rmvb", ".m3u", ".ifo", ".mov", ".qt", ".divx",
@@ -46,6 +49,14 @@ public partial class FilenameUtil
     public static bool IsAudioFile(string filename)
     {
         return AudioExtensions.Contains(Path.GetExtension(filename).ToLower());
+    }
+
+    public static bool IsSampleFileName(string? filename)
+    {
+        if (string.IsNullOrWhiteSpace(filename)) return false;
+        var baseName = Path.GetFileNameWithoutExtension(filename);
+        return !string.IsNullOrWhiteSpace(baseName)
+               && SampleTokenRegex().IsMatch(baseName);
     }
 
     public static bool IsRarFile(string? filename)

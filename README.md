@@ -116,6 +116,24 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.6 (2026-04-21)
+*   **UI**: Updated Queue page Provider Stats card styling to use Bootstrap theme variables so text/background contrast renders correctly in dark mode.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-CLEANUP-TIMEOUT-QUEUE-DARKMODE` for deployment verification.
+
+## v0.7.5 (2026-04-21)
+*   **Feature**: Added configurable `usenet.cleanup-timeout-ms` setting to control how long NNTP connection cleanup waits before force-replacing a draining connection.
+*   **Reliability**: Wired cleanup timeout configuration into both stream-dispose and background cleanup paths to reduce false cleanup cancellation churn on slower providers.
+*   **UI**: Added "Connection Cleanup Timeout (ms)" field to Settings → Usenet with validation and save tracking.
+
+## v0.7.4 (2026-04-21)
+*   **Fix**: Reduced default `analysis.max-concurrent` from 3 to 1, and `usenet.max-concurrent-buffered-streams` from 4 to 2, to prevent OOM crashes under memory pressure when multiple ffprobe analyses and buffered streams run simultaneously.
+*   **Reliability**: Each ffprobe analysis opens a `NzbFileStream` with a 20-segment prefetch buffer; reducing concurrent analyses from 3 to 1 cuts peak streaming RAM by ~60% for containers with limited memory.
+
+## v0.7.3 (2026-04-21)
+*   **Fix**: Added queue-time sample file filtering when `usenet.hide-samples=true`, so sample releases are removed before importable-media validation and ffprobe analysis.
+*   **Reliability**: Replaced narrow `".sample."` matching with centralized filename token detection, improving sample filtering across WebDAV content and completed-symlink views.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-SAMPLE-FILTER-HARDENING` for clearer deployment verification.
+
 ## v0.7.2 (2026-04-21)
 *   **Fix**: Preview endpoints now reject non-file DavItem IDs up front (directories/roots), preventing HLS/remux requests from targeting invalid `/view` paths.
 *   **Reliability**: HLS and remux preview streaming no longer return empty HTTP 200 responses when `ffmpeg` exits with an error before emitting data; zero-output failures now return explicit 502 errors.

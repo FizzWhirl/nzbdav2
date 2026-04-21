@@ -40,6 +40,7 @@ const defaultConfig = {
     "usenet.stream-buffer-size": "100",
     "usenet.hide-samples": "false",
     "usenet.operation-timeout": "90",
+    "usenet.cleanup-timeout-ms": "500",
     "webdav.user": "admin",
     "webdav.pass": "",
     "webdav.show-hidden-files": "false",

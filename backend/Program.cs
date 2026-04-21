@@ -57,8 +57,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-21-PERF-SECURITY-HARDENING");
-        Log.Warning("  NEW: Remux stdin fault handling, ArgumentList ffprobe/ffmpeg, Step5 batched history writes");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-21-CLEANUP-TIMEOUT-QUEUE-DARKMODE");
+        Log.Warning("  NEW: Configurable cleanup timeout + queue provider stats theme-aware dark mode styling");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

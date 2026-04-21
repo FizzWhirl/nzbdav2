@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using Microsoft.AspNetCore.Mvc;
 using NzbWebDAV.Api.Controllers.Preview;
 using NzbWebDAV.Database;
@@ -97,6 +98,15 @@ public class PreviewRemuxController(DavDatabaseClient dbClient, DatabaseStore st
             catch (OperationCanceledException)
             {
                 // Expected on disconnect/cancel.
+            }
+            catch (IOException ex)
+            {
+                // ffmpeg may close stdin early when input is invalid or it exits with an error.
+                Log.Debug("[PreviewRemux] stdin copy ended early for DavItemId={DavItemId}: {Message}", davItemId, ex.Message);
+            }
+            catch (ObjectDisposedException ex)
+            {
+                Log.Debug("[PreviewRemux] stdin stream disposed early for DavItemId={DavItemId}: {Message}", davItemId, ex.Message);
             }
             finally
             {

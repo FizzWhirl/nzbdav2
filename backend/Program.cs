@@ -57,8 +57,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-21-PREVIEW-GUARDRAILS-REBASING");
-        Log.Warning("  NEW: Preview file-type validation and no-empty-200 ffmpeg response guardrails");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-21-PERF-SECURITY-HARDENING");
+        Log.Warning("  NEW: Remux stdin fault handling, ArgumentList ffprobe/ffmpeg, Step5 batched history writes");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

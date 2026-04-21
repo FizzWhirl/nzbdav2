@@ -118,13 +118,26 @@ public class MediaAnalysisService(
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = ResolveExecutablePath("FFPROBE_PATH", "ffprobe"),
-                    Arguments = $"-headers \"{headers}\" -v error -print_format json -show_format -show_streams -probesize 5000000 -analyzeduration 5000000 \"{url}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 }
             };
+
+            process.StartInfo.ArgumentList.Add("-headers");
+            process.StartInfo.ArgumentList.Add(headers);
+            process.StartInfo.ArgumentList.Add("-v");
+            process.StartInfo.ArgumentList.Add("error");
+            process.StartInfo.ArgumentList.Add("-print_format");
+            process.StartInfo.ArgumentList.Add("json");
+            process.StartInfo.ArgumentList.Add("-show_format");
+            process.StartInfo.ArgumentList.Add("-show_streams");
+            process.StartInfo.ArgumentList.Add("-probesize");
+            process.StartInfo.ArgumentList.Add("5000000");
+            process.StartInfo.ArgumentList.Add("-analyzeduration");
+            process.StartInfo.ArgumentList.Add("5000000");
+            process.StartInfo.ArgumentList.Add(url);
 
             process.Start();
 
@@ -233,13 +246,26 @@ public class MediaAnalysisService(
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = ResolveExecutablePath("FFMPEG_PATH", "ffmpeg"),
-                    Arguments = $"-headers \"{headers}\" -ss {seekPosition} -i \"{url}\" -t 5 -v error -f null -",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 }
             };
+
+            process.StartInfo.ArgumentList.Add("-headers");
+            process.StartInfo.ArgumentList.Add(headers);
+            process.StartInfo.ArgumentList.Add("-ss");
+            process.StartInfo.ArgumentList.Add(seekPosition);
+            process.StartInfo.ArgumentList.Add("-i");
+            process.StartInfo.ArgumentList.Add(url);
+            process.StartInfo.ArgumentList.Add("-t");
+            process.StartInfo.ArgumentList.Add("5");
+            process.StartInfo.ArgumentList.Add("-v");
+            process.StartInfo.ArgumentList.Add("error");
+            process.StartInfo.ArgumentList.Add("-f");
+            process.StartInfo.ArgumentList.Add("null");
+            process.StartInfo.ArgumentList.Add("-");
 
             process.Start();
 

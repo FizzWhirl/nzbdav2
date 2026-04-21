@@ -542,6 +542,7 @@ public class QueueItemProcessor(
             else
             {
                 var corruptIds = new ConcurrentBag<Guid>();
+                var analysisHistoryRows = new ConcurrentBag<AnalysisHistoryItem>();
 
                 await Parallel.ForEachAsync(filesToCheck, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = queueCt }, async (item, ct) =>
                 {
@@ -582,21 +583,22 @@ public class QueueItemProcessor(
                     }
 
                     // Save to analysis history (use lock for EF Core DbContext thread safety)
-                    lock (dbContext)
+                    analysisHistoryRows.Add(new AnalysisHistoryItem
                     {
-                        dbContext.AnalysisHistoryItems.Add(new AnalysisHistoryItem
-                        {
-                            DavItemId = item.Id,
-                            FileName = item.Name,
-                            JobName = queueItem.JobName,
-                            Result = historyResult,
-                            Details = historyDetails,
-                            CreatedAt = DateTimeOffset.UtcNow
-                        });
-                    }
-                    // SaveChanges after each to avoid holding data in memory for large batches
-                    lock (dbContext) { dbContext.SaveChanges(); }
+                        DavItemId = item.Id,
+                        FileName = item.Name,
+                        JobName = queueItem.JobName,
+                        Result = historyResult,
+                        Details = historyDetails,
+                        CreatedAt = DateTimeOffset.UtcNow
+                    });
                 }).ConfigureAwait(false);
+
+                if (!analysisHistoryRows.IsEmpty)
+                {
+                    dbContext.AnalysisHistoryItems.AddRange(analysisHistoryRows);
+                    await dbContext.SaveChangesAsync(queueCt).ConfigureAwait(false);
+                }
 
                 if (!corruptIds.IsEmpty)
                 {

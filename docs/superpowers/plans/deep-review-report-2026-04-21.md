@@ -74,3 +74,19 @@ Method used:
 3. Improve Step 5 history persistence strategy (Medium).
 4. Add fail-closed expected-token guard (Low).
 5. Run post-restart runtime smoke validation on latest image.
+
+## Performance and Security Addendum
+
+### Security review notes
+1. Internal analysis auth bypass is significantly improved (loopback + analysis marker + token match), but hard-failing on empty expected token is still recommended.
+2. ffmpeg/ffprobe internal calls currently pass auth headers in process arguments; this is practical, but command-line argument visibility can expose tokens to privileged local process inspection. Consider reducing token exposure by:
+  - constraining process permissions,
+  - minimizing token lifetime where possible,
+  - and evaluating alternatives to argument-carried secrets.
+3. Static WebDAV download key fallback remains a broad-access mechanism by design. Operationally, rotate it periodically and after incident response events.
+
+### Performance review notes
+1. Preview process limiter (`PREVIEW_MAX_FFMPEG_PROCESSES`) is an effective global safety control. Keep defaults conservative on low-RAM hosts and tune only with measured workloads.
+2. Queue Step 5 analysis now benefits from batched history writes (post-loop persistence), reducing lock contention and improving throughput predictability on large media sets.
+3. HLS preview path intentionally uses higher worker/buffer settings; this improves continuity but increases burst resource usage. Validate against concurrent seek traffic before raising limits.
+4. NNTP dynamic timeout floor (45s) improves resilience to transient slowness but can increase tail latency during degraded-provider events. Pair with timeout observability dashboards/alerts.

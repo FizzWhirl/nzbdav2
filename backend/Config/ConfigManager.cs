@@ -181,17 +181,6 @@ public class ConfigManager
         );
     }
 
-    public int GetUsenetCleanupTimeoutMs()
-    {
-        var timeoutMs = int.Parse(
-            StringUtil.EmptyToNull(GetConfigValue("usenet.cleanup-timeout-ms"))
-            ?? StringUtil.EmptyToNull(Environment.GetEnvironmentVariable("USENET_CLEANUP_TIMEOUT_MS"))
-            ?? "500"
-        );
-
-        return Math.Clamp(timeoutMs, 100, 10000);
-    }
-
     public int GetMaxConcurrentBufferedStreams()
     {
         return int.Parse(

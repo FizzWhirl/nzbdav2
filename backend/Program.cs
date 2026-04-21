@@ -57,8 +57,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-21-CLEANUP-TIMEOUT-QUEUE-DARKMODE");
-        Log.Warning("  NEW: Configurable cleanup timeout + queue provider stats theme-aware dark mode styling");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-21-ROLLBACK-CLEANUP-TIMEOUT");
+        Log.Warning("  FIX: Reverted configurable cleanup timeout; restored fixed 500ms cleanup behavior");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

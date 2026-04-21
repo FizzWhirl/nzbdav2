@@ -116,6 +116,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.7 (2026-04-21)
+*   **Fix**: Reverted configurable `usenet.cleanup-timeout-ms` setting and restored fixed 500ms NNTP cleanup timeout behavior.
+*   **UI**: Removed "Connection Cleanup Timeout (ms)" from Settings → Usenet.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-ROLLBACK-CLEANUP-TIMEOUT`.
+
 ## v0.7.6 (2026-04-21)
 *   **UI**: Updated Queue page Provider Stats card styling to use Bootstrap theme variables so text/background contrast renders correctly in dark mode.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-CLEANUP-TIMEOUT-QUEUE-DARKMODE` for deployment verification.

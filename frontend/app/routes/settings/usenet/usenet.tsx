@@ -131,7 +131,6 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     const [hideSamples, setHideSamples] = useState(config["usenet.hide-samples"] === "true");
     const [streamBufferSize, setStreamBufferSize] = useState(config["usenet.stream-buffer-size"] || "100");
     const [operationTimeout, setOperationTimeout] = useState(config["usenet.operation-timeout"] || "90");
-    const [cleanupTimeoutMs, setCleanupTimeoutMs] = useState(config["usenet.cleanup-timeout-ms"] || "500");
     const [isRunningBenchmark, setIsRunningBenchmark] = useState(false);
     const [isSelectingFile, setIsSelectingFile] = useState(false);
     const [benchmarkResults, setBenchmarkResults] = useState<BenchmarkResponse | null>(null);
@@ -191,13 +190,6 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
         setOperationTimeout(value);
         if (isPositiveInteger(value)) {
             setNewConfig(prev => ({ ...prev, "usenet.operation-timeout": value }));
-        }
-    }, [setNewConfig]);
-
-    const handleCleanupTimeoutMsChange = useCallback((value: string) => {
-        setCleanupTimeoutMs(value);
-        if (isPositiveInteger(value)) {
-            setNewConfig(prev => ({ ...prev, "usenet.cleanup-timeout-ms": value }));
         }
     }, [setNewConfig]);
 
@@ -615,23 +607,6 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                     />
                     <div>
                         Maximum time to wait for a Usenet response (including connection acquisition). Increase if you see frequent timeouts. (Default: 90)
-                    </div>
-                </div>
-                <div className={styles["form-group"]}>
-                    <label htmlFor="cleanup-timeout-ms" className={styles["form-label"]}>
-                        Connection Cleanup Timeout (ms)
-                    </label>
-                    <input
-                        type="text"
-                        id="cleanup-timeout-ms"
-                        className={`${styles["form-input"]} ${!isPositiveInteger(cleanupTimeoutMs) ? styles.error : ""}`}
-                        placeholder="500"
-                        value={cleanupTimeoutMs}
-                        onChange={(e) => handleCleanupTimeoutMsChange(e.target.value)}
-                        style={{ maxWidth: '200px' }}
-                    />
-                    <div>
-                        Wait time before force-replacing connections that are draining. Increase this (for example 1500-3000) if you see frequent cleanup cancellation logs on slower providers. (Default: 500)
                     </div>
                 </div>
             </div>
@@ -1451,8 +1426,7 @@ export function isUsenetSettingsUpdated(config: Record<string, string>, newConfi
         || config["provider-affinity.enable"] !== newConfig["provider-affinity.enable"]
         || config["usenet.hide-samples"] !== newConfig["usenet.hide-samples"]
         || config["usenet.stream-buffer-size"] !== newConfig["usenet.stream-buffer-size"]
-        || config["usenet.operation-timeout"] !== newConfig["usenet.operation-timeout"]
-        || config["usenet.cleanup-timeout-ms"] !== newConfig["usenet.cleanup-timeout-ms"];
+        || config["usenet.operation-timeout"] !== newConfig["usenet.operation-timeout"];
 }
 
 export function isPositiveInteger(value: string) {

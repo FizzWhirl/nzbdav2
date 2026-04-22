@@ -55,7 +55,9 @@ jobs:
             echo "NZBDAV_VERSION=${SAFE_REF}" >> $GITHUB_OUTPUT
           fi
 
-          GHCR_REPO="ghcr.io/${{ github.repository }}"
+          # GHCR requires lowercase repository paths for valid tags.
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          GHCR_REPO="ghcr.io/${REPO_LOWER}"
           # DOCKERHUB_REPO="${{ github.repository_owner }}/nzbdav2"  # Uncomment if using Docker Hub
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             {

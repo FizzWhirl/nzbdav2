@@ -116,6 +116,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.17 (2026-04-22)
+*   **Optimization**: Reduced media-analysis decode sample duration from 5 seconds to 2 seconds for Step 5 decode checks to lower analysis data usage.
+*   **Logic**: Disabled buffered segment streaming only for `X-Analysis-Mode` requests, so analysis no longer prefetches extra Usenet data while regular playback keeps existing buffering behavior.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-LOW-DATA`.
+
 ## v0.7.16 (2026-04-22)
 *   **Fix**: Step 5 media analysis now keeps files (instead of marking them corrupt) when decode check failures are caused by transient provider errors — 5XX responses, NNTP protocol errors, premature EOF, or decode timeouts. Only genuine codec errors (invalid data, CRC failures) result in corruption marking.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-TRANSIENT-DECODE-FIX`.

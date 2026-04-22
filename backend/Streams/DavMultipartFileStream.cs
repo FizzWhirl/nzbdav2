@@ -10,7 +10,8 @@ public class DavMultipartFileStream(
     DavMultipartFile.FilePart[] fileParts,
     UsenetStreamingClient usenet,
     int concurrentConnections,
-    ConnectionUsageContext? usageContext = null
+    ConnectionUsageContext? usageContext = null,
+    bool useBufferedStreaming = true
 ) : Stream
 {
     private CombinedStream? _innerStream;
@@ -103,7 +104,7 @@ public class DavMultipartFileStream(
                         capturedPart.SegmentIdByteRange.Count,
                         concurrentConnections,
                         partContext,
-                        useBufferedStreaming: true,
+                        useBufferedStreaming: useBufferedStreaming,
                         segmentFallbacks: capturedPart.SegmentFallbacks
                     );
                     // Seek to the start of this part within the RAR file

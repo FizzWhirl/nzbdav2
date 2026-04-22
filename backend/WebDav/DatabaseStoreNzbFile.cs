@@ -9,6 +9,8 @@ using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav.Base;
 
 using NzbWebDAV.Services;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace NzbWebDAV.WebDav;
 
@@ -139,7 +141,7 @@ public class DatabaseStoreNzbFile(
         // Non-HLS preview seeks use zero grace period so SharedStreamManager immediately releases
         // permits when the browser jumps to a different position. HLS preview keeps the normal
         // grace period so the next segment can reuse the warmed shared stream.
-        return usenetClient.GetFileStream(
+        var stream = usenetClient.GetFileStream(
             file.SegmentIds,
             FileSize,
             concurrentConnections,
@@ -150,5 +152,7 @@ public class DatabaseStoreNzbFile(
             file.SegmentFallbacks,
             sharedStreamGracePeriod: isPreviewHlsMode ? null : isPreviewMode ? 0 : null
         );
+
+        return stream;
     }
 }

@@ -33,14 +33,15 @@ public class MediaAnalysisService(
         var webDavUrl = $"http://localhost:8080{encodedPath}";
 
         // 3. Run ffprobe with analysis mode header (retry once on failure for transient issues)
-        Log.Information("[MediaAnalysis] Running ffprobe on {Name} ({Id}) via HTTP with analysis mode", item.Name, davItemId);
-        var (result, timedOut) = await RunFfprobeAsync(webDavUrl, ct).ConfigureAwait(false);
+        var analysisRunId = $"{davItemId:N}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+        Log.Information("[MediaAnalysis] Running ffprobe on {Name} ({Id}) via HTTP with analysis mode (RunId={RunId})", item.Name, davItemId, analysisRunId);
+        var (result, timedOut) = await RunFfprobeAsync(webDavUrl, analysisRunId, "ffprobe-metadata-attempt1", ct).ConfigureAwait(false);
 
         if (!timedOut && string.IsNullOrWhiteSpace(result))
         {
             Log.Warning("[MediaAnalysis] ffprobe failed for {Name} — retrying in 3s (transient provider issue?)", item.Name);
             await Task.Delay(3000, ct).ConfigureAwait(false);
-            (result, timedOut) = await RunFfprobeAsync(webDavUrl, ct).ConfigureAwait(false);
+            (result, timedOut) = await RunFfprobeAsync(webDavUrl, analysisRunId, "ffprobe-metadata-attempt2", ct).ConfigureAwait(false);
         }
 
         // 4. Update DB
@@ -71,14 +72,14 @@ public class MediaAnalysisService(
              item.MediaInfo = result;
 
              // Metadata probe passed — now run decode checks at 75% and 90% to verify integrity
-             var integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, ct).ConfigureAwait(false);
+             var integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, analysisRunId, 1, ct).ConfigureAwait(false);
 
              // Retry decode check once on failure — transient provider issues can cause false positives
              if (integrityErrors != null)
              {
                  Log.Warning("[MediaAnalysis] Decode check failed for {Name}: {Errors} — retrying in 3s", item.Name, integrityErrors);
                  await Task.Delay(3000, ct).ConfigureAwait(false);
-                 integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, ct).ConfigureAwait(false);
+                 integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, analysisRunId, 2, ct).ConfigureAwait(false);
              }
 
              if (integrityErrors != null)
@@ -116,11 +117,11 @@ public class MediaAnalysisService(
     /// <summary>
     /// Runs ffprobe on the given WebDAV URL with X-Analysis-Mode header to limit resource usage.
     /// </summary>
-    private async Task<(string? output, bool timedOut)> RunFfprobeAsync(string url, CancellationToken ct)
+    private async Task<(string? output, bool timedOut)> RunFfprobeAsync(string url, string analysisRunId, string analysisPass, CancellationToken ct)
     {
         try
         {
-            var headers = BuildAnalysisHeaders();
+            var headers = BuildAnalysisHeaders(analysisRunId, analysisPass);
             var start = Stopwatch.StartNew();
             using var process = new Process
             {
@@ -206,7 +207,7 @@ public class MediaAnalysisService(
     /// Decodes 5s at 75% and 90% of the file to verify data integrity.
     /// Two check points near the end catch truncated files where data is only partially available.
     /// </summary>
-    private async Task<string?> RunDecodeCheckAsync(string url, string ffprobeJson, string fileName, CancellationToken ct)
+    private async Task<string?> RunDecodeCheckAsync(string url, string ffprobeJson, string fileName, string analysisRunId, int attempt, CancellationToken ct)
     {
         double duration;
         try
@@ -234,9 +235,10 @@ public class MediaAnalysisService(
         {
             var seekPosition = (duration * pct).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
             var label = $"{(int)(pct * 100)}%";
-            Log.Information("[MediaAnalysis] Decode check ({Label}): -ss {SeekPos} -t 5 for {Name}", label, seekPosition, fileName);
+            var passId = $"ffmpeg-decode-{label}-attempt{attempt}";
+            Log.Information("[MediaAnalysis] Decode check ({Label}): -ss {SeekPos} -t 2 for {Name} (RunId={RunId}, Pass={Pass})", label, seekPosition, fileName, analysisRunId, passId);
 
-            var result = await RunSingleDecodeAsync(url, seekPosition, label, fileName, ct).ConfigureAwait(false);
+            var result = await RunSingleDecodeAsync(url, seekPosition, label, fileName, analysisRunId, passId, ct).ConfigureAwait(false);
             if (result != null)
                 return result;
         }
@@ -244,12 +246,12 @@ public class MediaAnalysisService(
         return null;
     }
 
-    private async Task<string?> RunSingleDecodeAsync(string url, string seekPosition, string label, string fileName, CancellationToken ct)
+    private async Task<string?> RunSingleDecodeAsync(string url, string seekPosition, string label, string fileName, string analysisRunId, string analysisPass, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
         try
         {
-            var headers = BuildAnalysisHeaders();
+            var headers = BuildAnalysisHeaders(analysisRunId, analysisPass);
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
@@ -269,7 +271,7 @@ public class MediaAnalysisService(
             process.StartInfo.ArgumentList.Add("-i");
             process.StartInfo.ArgumentList.Add(url);
             process.StartInfo.ArgumentList.Add("-t");
-            process.StartInfo.ArgumentList.Add("5");
+            process.StartInfo.ArgumentList.Add("2");
             process.StartInfo.ArgumentList.Add("-v");
             process.StartInfo.ArgumentList.Add("error");
             process.StartInfo.ArgumentList.Add("-f");
@@ -318,10 +320,10 @@ public class MediaAnalysisService(
         }
     }
 
-    private static string BuildAnalysisHeaders()
+    private static string BuildAnalysisHeaders(string analysisRunId, string analysisPass)
     {
         var token = EnvironmentUtil.GetVariable("FRONTEND_BACKEND_API_KEY");
-        return $"X-Analysis-Mode: true\r\nX-Internal-Analysis-Auth: {token}\r\n";
+        return $"X-Analysis-Mode: true\r\nX-Internal-Analysis-Auth: {token}\r\nX-Analysis-Run-Id: {analysisRunId}\r\nX-Analysis-Pass: {analysisPass}\r\n";
     }
 
     private static string ResolveExecutablePath(string envName, string defaultCommand)

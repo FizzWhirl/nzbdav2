@@ -15,6 +15,12 @@ public class FileProcessor(
 {
     public override async Task<BaseProcessor.Result?> ProcessAsync()
     {
+        if (fileInfo.MissingFirstSegment)
+        {
+            Log.Warning("File {FileName} has missing first segment. Skipping for partial completion", fileInfo.FileName);
+            return null;
+        }
+
         try
         {
             return new Result()
@@ -26,11 +32,9 @@ public class FileProcessor(
             };
         }
 
-        // Ignore missing articles if it's not a video file.
-        // In that case, simply skip the file altogether.
-        catch (UsenetArticleNotFoundException) when (!FilenameUtil.IsVideoFile(fileInfo.FileName))
+        catch (UsenetArticleNotFoundException)
         {
-            Log.Warning($"File `{fileInfo.FileName}` has missing articles. Skipping file since it is not a video.");
+            Log.Warning("File {FileName} has missing articles. Skipping for partial completion", fileInfo.FileName);
             return null;
         }
     }

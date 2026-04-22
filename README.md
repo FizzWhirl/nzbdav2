@@ -116,6 +116,87 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.17 (2026-04-22)
+*   **Optimization**: Reduced media-analysis decode sample duration from 5 seconds to 2 seconds for Step 5 decode checks to lower analysis data usage.
+*   **Logic**: Disabled buffered segment streaming only for `X-Analysis-Mode` requests, so analysis no longer prefetches extra Usenet data while regular playback keeps existing buffering behavior.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-LOW-DATA`.
+
+## v0.7.16 (2026-04-22)
+*   **Fix**: Step 5 media analysis now keeps files (instead of marking them corrupt) when decode check failures are caused by transient provider errors — 5XX responses, NNTP protocol errors, premature EOF, or decode timeouts. Only genuine codec errors (invalid data, CRC failures) result in corruption marking.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-TRANSIENT-DECODE-FIX`.
+
+## v0.7.15 (2026-04-22)
+*   **Reliability**: Hardened `NzbProviderAffinity` stats persistence by preventing overlapping timer writes and reducing write cadence from 5s to 15s.
+*   **Fix**: Added retry handling for transient SQLite write errors (`disk I/O error`, `database is locked`) during affinity stats persistence.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-AFFINITY-PERSIST-FIX`.
+
+## v0.7.14 (2026-04-22)
+*   **Reliability**: Raised default `analysis.max-concurrent` from `1` to `3` in backend and frontend defaults to avoid severe queue-analysis bottlenecks on large packs.
+*   **Logic**: Kept unified analysis fan-out model where both Queue Step 3 smart probe and Step 5 media analysis follow `analysis.max-concurrent`.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-DEFAULTS-3`.
+
+## v0.7.13 (2026-04-22)
+*   **Logic**: Queue Step 5 media analysis (`ffprobe` + decode checks) now uses `analysis.max-concurrent` instead of a separate hardcoded parallelism value.
+*   **Logic**: Queue Steps 3 and 5 now share the same frontend-exposed analysis concurrency setting.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-UNIFIED-ANALYSIS-CONCURRENCY`.
+
+## v0.7.12 (2026-04-22)
+*   **Logic**: Queue Step 5 media probing (`ffprobe` + decode checks) now runs only when `api.ensure-article-existence=true`.
+*   **Logic**: Queue Step 3 smart article probe now skips sample files when `usenet.hide-samples=true`.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-PROBE-GATING-SAMPLES`.
+
+## v0.7.11 (2026-04-22)
+*   **Logic**: Removed the smart article probe safety clamp so Queue Step 3 now uses `analysis.max-concurrent` directly.
+*   **Reliability**: Keeps probe concurrency behavior fully aligned with the single analysis tuning setting.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-PROBE-UNCAPPED`.
+
+## v0.7.10 (2026-04-22)
+*   **Logic**: Queue Step 3 smart article probe parallelism now follows `analysis.max-concurrent` instead of a separate hardcoded value.
+*   **Reliability**: Applied safety clamp (`1..8`) to probe parallelism to avoid runaway fan-out while still allowing tuning through a single setting.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-PROBE-LINK`.
+
+## v0.7.9 (2026-04-22)
+*   **Fix**: Reduced queue Step 3 per-file smart article probe parallelism from 8 to 4 (`Parallel.ForEachAsync MaxDegreeOfParallelism`) to lower concurrent `QueueAnalysis` pressure during large queue processing.
+*   **Reliability**: Helps reduce memory pressure spikes when many files are probed simultaneously in the same NZB job.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-QUEUE-PROBE-CAP-4`.
+
+## v0.7.8 (2026-04-21)
+*   **Fix**: Changed media decode integrity sampling points from 75%/90% to 10%/90% so corruption near the start of files is validated earlier.
+*   **Reliability**: Hardened Settings defaults by setting `analysis.max-concurrent` to `1` in the frontend defaults/fallback to match backend safe defaults and reduce OOM risk during mass analysis.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-OOM-HARDENING-PASS2`.
+
+## v0.7.7 (2026-04-21)
+*   **Fix**: Reverted configurable `usenet.cleanup-timeout-ms` setting and restored fixed 500ms NNTP cleanup timeout behavior.
+*   **UI**: Removed "Connection Cleanup Timeout (ms)" from Settings → Usenet.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-ROLLBACK-CLEANUP-TIMEOUT`.
+
+## v0.7.6 (2026-04-21)
+*   **UI**: Updated Queue page Provider Stats card styling to use Bootstrap theme variables so text/background contrast renders correctly in dark mode.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-CLEANUP-TIMEOUT-QUEUE-DARKMODE` for deployment verification.
+
+## v0.7.5 (2026-04-21)
+*   **Feature**: Added configurable `usenet.cleanup-timeout-ms` setting to control how long NNTP connection cleanup waits before force-replacing a draining connection.
+*   **Reliability**: Wired cleanup timeout configuration into both stream-dispose and background cleanup paths to reduce false cleanup cancellation churn on slower providers.
+*   **UI**: Added "Connection Cleanup Timeout (ms)" field to Settings → Usenet with validation and save tracking.
+
+## v0.7.4 (2026-04-21)
+*   **Fix**: Reduced default `analysis.max-concurrent` from 3 to 1, and `usenet.max-concurrent-buffered-streams` from 4 to 2, to prevent OOM crashes under memory pressure when multiple ffprobe analyses and buffered streams run simultaneously.
+*   **Reliability**: Each ffprobe analysis opens a `NzbFileStream` with a 20-segment prefetch buffer; reducing concurrent analyses from 3 to 1 cuts peak streaming RAM by ~60% for containers with limited memory.
+
+## v0.7.3 (2026-04-21)
+*   **Fix**: Added queue-time sample file filtering when `usenet.hide-samples=true`, so sample releases are removed before importable-media validation and ffprobe analysis.
+*   **Reliability**: Replaced narrow `".sample."` matching with centralized filename token detection, improving sample filtering across WebDAV content and completed-symlink views.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-SAMPLE-FILTER-HARDENING` for clearer deployment verification.
+
+## v0.7.2 (2026-04-21)
+*   **Fix**: Preview endpoints now reject non-file DavItem IDs up front (directories/roots), preventing HLS/remux requests from targeting invalid `/view` paths.
+*   **Reliability**: HLS and remux preview streaming no longer return empty HTTP 200 responses when `ffmpeg` exits with an error before emitting data; zero-output failures now return explicit 502 errors.
+*   **Maintenance**: Rebased feature/media-analysis-optimization onto latest `origin/main` and retained branch functionality on top of upstream queue/concurrency changes.
+*   **Fix**: Hardened remux stdin handling for early ffmpeg exits (broken pipe/disposed stream paths) to avoid uncontrolled error propagation.
+*   **Reliability**: Migrated media analysis ffprobe/ffmpeg invocations to `ProcessStartInfo.ArgumentList` to eliminate fragile argument-string quoting on unusual file paths.
+*   **Performance**: Refactored queue Step 5 analysis history persistence from per-item locked `SaveChanges()` to batched post-loop async persistence.
+*   **Docs**: Added deep review report plus performance/security addendum in `docs/superpowers/plans/deep-review-report-2026-04-21.md`.
+
 ## v0.7.1 (2026-04-13)
 *   **Feature**: Hybrid connection pool — replace hard-partitioned connection semaphores with priority-based shared pool (`PrioritizedSemaphore`). Queue processing uses full connection capacity when not streaming; streaming gets guaranteed reserve slots (configurable via `usenet.streaming-reserve`, default 5) and priority scheduling (configurable via `usenet.streaming-priority`, default 80%).
 *   **Feature**: Buffered multi-connection streaming during RAR header parsing via new `QueueRarProcessing` context — RAR end-of-archive seeks now pre-fetch segments instead of one-at-a-time lazy fetches.

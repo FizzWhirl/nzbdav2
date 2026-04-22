@@ -126,6 +126,10 @@
     background-color: rgba(255, 255, 255, 0.05);
 }
 
+.nameCell {
+    vertical-align: middle;
+}
+
 .nameContainer {
     display: flex;
     flex-direction: column;

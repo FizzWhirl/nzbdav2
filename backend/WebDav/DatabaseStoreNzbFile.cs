@@ -9,6 +9,8 @@ using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav.Base;
 
 using NzbWebDAV.Services;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace NzbWebDAV.WebDav;
 
@@ -62,19 +64,95 @@ public class DatabaseStoreNzbFile(
             nzbAnalysisService.TriggerAnalysisInBackground(file.Id, file.SegmentIds);
         }
 
-        Serilog.Log.Debug("[DatabaseStoreNzbFile] Opening stream for {FileName} ({Id})", Name, id);
+        // Check if this is a lightweight analysis request (from ffprobe via MediaAnalysisService)
+        var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
+        var isPreviewMode = httpContext.Items.ContainsKey("PreviewMode");
+        var isPreviewHlsMode = httpContext.Items.ContainsKey("PreviewHlsMode");
+        var concurrentConnections = isAnalysisMode ? 4 : configManager.GetTotalStreamingConnections();
+        var bufferSize = isAnalysisMode ? 4 : configManager.GetStreamBufferSize();
+        var useBufferedStreaming = configManager.UseBufferedStreaming();
 
-        // Use total streaming connections for worker count - the global semaphore limits actual concurrent fetches
-        // This ensures a single stream can utilize the full connection pool
-        return usenetClient.GetFileStream(
+        // HLS preview benefits from buffered/shared streaming because adjacent segment fetches are
+        // sequential and should reuse the warm article pipeline rather than reopening cold streams.
+        if (isPreviewHlsMode && !isAnalysisMode)
+        {
+            concurrentConnections = Math.Clamp(Math.Min(configManager.GetTotalStreamingConnections(), 12), 6, 12);
+            bufferSize = Math.Clamp(Math.Max(bufferSize, concurrentConnections * 6), 48, 96);
+            useBufferedStreaming = true;
+
+            // HLS segment requests should keep buffered article fetching, but they must not
+            // attach to an older shared stream at a stale byte position when ffmpeg issues a
+            // fresh HTTP seek for another segment.
+            usageContext = new ConnectionUsageContext(
+                ConnectionUsageType.Streaming,
+                new ConnectionUsageDetails
+                {
+                    Text = davNzbFile.Path,
+                    JobName = davNzbFile.Name,
+                    AffinityKey = normalizedAffinityKey,
+                    FileDate = davNzbFile.ReleaseDate
+                }
+            );
+        }
+        // Non-HLS preview seeks are latency-sensitive and can quickly saturate the global stream permit pool.
+        // Use a small independent stream footprint and bypass buffered/shared streams so each
+        // seek opens a fresh stream instead of attaching to an older shared pump position.
+        else if (isPreviewMode && !isAnalysisMode)
+        {
+            concurrentConnections = 2;
+            bufferSize = Math.Clamp(bufferSize / 2, 8, 20);
+            useBufferedStreaming = false;
+        }
+
+        if (isAnalysisMode)
+        {
+            // Use queue analysis connections for media integrity checks during queue processing
+            usageContext = new ConnectionUsageContext(
+                ConnectionUsageType.QueueAnalysis,
+                new ConnectionUsageDetails
+                {
+                    Text = davNzbFile.Path,
+                    JobName = davNzbFile.Name,
+                    DavItemId = davNzbFile.Id
+                }
+            );
+            Serilog.Log.Debug("[DatabaseStoreNzbFile] Analysis mode: Opening lightweight stream for {FileName} ({Id}) (workers={Workers}, buffer={Buffer})",
+                Name, id, concurrentConnections, bufferSize);
+        }
+        else if (isPreviewHlsMode)
+        {
+            Serilog.Log.Debug("[DatabaseStoreNzbFile] HLS preview mode: Opening buffered stream for {FileName} ({Id}) (workers={Workers}, buffer={Buffer}, buffered={Buffered})",
+                Name, id, concurrentConnections, bufferSize, useBufferedStreaming);
+        }
+        else if (isPreviewMode)
+        {
+            Serilog.Log.Debug("[DatabaseStoreNzbFile] Preview mode: Opening independent stream for {FileName} ({Id}) (workers={Workers}, buffer={Buffer}, buffered={Buffered})",
+                Name, id, concurrentConnections, bufferSize, useBufferedStreaming);
+        }
+        else
+        {
+            var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var userAgent = httpContext.Request.Headers.UserAgent.ToString();
+            var rangeHeader = httpContext.Request.Headers.Range.ToString();
+            Serilog.Log.Information("[DatabaseStoreNzbFile] Opening stream for {FileName} ({Id}) — Client: {ClientIp}, UA: {UserAgent}, Range: {Range}",
+                Name, id, clientIp, userAgent, rangeHeader);
+        }
+
+        // Non-HLS preview seeks use zero grace period so SharedStreamManager immediately releases
+        // permits when the browser jumps to a different position. HLS preview keeps the normal
+        // grace period so the next segment can reuse the warmed shared stream.
+        var stream = usenetClient.GetFileStream(
             file.SegmentIds,
             FileSize,
-            configManager.GetTotalStreamingConnections(),
+            concurrentConnections,
             usageContext,
-            configManager.UseBufferedStreaming(),
-            configManager.GetStreamBufferSize(),
+            useBufferedStreaming,
+            bufferSize,
             file.GetSegmentSizes(),
-            file.SegmentFallbacks
+            file.SegmentFallbacks,
+            sharedStreamGracePeriod: isPreviewHlsMode ? null : isPreviewMode ? 0 : null
         );
+
+        return stream;
     }
 }

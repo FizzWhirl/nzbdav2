@@ -1,9 +1,8 @@
 declare const styles: {
-  readonly "container": string;
-  readonly "accordion": string;
-  readonly "accordionItem": string;
-  readonly "accordionHeader": string;
   readonly "accordionBody": string;
+  readonly "accordionHeader": string;
+  readonly "accordionItem": string;
+  readonly "container": string;
 };
 export = styles;
 

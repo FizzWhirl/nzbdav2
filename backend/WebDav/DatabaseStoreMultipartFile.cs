@@ -38,6 +38,8 @@ public class DatabaseStoreMultipartFile(
         Serilog.Log.Debug("[DatabaseStoreMultipartFile] AffinityKey: Raw='{Raw}' Normalized='{Normalized}' for file '{File}'",
             rawAffinityKey, normalizedAffinityKey, davMultipartFile.Name);
 
+        // Extract analysis context early so it can flow down through the stream chain
+        var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
         var usageContext = new ConnectionUsageContext(
             ConnectionUsageType.Streaming,
             new ConnectionUsageDetails
@@ -59,12 +61,13 @@ public class DatabaseStoreMultipartFile(
             multipartFile.Metadata.FileParts,
             usenetClient,
             configManager.GetTotalStreamingConnections(),
-            usageContext
+            usageContext,
+            useBufferedStreaming: !isAnalysisMode
         );
         Stream finalStream = multipartFile.Metadata.AesParams != null
             ? new AesDecoderStream(packedStream, multipartFile.Metadata.AesParams)
             : packedStream;
-            
+
         return new RarDeobfuscationStream(finalStream, multipartFile.Metadata.ObfuscationKey);
     }
 }

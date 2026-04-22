@@ -209,12 +209,9 @@ public class MultiConnectionNntpClient : INntpClient
         timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(currentTimeoutMs));
 
         // Propagate the connection usage context to the new linked token
+        // Always propagate — even Unknown — so ConnectionPool sees consistent context
         var originalUsageContext = cancellationToken.GetContext<ConnectionUsageContext>();
-        IDisposable? timeoutContextScope = null;
-        if (originalUsageContext.UsageType != ConnectionUsageType.Unknown)
-        {
-            timeoutContextScope = timeoutCts.Token.SetScopedContext(originalUsageContext);
-        }
+        using var timeoutContextScope = timeoutCts.Token.SetScopedContext(originalUsageContext);
 
         ConnectionLock<INntpClient>? connectionLock = null;
         bool success = false;
@@ -328,22 +325,31 @@ public class MultiConnectionNntpClient : INntpClient
                     finally
                     {
                         _lastActivity = DateTimeOffset.UtcNow;
-                        timeoutContextScope?.Dispose(); // Dispose the scoped context if it was created
                         // If we failed to create the stream (success == false), we must cleanup here.
                         if (!success)
                         {
                             if (connectionLock != null)
                             {
-                                _ = connectionLock.Connection.WaitForReady(SigtermUtil.GetCancellationToken())
-                                    .ContinueWith(t =>
+                                _ = Task.Run(async () =>
+                                {
+                                    try
                                     {
-                                        if (t.IsFaulted)
-                                        {
-                                            _logger?.Debug("Background connection cleanup failed: {Message}", t.Exception?.InnerException?.Message);
-                                            connectionLock.Replace();
-                                        }
+                                        // Bound cleanup wait to avoid leaking active locks on fatal stream-setup failures
+                                        // (e.g. OOM) where NNTP drain may never complete.
+                                        using var cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
+                                        cleanupCts.CancelAfter(TimeSpan.FromMilliseconds(500));
+                                        await connectionLock.Connection.WaitForReady(cleanupCts.Token).ConfigureAwait(false);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger?.Debug("Background stream cleanup failed: {Message}. Forcing connection replacement.", ex.Message);
+                                        connectionLock.Replace();
+                                    }
+                                    finally
+                                    {
                                         connectionLock.Dispose();
-                                    });
+                                    }
+                                });
                             }
                         }
                         // Always dispose permit in finally block of the current recursive call
@@ -374,12 +380,9 @@ public class MultiConnectionNntpClient : INntpClient
         timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(currentTimeoutMs));
 
         // Propagate the connection usage context to the new linked token
+        // Always propagate — even Unknown — so ConnectionPool sees consistent context
         var originalUsageContext = cancellationToken.GetContext<ConnectionUsageContext>();
-        IDisposable? timeoutContextScope = null;
-        if (originalUsageContext.UsageType != ConnectionUsageType.Unknown)
-        {
-            timeoutContextScope = timeoutCts.Token.SetScopedContext(originalUsageContext);
-        }
+        using var timeoutContextScope = timeoutCts.Token.SetScopedContext(originalUsageContext);
 
         var startTime = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -442,16 +445,25 @@ public class MultiConnectionNntpClient : INntpClient
                 // we intentionally do not pass the cancellation token to ContinueWith,
                 // since we want the continuation to always run.
                 if (!isDisposed)
-                    _ = connectionLock.Connection.WaitForReady(SigtermUtil.GetCancellationToken())
-                        .ContinueWith(t =>
+                    _ = Task.Run(async () =>
+                    {
+                        try
                         {
-                            if (t.IsFaulted)
-                            {
-                                _logger?.Debug("Background connection cleanup failed: {Message}", t.Exception?.InnerException?.Message);
-                                connectionLock.Replace();
-                            }
+                            // Bound cleanup wait to avoid stale active connections when drain hangs.
+                            using var cleanupCts = CancellationTokenSource.CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
+                            cleanupCts.CancelAfter(TimeSpan.FromMilliseconds(500));
+                            await connectionLock.Connection.WaitForReady(cleanupCts.Token).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Debug("Background connection cleanup failed: {Message}. Forcing replacement.", ex.Message);
+                            connectionLock.Replace();
+                        }
+                        finally
+                        {
                             connectionLock.Dispose();
-                        });
+                        }
+                    });
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)
@@ -463,7 +475,6 @@ public class MultiConnectionNntpClient : INntpClient
         finally
         {
             _lastActivity = DateTimeOffset.UtcNow;
-            timeoutContextScope?.Dispose(); // Dispose the scoped context if it was created
             // Release global permit
             globalPermit?.Dispose();
         }

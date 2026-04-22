@@ -35,7 +35,7 @@ WORKDIR /app
 
 # Prepare environment
 RUN mkdir /config \
-    && apk add --no-cache nodejs npm libc6-compat shadow su-exec bash curl sqlite ffmpeg
+    && apk add --no-cache nodejs npm libc6-compat shadow su-exec bash curl sqlite ffmpeg rclone fuse3
 
 # Copy frontend
 COPY --from=frontend-build /frontend/node_modules ./frontend/node_modules
@@ -72,7 +72,10 @@ ENV LOG_LEVEL=warning
 #   1GB VPS:  DOTNET_GCServer=0  DOTNET_GCHeapHardLimit=0x20000000  (512MB)
 #   2GB VPS:  DOTNET_GCServer=0  DOTNET_GCHeapHardLimit=0x40000000  (1GB)
 #   4GB+ NAS: DOTNET_GCServer=1  DOTNET_GCHeapHardLimit=0x80000000  (2GB)
+#
+# Default is set to 1GB to avoid OOM storms during concurrent streaming and queue probing.
+# If your host has less RAM, override this in compose/environment.
 ENV DOTNET_GCServer=0
-ENV DOTNET_GCHeapHardLimit=0x20000000
+ENV DOTNET_GCHeapHardLimit=0x40000000
 
 CMD ["/entrypoint.sh"]

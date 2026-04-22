@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { Toast, ToastContainer } from 'react-bootstrap';
 
 export type ToastVariant = 'primary' | 'secondary' | 'success' | 'danger' | 'warning' | 'info' | 'light' | 'dark';
@@ -47,7 +48,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                         delay={toast.duration} 
                         autohide 
                         bg={toast.variant?.toLowerCase()}
-                        text={toast.variant && ['warning', 'info', 'light'].includes(toast.variant) ? 'dark' : 'white'}
+                        className={toast.variant && ['warning', 'info', 'light'].includes(toast.variant) ? 'text-dark' : 'text-white'}
                     >
                         {toast.title && <Toast.Header closeButton={true}><strong className="me-auto">{toast.title}</strong></Toast.Header>}
                         <Toast.Body>{toast.message}</Toast.Body>

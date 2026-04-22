@@ -17,6 +17,7 @@
     "compression": "^1.7.5",
     "date-fns": "^4.1.0",
     "express": "^5.1.0",
+    "hls.js": "^1.6.16",
     "http-proxy-middleware": "^3.0.5",
     "isbot": "^5.1.27",
     "lucide-react": "^0.555.0",

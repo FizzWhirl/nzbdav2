@@ -1,6 +1,6 @@
 declare const styles: {
-  readonly "container": string;
   readonly "checkbox": string;
+  readonly "container": string;
 };
 export = styles;
 

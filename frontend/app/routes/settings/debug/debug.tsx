@@ -86,7 +86,7 @@ export function DebugSettings() {
     const allEnabled = enabledComponents.includes('all');
 
     return (
-        <div className={styles["setting-group"]}>
+        <div className={styles.container}>
             <h4>Debug Logging</h4>
             <p style={{ fontSize: '0.9rem', color: '#6c757d', marginBottom: '1rem' }}>
                 Enable debug-level logging for specific components to help troubleshoot issues.

@@ -3,6 +3,7 @@ import { useLoaderData, useSearchParams, useRevalidator } from "react-router";
 import { Button, ButtonGroup, Container, Tabs, Tab } from "react-bootstrap";
 import type { Route } from "./+types/route";
 import { backendClient } from "~/clients/backend-client.server";
+import type { BandwidthSample, ProviderBandwidthSnapshot } from "~/types/bandwidth";
 import type { HealthCheckResult, MissingArticleItem, MappedFile } from "~/types/stats";
 import type { ConnectionUsageContext } from "~/types/connections";
 import { BandwidthTable } from "./components/BandwidthTable";
@@ -44,7 +45,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     let connections: Record<number, ConnectionUsageContext[]> | null = null;
     let bandwidthHistory: BandwidthSample[] | null = null;
-    let currentBandwidth: ProviderBandwidthSnapshot | null = null;
+    let currentBandwidth: ProviderBandwidthSnapshot[] | null = null;
     let deletedFiles: { items: any[], totalCount: number } | null = null;
     let missingArticles: { items: MissingArticleItem[], totalCount: number } | null = null;
     let mappedFiles: { items: MappedFile[], totalCount: number } | null = null;
@@ -368,7 +369,7 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                     )}
                 </Tab>
                 <Tab eventKey="deleted" title="Deleted Files">
-                    {activeTab === 'deleted' && (
+                    {activeTab === 'deleted' && deletedFiles && (
                         <DeletedFilesTable 
                             files={deletedFiles.items} 
                             totalCount={deletedFiles.totalCount} 
@@ -378,7 +379,7 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                     )}
                 </Tab>
                 <Tab eventKey="missing" title="Missing Articles">
-                    {activeTab === 'missing' && currentBandwidth && (
+                    {activeTab === 'missing' && currentBandwidth && missingArticles && (
                         <MissingArticlesTable 
                             items={missingArticles.items} 
                             totalCount={missingArticles.totalCount}
@@ -390,7 +391,7 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                     )}
                 </Tab>
                 <Tab eventKey="mapped" title="Mapped Files">
-                    {activeTab === 'mapped' && (
+                    {activeTab === 'mapped' && mappedFiles && (
                         <MappedFilesTable
                             items={mappedFiles.items}
                             totalCount={mappedFiles.totalCount}

@@ -98,6 +98,8 @@ public class UsenetStreamingClient
         // Optimization: Smart Analysis for uniform segment sizes
         if (useSmartAnalysis && segmentIds.Length > 2)
         {
+            string? spotCheckFailure = null; // Set if mid-file spot-check finds missing articles
+
             try
             {
                 using var fastCheckCts = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -122,25 +124,62 @@ public class UsenetStreamingClient
 
                     if (expectedTotal == actualTotal)
                     {
-                        Serilog.Log.Debug("[UsenetStreamingClient] Smart Analysis: Uniform segments detected ({Size} bytes). Skipping full scan for {Count} segments.", first.PartSize, segmentIds.Length);
-                        
-                        var fastSizes = new long[segmentIds.Length];
-                        Array.Fill(fastSizes, first.PartSize);
-                        fastSizes[^1] = last.PartSize;
-                        
-                        progress?.Report(segmentIds.Length);
-                        return fastSizes;
+                        // Uniform segments confirmed — now spot-check mid-file articles using STAT (lightest possible check).
+                        // This catches partial DMCA/takedown where first/last exist but mid-file articles are removed.
+                        // Uses flag instead of throwing to avoid entering the DMCA confirmation catch block below
+                        // (which assumes first/last are MISSING — here they exist).
+                        // Spot checks run in parallel to avoid exceeding the per-file timeout.
+                        if (segmentIds.Length > 20)
+                        {
+                            var spotCheckPositions = new[] { 0.15, 0.30, 0.50, 0.70, 0.85 };
+                            var spotCheckTasks = spotCheckPositions.Select(async fraction =>
+                            {
+                                var idx = (int)(segmentIds.Length * fraction);
+                                var statResult = await _client.StatAsync(segmentIds[idx], fastCheckCts.Token).ConfigureAwait(false);
+                                return (idx, fraction, statResult.ArticleExists);
+                            });
+                            var spotResults = await Task.WhenAll(spotCheckTasks).ConfigureAwait(false);
+                            foreach (var (idx, fraction, exists) in spotResults)
+                            {
+                                if (!exists)
+                                {
+                                    spotCheckFailure = $"Mid-file article missing at index {idx}/{segmentIds.Length} ({(int)(fraction * 100)}%). Partial DMCA or corruption.";
+                                    Serilog.Log.Warning("[UsenetStreamingClient] Smart Analysis: {Message}", spotCheckFailure);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (spotCheckFailure == null)
+                        {
+                            Serilog.Log.Debug("[UsenetStreamingClient] Smart Analysis: Uniform segments detected ({Size} bytes). Skipping full scan for {Count} segments.", first.PartSize, segmentIds.Length);
+                            
+                            var fastSizes = new long[segmentIds.Length];
+                            Array.Fill(fastSizes, first.PartSize);
+                            fastSizes[^1] = last.PartSize;
+                            
+                            progress?.Report(segmentIds.Length);
+                            return fastSizes;
+                        }
                     }
                 }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Parent timeout (e.g., 15s per-file timeout from QueueItemProcessor) — just propagate.
+                // The caller handles retry logic; no need to log a scary message here.
+                throw;
             }
             catch (Exception ex)
             {
                 // Check if this looks like a DMCA/takedown (article not found)
                 if (IsArticleNotFoundException(ex) && segmentIds.Length > 3)
                 {
-                    Serilog.Log.Warning("[UsenetStreamingClient] Smart Analysis failed with article-not-found. Running DMCA confirmation check...");
+                    Serilog.Log.Warning("[UsenetStreamingClient] Smart Analysis failed with article-not-found. Running DMCA confirmation check on mid segment...");
 
-                    // Confirmation: try one segment from the middle of the NZB
+                    // Standard DMCA confirmation: check mid segment only.
+                    // DMCA takedowns remove ALL articles for a file — if first, last, AND mid are all missing,
+                    // the file is confirmed DMCA'd. This is the standard Usenet DMCA detection pattern.
                     var midIndex = segmentIds.Length / 2;
                     try
                     {
@@ -150,29 +189,41 @@ public class UsenetStreamingClient
 
                         await _client.GetSegmentYencHeaderAsync(segmentIds[midIndex], confirmCts.Token).ConfigureAwait(false);
 
-                        // Middle segment succeeded — not a full DMCA, proceed with full scan
-                        Serilog.Log.Warning("[UsenetStreamingClient] DMCA confirmation check PASSED (mid-segment exists). Falling back to full scan.");
+                        // Mid segment exists — not a full DMCA, but has partial article loss.
+                        // Skip full HEAD scan — defer to ffprobe for definitive integrity check.
+                        Serilog.Log.Warning("[UsenetStreamingClient] DMCA check PASSED (mid-segment exists). Not DMCA — deferring to ffprobe.");
+                        throw new UsenetArticleNotFoundException(
+                            $"Partial article loss detected (first/last missing but mid exists). Deferring to ffprobe.");
                     }
                     catch (Exception confirmEx) when (IsArticleNotFoundException(confirmEx))
                     {
-                        // Confirmed: first/last AND middle segments are missing — DMCA/takedown pattern
-                        Serilog.Log.Warning("[UsenetStreamingClient] DMCA/takedown pattern confirmed: first, last, and mid segments all missing. Failing fast.");
+                        // Confirmed: first, last, AND mid segments all missing — DMCA/takedown pattern
+                        Serilog.Log.Warning("[UsenetStreamingClient] DMCA/takedown pattern confirmed: first, mid={MidIndex}, and last segments all missing. Failing fast.", midIndex);
                         throw new NonRetryableDownloadException(
-                            $"DMCA/takedown pattern detected: multiple segments across NZB are missing (first, mid={midIndex}, last). " +
+                            $"DMCA/takedown pattern detected: first, mid ({midIndex}), and last segments all missing. " +
                             $"Skipping full scan of {segmentIds.Length} segments.");
                     }
-                    catch (Exception confirmEx)
+                    catch (Exception confirmEx) when (!IsArticleNotFoundException(confirmEx))
                     {
-                        // Confirmation check failed with a non-article error (timeout, connection issue)
-                        // Proceed with full scan — might be a transient network problem
-                        Serilog.Log.Warning(confirmEx, "[UsenetStreamingClient] DMCA confirmation check failed with non-article error. Falling back to full scan.");
+                        // Transient error on confirmation — not conclusive, defer to ffprobe
+                        Serilog.Log.Warning(confirmEx, "[UsenetStreamingClient] DMCA confirmation check failed with non-article error. Deferring to ffprobe.");
+                        throw new UsenetArticleNotFoundException(
+                            $"DMCA confirmation inconclusive (transient error). Deferring to ffprobe.");
                     }
                 }
                 else
                 {
-                    // Not article-not-found (timeout, connection reset, etc.) — proceed with full scan
-                    Serilog.Log.Warning(ex, "[UsenetStreamingClient] Smart Analysis failed/skipped. Falling back to full scan.");
+                    // Not article-not-found (timeout, connection reset, etc.) — skip full scan, defer to ffprobe
+                    Serilog.Log.Warning(ex, "[UsenetStreamingClient] Smart Analysis failed with non-article error. Deferring to ffprobe.");
+                    throw;
                 }
+            }
+
+            // If spot-check found missing mid-file articles (first/last exist but gaps in middle),
+            // throw here AFTER the try-catch to avoid the DMCA confirmation path (which assumes first/last are missing).
+            if (spotCheckFailure != null)
+            {
+                throw new UsenetArticleNotFoundException(spotCheckFailure);
             }
         }
 
@@ -288,12 +339,12 @@ public class UsenetStreamingClient
             sharedStreamBufferSize: _configManager.GetSharedStreamBufferSize(), sharedStreamGracePeriod: _configManager.GetSharedStreamGracePeriod());
     }
 
-    public NzbFileStream GetFileStream(string[] segmentIds, long fileSize, int concurrentConnections, ConnectionUsageContext? usageContext = null, bool useBufferedStreaming = true, int? bufferSize = null, long[]? segmentSizes = null, Dictionary<int, string[]>? segmentFallbacks = null)
+    public NzbFileStream GetFileStream(string[] segmentIds, long fileSize, int concurrentConnections, ConnectionUsageContext? usageContext = null, bool useBufferedStreaming = true, int? bufferSize = null, long[]? segmentSizes = null, Dictionary<int, string[]>? segmentFallbacks = null, int? sharedStreamGracePeriod = null)
     {
         // Use config value if not specified
         var actualBufferSize = bufferSize ?? _configManager.GetStreamBufferSize();
         return new NzbFileStream(segmentIds, fileSize, _client, concurrentConnections, usageContext, useBufferedStreaming, actualBufferSize, segmentSizes, segmentFallbacks,
-            _configManager.GetSharedStreamBufferSize(), _configManager.GetSharedStreamGracePeriod());
+            _configManager.GetSharedStreamBufferSize(), sharedStreamGracePeriod ?? _configManager.GetSharedStreamGracePeriod());
     }
 
     public NzbFileStream GetFastFileStream(string[] segmentIds, long fileSize, int concurrentConnections, ConnectionUsageContext? usageContext = null)

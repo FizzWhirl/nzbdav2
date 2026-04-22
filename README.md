@@ -116,6 +116,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.19 (2026-04-22)
+*   **Fix**: Added runtime schema compatibility checks that automatically add missing `DownloadDirId` columns to `HistoryItems` and `HistoryCleanupItems` when upgrading from legacy databases with migration drift.
+*   **Reliability**: Added startup self-healing index creation for `IX_HistoryItems_Category_DownloadDirId` to keep history cleanup and health-check queries stable after migration from v1.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-SCHEMA-COMPAT-HISTORY`.
+
 ## v0.7.18 (2026-04-22)
 *   **Tooling**: Kept Docker publishing repository-derived so GitHub Actions publishes to the current fork owner automatically.
 *   **UI**: Updated in-app GitHub and changelog links to point to FizzWhirl/nzbdav2.

@@ -57,8 +57,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-ANALYSIS-LOW-DATA");
-            Log.Warning("  FEATURE: Analysis decode uses 2s sample and disables buffered streaming in analysis mode");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-SCHEMA-COMPAT-HISTORY");
+            Log.Warning("  FEATURE: Runtime schema self-healing for missing History DownloadDirId columns");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -163,6 +163,7 @@ class Program
             var argIndex = args.ToList().IndexOf("--db-migration");
             var targetMigration = args.Length > argIndex + 1 ? args[argIndex + 1] : null;
             await databaseContext.Database.MigrateAsync(targetMigration).ConfigureAwait(false);
+            await EnsureSchemaCompatibilityAsync(databaseContext).ConfigureAwait(false);
 
             Log.Warning("Database migration finished successfully!");
             return;
@@ -176,6 +177,7 @@ class Program
         await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA temp_store = MEMORY;").ConfigureAwait(false);
         await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA mmap_size = 1610612736;").ConfigureAwait(false); // 1.5GB - covers full DB
         await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout = 5000;").ConfigureAwait(false);
+        await EnsureSchemaCompatibilityAsync(databaseContext).ConfigureAwait(false);
 
         // initialize the config-manager
         var configManager = new ConfigManager();
@@ -310,5 +312,65 @@ class Program
         app.UseNWebDav();
         app.Lifetime.ApplicationStopping.Register(SigtermUtil.Cancel);
         await app.RunAsync().ConfigureAwait(false);
+    }
+
+    private static async Task EnsureSchemaCompatibilityAsync(DavDatabaseContext databaseContext)
+    {
+        await EnsureColumnExistsAsync(databaseContext, "HistoryItems", "DownloadDirId", "TEXT").ConfigureAwait(false);
+        await EnsureColumnExistsAsync(databaseContext, "HistoryCleanupItems", "DownloadDirId", "TEXT").ConfigureAwait(false);
+        await databaseContext.Database.ExecuteSqlRawAsync(
+            "CREATE INDEX IF NOT EXISTS IX_HistoryItems_Category_DownloadDirId ON HistoryItems (Category, DownloadDirId);")
+            .ConfigureAwait(false);
+    }
+
+    private static async Task EnsureColumnExistsAsync(
+        DavDatabaseContext databaseContext,
+        string tableName,
+        string columnName,
+        string sqlType)
+    {
+        if (await ColumnExistsAsync(databaseContext, tableName, columnName).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        Log.Warning("[SchemaCompat] Missing column detected: {Table}.{Column}. Adding it now.", tableName, columnName);
+        await databaseContext.Database.ExecuteSqlRawAsync(
+            $"ALTER TABLE {tableName} ADD COLUMN {columnName} {sqlType} NULL;")
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<bool> ColumnExistsAsync(DavDatabaseContext databaseContext, string tableName, string columnName)
+    {
+        var connection = databaseContext.Database.GetDbConnection();
+        var shouldClose = connection.State != System.Data.ConnectionState.Open;
+        if (shouldClose)
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"PRAGMA table_info({tableName});";
+
+            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                if (string.Equals(reader["name"]?.ToString(), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            if (shouldClose)
+            {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
+        }
     }
 }

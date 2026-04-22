@@ -57,8 +57,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-SCHEMA-COMPAT-HISTORY");
-            Log.Warning("  FEATURE: Runtime schema self-healing for missing History DownloadDirId columns");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-MIGRATION-COMPAT-PATCHES");
+            Log.Warning("  FEATURE: Runtime migration self-healing for History, Queue, and DavItem type drift");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -321,6 +321,103 @@ class Program
         await databaseContext.Database.ExecuteSqlRawAsync(
             "CREATE INDEX IF NOT EXISTS IX_HistoryItems_Category_DownloadDirId ON HistoryItems (Category, DownloadDirId);")
             .ConfigureAwait(false);
+
+        await EnsureQueueNzbContentsConsistencyAsync(databaseContext).ConfigureAwait(false);
+        await NormalizeLegacyDavItemTypesAsync(databaseContext).ConfigureAwait(false);
+    }
+
+    private static async Task EnsureQueueNzbContentsConsistencyAsync(DavDatabaseContext databaseContext)
+    {
+        if (!await TableExistsAsync(databaseContext, "QueueItems").ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (!await TableExistsAsync(databaseContext, "QueueNzbContents").ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (await ColumnExistsAsync(databaseContext, "QueueItems", "NzbContents").ConfigureAwait(false))
+        {
+            var backfilled = await databaseContext.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO QueueNzbContents (Id, NzbContents)
+                SELECT q.Id, q.NzbContents
+                FROM QueueItems q
+                LEFT JOIN QueueNzbContents c ON c.Id = q.Id
+                WHERE c.Id IS NULL AND q.NzbContents IS NOT NULL
+                """)
+                .ConfigureAwait(false);
+
+            if (backfilled > 0)
+            {
+                Log.Warning("[SchemaCompat] Backfilled {Count} QueueNzbContents rows from legacy QueueItems.NzbContents", backfilled);
+            }
+        }
+
+        var removedOrphans = await databaseContext.Database.ExecuteSqlRawAsync(
+            """
+            DELETE FROM QueueItems
+            WHERE Id IN (
+                SELECT q.Id
+                FROM QueueItems q
+                LEFT JOIN QueueNzbContents c ON c.Id = q.Id
+                WHERE c.Id IS NULL
+            )
+            """)
+            .ConfigureAwait(false);
+
+        if (removedOrphans > 0)
+        {
+            Log.Warning("[SchemaCompat] Removed {Count} orphaned QueueItems missing QueueNzbContents", removedOrphans);
+        }
+    }
+
+    private static async Task NormalizeLegacyDavItemTypesAsync(DavDatabaseContext databaseContext)
+    {
+        if (!await TableExistsAsync(databaseContext, "DavItems").ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var fixedNzbTypes = await databaseContext.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE DavItems
+            SET Type = 3
+            WHERE Type = 1
+              AND EXISTS (SELECT 1 FROM DavNzbFiles n WHERE n.Id = DavItems.Id)
+            """)
+            .ConfigureAwait(false);
+
+        var fixedRarTypes = await databaseContext.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE DavItems
+            SET Type = 4
+            WHERE Type = 1
+              AND EXISTS (SELECT 1 FROM DavRarFiles r WHERE r.Id = DavItems.Id)
+            """)
+            .ConfigureAwait(false);
+
+        var fixedMultipartTypes = await databaseContext.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE DavItems
+            SET Type = 6
+            WHERE Type = 1
+              AND EXISTS (SELECT 1 FROM DavMultipartFiles m WHERE m.Id = DavItems.Id)
+            """)
+            .ConfigureAwait(false);
+
+        var totalFixed = fixedNzbTypes + fixedRarTypes + fixedMultipartTypes;
+        if (totalFixed > 0)
+        {
+            Log.Warning(
+                "[SchemaCompat] Normalized {Total} legacy DavItems types (Nzb={Nzb}, Rar={Rar}, Multipart={Multipart})",
+                totalFixed,
+                fixedNzbTypes,
+                fixedRarTypes,
+                fixedMultipartTypes);
+        }
     }
 
     private static async Task EnsureColumnExistsAsync(
@@ -364,6 +461,36 @@ class Program
             }
 
             return false;
+        }
+        finally
+        {
+            if (shouldClose)
+            {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static async Task<bool> TableExistsAsync(DavDatabaseContext databaseContext, string tableName)
+    {
+        var connection = databaseContext.Database.GetDbConnection();
+        var shouldClose = connection.State != System.Data.ConnectionState.Open;
+        if (shouldClose)
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @table LIMIT 1;";
+            var param = command.CreateParameter();
+            param.ParameterName = "@table";
+            param.Value = tableName;
+            command.Parameters.Add(param);
+
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return result != null;
         }
         finally
         {

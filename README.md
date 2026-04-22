@@ -116,6 +116,20 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.16 (2026-04-22)
+*   **Fix**: Step 5 media analysis now keeps files (instead of marking them corrupt) when decode check failures are caused by transient provider errors — 5XX responses, NNTP protocol errors, premature EOF, or decode timeouts. Only genuine codec errors (invalid data, CRC failures) result in corruption marking.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-TRANSIENT-DECODE-FIX`.
+
+## v0.7.15 (2026-04-22)
+*   **Reliability**: Hardened `NzbProviderAffinity` stats persistence by preventing overlapping timer writes and reducing write cadence from 5s to 15s.
+*   **Fix**: Added retry handling for transient SQLite write errors (`disk I/O error`, `database is locked`) during affinity stats persistence.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-AFFINITY-PERSIST-FIX`.
+
+## v0.7.14 (2026-04-22)
+*   **Reliability**: Raised default `analysis.max-concurrent` from `1` to `3` in backend and frontend defaults to avoid severe queue-analysis bottlenecks on large packs.
+*   **Logic**: Kept unified analysis fan-out model where both Queue Step 3 smart probe and Step 5 media analysis follow `analysis.max-concurrent`.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-DEFAULTS-3`.
+
 ## v0.7.13 (2026-04-22)
 *   **Logic**: Queue Step 5 media analysis (`ffprobe` + decode checks) now uses `analysis.max-concurrent` instead of a separate hardcoded parallelism value.
 *   **Logic**: Queue Steps 3 and 5 now share the same frontend-exposed analysis concurrency setting.

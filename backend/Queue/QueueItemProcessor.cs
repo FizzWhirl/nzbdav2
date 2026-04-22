@@ -601,6 +601,12 @@ public class QueueItemProcessor(
                             historyResult = "Pending";
                             historyDetails = "Media integrity check timed out — file kept for retry";
                             break;
+                        case MediaAnalysisResult.TransientError:
+                            Log.Warning("[QueueItemProcessor] Step 5: {FileName} had a transient provider error during analysis — keeping file", item.Name);
+                            websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
+                            historyResult = "Pending";
+                            historyDetails = "Media integrity check encountered a transient provider error — file kept";
+                            break;
                         default:
                             Log.Information("[QueueItemProcessor] Step 5: {FileName} passed media analysis", item.Name);
                             websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");

@@ -369,7 +369,7 @@ public class ConfigManager
     {
         return int.Parse(
             StringUtil.EmptyToNull(GetConfigValue("analysis.max-concurrent"))
-            ?? "1"
+            ?? "3"
         );
     }
 

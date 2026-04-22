@@ -126,7 +126,7 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     const providerConfig = useMemo(() => parseProviderConfig(config["usenet.providers"]), [config]);
     const [statsEnabled, setStatsEnabled] = useState(config["stats.enable"] !== "false");
     const [analysisEnabled, setAnalysisEnabled] = useState(config["analysis.enable"] !== "false");
-    const [maxConcurrentAnalyses, setMaxConcurrentAnalyses] = useState(config["analysis.max-concurrent"] || "1");
+    const [maxConcurrentAnalyses, setMaxConcurrentAnalyses] = useState(config["analysis.max-concurrent"] || "3");
     const [providerAffinityEnabled, setProviderAffinityEnabled] = useState(config["provider-affinity.enable"] !== "false");
     const [hideSamples, setHideSamples] = useState(config["usenet.hide-samples"] === "true");
     const [streamBufferSize, setStreamBufferSize] = useState(config["usenet.stream-buffer-size"] || "100");

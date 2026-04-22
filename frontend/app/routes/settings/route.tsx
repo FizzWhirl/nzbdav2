@@ -54,7 +54,7 @@ const defaultConfig = {
     "repair.min-check-interval-days": "",
     "stats.enable": "false",
     "analysis.enable": "true",
-    "analysis.max-concurrent": "1",
+    "analysis.max-concurrent": "3",
     "provider-affinity.enable": "true",
     "api.startup-vacuum": "false",
     "api.health-check-categories": "",

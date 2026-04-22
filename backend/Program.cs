@@ -57,8 +57,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-UNIFIED-ANALYSIS-CONCURRENCY");
-            Log.Warning("  FEATURE: Steps 3 and 5 now both follow analysis.max-concurrent");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-TRANSIENT-DECODE-FIX");
+            Log.Warning("  FEATURE: Step 5 keeps files on provider errors/timeouts instead of marking corrupt");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

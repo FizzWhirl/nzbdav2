@@ -12,7 +12,8 @@ public enum MediaAnalysisResult
 {
     Success,
     Failed,
-    Timeout
+    Timeout,
+    TransientError
 }
 
 public class MediaAnalysisService(
@@ -83,9 +84,17 @@ public class MediaAnalysisService(
              if (integrityErrors != null)
              {
                  Log.Warning("[MediaAnalysis] Decode check failed on retry for {Name}: {Errors}", item.Name, integrityErrors);
-                 item.IsCorrupted = true;
-                 item.CorruptionReason = $"Decode integrity check failed: {integrityErrors}";
-                 analysisResult = MediaAnalysisResult.Failed;
+                 if (IsTransientDecodeError(integrityErrors))
+                 {
+                     Log.Warning("[MediaAnalysis] Decode failure is transient (provider/timeout) for {Name} — keeping file", item.Name);
+                     analysisResult = MediaAnalysisResult.TransientError;
+                 }
+                 else
+                 {
+                     item.IsCorrupted = true;
+                     item.CorruptionReason = $"Decode integrity check failed: {integrityErrors}";
+                     analysisResult = MediaAnalysisResult.Failed;
+                 }
              }
              else
              {
@@ -95,7 +104,7 @@ public class MediaAnalysisService(
              }
         }
 
-        if (analysisResult != MediaAnalysisResult.Timeout)
+        if (analysisResult != MediaAnalysisResult.Timeout && analysisResult != MediaAnalysisResult.TransientError)
         {
             await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
         }
@@ -319,5 +328,36 @@ public class MediaAnalysisService(
     {
         var configured = Environment.GetEnvironmentVariable(envName);
         return string.IsNullOrWhiteSpace(configured) ? defaultCommand : configured;
+    }
+
+    /// <summary>
+    /// Returns true if the decode error string represents a transient provider or network issue
+    /// rather than genuine file corruption. Transient errors should not mark a file as corrupt.
+    /// </summary>
+    private static bool IsTransientDecodeError(string error)
+    {
+        // Timeout during decode seek — not corruption, just slow provider/stream
+        if (error.StartsWith("[timeout]", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // [error] prefix from our exception handler — network/IO exception, not corruption
+        if (error.StartsWith("[error]", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Provider-level HTTP/NNTP errors surfaced by ffmpeg/ffprobe
+        if (error.Contains("5XX Server Error", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (error.Contains("Server returned", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (error.Contains("Invalid NNTP Response", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Premature EOF — usually means provider didn't serve all segments (transient), not corrupt data
+        if (error.Contains("File ended prematurely", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (error.Contains("ends prematurely", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
     }
 }

@@ -24,6 +24,7 @@ public class NzbProviderAffinityService
     private readonly Timer _persistenceTimer;
     private readonly Timer _benchmarkRefreshTimer;
     private readonly SemaphoreSlim _dbWriteLock = new(1, 1);
+    private int _isPersistingStats;
 
     public NzbProviderAffinityService(
         IServiceScopeFactory scopeFactory,
@@ -32,8 +33,8 @@ public class NzbProviderAffinityService
         _scopeFactory = scopeFactory;
         _configManager = configManager;
 
-        // Persist stats every 5 seconds
-        _persistenceTimer = new Timer(PersistStats, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        // Persist stats every 15 seconds to reduce SQLite write pressure on mounted volumes.
+        _persistenceTimer = new Timer(PersistStats, null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
 
         // Refresh benchmark speeds every 60 seconds (in case new benchmarks are run)
         _benchmarkRefreshTimer = new Timer(_ => _ = Task.Run(LoadBenchmarkSpeedsAsync), null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60));
@@ -385,6 +386,7 @@ public class NzbProviderAffinityService
     private async void PersistStats(object? state)
     {
         if (!_configManager.IsProviderAffinityEnabled()) return;
+        if (Interlocked.Exchange(ref _isPersistingStats, 1) == 1) return;
 
         try
         {
@@ -424,7 +426,7 @@ public class NzbProviderAffinityService
 
                 if (hasChanges)
                 {
-                    await dbContext.SaveChangesAsync().ConfigureAwait(false);
+                    await SaveChangesWithRetryAsync(dbContext).ConfigureAwait(false);
                 }
             }
             finally
@@ -436,6 +438,41 @@ public class NzbProviderAffinityService
         {
             Log.Error(ex, "[NzbProviderAffinity] Failed to persist stats to database");
         }
+        finally
+        {
+            Interlocked.Exchange(ref _isPersistingStats, 0);
+        }
+    }
+
+    private static async Task SaveChangesWithRetryAsync(DavDatabaseContext dbContext)
+    {
+        const int maxAttempts = 3;
+        var delay = TimeSpan.FromMilliseconds(200);
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await dbContext.SaveChangesAsync().ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex) when (attempt < maxAttempts && IsTransientSqliteError(ex))
+            {
+                Log.Warning(ex, "[NzbProviderAffinity] Transient DB write failure on attempt {Attempt}/{MaxAttempts}; retrying in {DelayMs}ms",
+                    attempt, maxAttempts, delay.TotalMilliseconds);
+                await Task.Delay(delay).ConfigureAwait(false);
+                delay = TimeSpan.FromMilliseconds(delay.TotalMilliseconds * 2);
+            }
+        }
+    }
+
+    private static bool IsTransientSqliteError(Exception ex)
+    {
+        var text = ex.ToString();
+        return text.Contains("disk I/O error", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("database is locked", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("SQLite Error 10", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("SQLite Error 5", StringComparison.OrdinalIgnoreCase);
     }
 
     private class ProviderPerformance

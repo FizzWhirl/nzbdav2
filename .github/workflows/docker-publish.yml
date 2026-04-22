@@ -56,7 +56,7 @@ jobs:
           fi
 
           GHCR_REPO="ghcr.io/${{ github.repository }}"
-          # DOCKERHUB_REPO="dgherman/nzbdav"  # Uncomment if using Docker Hub
+          # DOCKERHUB_REPO="${{ github.repository_owner }}/nzbdav2"  # Uncomment if using Docker Hub
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             {
               echo "TAGS<<EOF"

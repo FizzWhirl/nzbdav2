@@ -101,7 +101,7 @@ docker run --rm -it \
   -e PUID=1000 \
   -e PGID=1000 \
   -p 3000:3000 \
-  ghcr.io/dgherman/nzbdav2:latest
+  ghcr.io/fizzwhirl/nzbdav2:latest
 ```
 
 After starting, navigate to `http://localhost:3000` and open Settings to configure your Usenet provider connections.
@@ -115,6 +115,11 @@ For a complete deployment guide including RClone mount configuration, Sonarr/Rad
 nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and periodically cherry-picks relevant upstream changes manually. Each sync documents which changes were adopted, which were skipped, and the rationale for each decision. Sync history is in [`docs/upstream-sync-*.md`](./docs/). The most recent file contains the last reviewed upstream commit and a table of all items evaluated.
 
 ## Changelog
+
+## v0.7.18 (2026-04-22)
+*   **Tooling**: Kept Docker publishing repository-derived so GitHub Actions publishes to the current fork owner automatically.
+*   **UI**: Updated in-app GitHub and changelog links to point to FizzWhirl/nzbdav2.
+*   **Docs**: Updated the Quick Start image reference to `ghcr.io/fizzwhirl/nzbdav2:latest`.
 
 ## v0.7.17 (2026-04-22)
 *   **Optimization**: Reduced media-analysis decode sample duration from 5 seconds to 2 seconds for Step 5 decode checks to lower analysis data usage.

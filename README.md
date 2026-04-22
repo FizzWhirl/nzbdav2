@@ -116,6 +116,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.21 (2026-04-22)
+*   **Fix**: Added pre-migration index compatibility checks that recreate legacy indexes before EF migration runs, preventing failures such as `no such index: IX_DavItems_Type_NextHealthCheck_ReleaseDate_Id` on drifted v1 databases.
+*   **Reliability**: Migration bootstrap now safely pre-creates `IX_DavItems_Type_NextHealthCheck_ReleaseDate_Id` and `IX_QueueItems_FileName` only when required tables and columns exist.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-MIGRATION-INDEX-COMPAT`.
+
 ## v0.7.20 (2026-04-22)
 *   **Fix**: Added runtime queue migration self-healing to backfill `QueueNzbContents` from legacy `QueueItems.NzbContents` when available and remove orphan queue rows that would otherwise stall processing with "no NZB contents" warnings.
 *   **Fix**: Added runtime normalization for legacy `DavItems` rows incorrectly marked as directories even though they map to file tables (`DavNzbFiles`, `DavRarFiles`, `DavMultipartFiles`).

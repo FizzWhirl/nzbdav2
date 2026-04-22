@@ -57,8 +57,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-MIGRATION-COMPAT-PATCHES");
-            Log.Warning("  FEATURE: Runtime migration self-healing for History, Queue, and DavItem type drift");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-MIGRATION-INDEX-COMPAT");
+            Log.Warning("  FEATURE: Pre-migration index compatibility for legacy drifted databases");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -158,6 +158,8 @@ class Program
             {
                 // Table might not exist yet, ignore
             }
+
+            await EnsureMigrationDropIndexPrerequisitesAsync(databaseContext).ConfigureAwait(false);
 
             Log.Warning("  → Running migrations...");
             var argIndex = args.ToList().IndexOf("--db-migration");
@@ -326,6 +328,25 @@ class Program
         await NormalizeLegacyDavItemTypesAsync(databaseContext).ConfigureAwait(false);
     }
 
+    private static async Task EnsureMigrationDropIndexPrerequisitesAsync(DavDatabaseContext databaseContext)
+    {
+        if (await TableExistsAsync(databaseContext, "DavItems").ConfigureAwait(false)
+            && await ColumnsExistAsync(databaseContext, "DavItems", "Type", "NextHealthCheck", "ReleaseDate", "Id").ConfigureAwait(false))
+        {
+            await databaseContext.Database.ExecuteSqlRawAsync(
+                "CREATE INDEX IF NOT EXISTS IX_DavItems_Type_NextHealthCheck_ReleaseDate_Id ON DavItems (Type, NextHealthCheck, ReleaseDate, Id);")
+                .ConfigureAwait(false);
+        }
+
+        if (await TableExistsAsync(databaseContext, "QueueItems").ConfigureAwait(false)
+            && await ColumnsExistAsync(databaseContext, "QueueItems", "FileName").ConfigureAwait(false))
+        {
+            await databaseContext.Database.ExecuteSqlRawAsync(
+                "CREATE INDEX IF NOT EXISTS IX_QueueItems_FileName ON QueueItems (FileName);")
+                .ConfigureAwait(false);
+        }
+    }
+
     private static async Task EnsureQueueNzbContentsConsistencyAsync(DavDatabaseContext databaseContext)
     {
         if (!await TableExistsAsync(databaseContext, "QueueItems").ConfigureAwait(false))
@@ -469,6 +490,19 @@ class Program
                 await connection.CloseAsync().ConfigureAwait(false);
             }
         }
+    }
+
+    private static async Task<bool> ColumnsExistAsync(DavDatabaseContext databaseContext, string tableName, params string[] columnNames)
+    {
+        foreach (var column in columnNames)
+        {
+            if (!await ColumnExistsAsync(databaseContext, tableName, column).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static async Task<bool> TableExistsAsync(DavDatabaseContext databaseContext, string tableName)

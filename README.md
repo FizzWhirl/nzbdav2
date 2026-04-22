@@ -116,6 +116,12 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.7.22 (2026-04-23)
+*   **Fix**: Added v1-compatible `DavItems` type normalization for databases that use `Type=2` + `SubType` (`201/202/203`) so files are no longer misclassified as folders in UI/WebDAV/rclone mounts.
+*   **Fix**: Added queue recovery from legacy blob files at startup (`/config/blobs/{firstTwo}/{nextTwo}/{guid}`) to repopulate `QueueNzbContents` before orphan cleanup.
+*   **Reliability**: Extended startup migration self-healing to handle mixed-schema upgrades where both old and new type encodings may coexist.
+*   **Logging**: Updated backend startup build banner to `BUILD v2026-04-23-V1-MIGRATION-FILETYPE-QUEUE-RECOVERY`.
+
 ## v0.7.21 (2026-04-22)
 *   **Fix**: Added pre-migration index compatibility checks that recreate legacy indexes before EF migration runs, preventing failures such as `no such index: IX_DavItems_Type_NextHealthCheck_ReleaseDate_Id` on drifted v1 databases.
 *   **Reliability**: Migration bootstrap now safely pre-creates `IX_DavItems_Type_NextHealthCheck_ReleaseDate_Id` and `IX_QueueItems_FileName` only when required tables and columns exist.

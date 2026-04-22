@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text;
 using NWebDav.Server;
 using NWebDav.Server.Stores;
 using NzbWebDAV.Api.SabControllers;
@@ -57,8 +58,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-22-MIGRATION-INDEX-COMPAT");
-            Log.Warning("  FEATURE: Pre-migration index compatibility for legacy drifted databases");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-23-V1-MIGRATION-FILETYPE-QUEUE-RECOVERY");
+            Log.Warning("  FEATURE: v1 Type/SubType normalization plus queue blob recovery from /config/blobs");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -377,6 +378,12 @@ class Program
             }
         }
 
+        var recoveredFromBlob = await RecoverQueueNzbContentsFromBlobStoreAsync(databaseContext).ConfigureAwait(false);
+        if (recoveredFromBlob > 0)
+        {
+            Log.Warning("[SchemaCompat] Recovered {Count} QueueNzbContents rows from legacy blob files", recoveredFromBlob);
+        }
+
         var removedOrphans = await databaseContext.Database.ExecuteSqlRawAsync(
             """
             DELETE FROM QueueItems
@@ -395,6 +402,109 @@ class Program
         }
     }
 
+    private static async Task<int> RecoverQueueNzbContentsFromBlobStoreAsync(DavDatabaseContext databaseContext)
+    {
+        if (!await TableExistsAsync(databaseContext, "QueueItems").ConfigureAwait(false)
+            || !await TableExistsAsync(databaseContext, "QueueNzbContents").ConfigureAwait(false))
+        {
+            return 0;
+        }
+
+        var connection = databaseContext.Database.GetDbConnection();
+        var shouldClose = connection.State != System.Data.ConnectionState.Open;
+        if (shouldClose)
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+        }
+
+        try
+        {
+            var missingIds = new List<Guid>();
+            await using (var selectMissing = connection.CreateCommand())
+            {
+                selectMissing.CommandText =
+                    """
+                    SELECT q.Id
+                    FROM QueueItems q
+                    LEFT JOIN QueueNzbContents c ON c.Id = q.Id
+                    WHERE c.Id IS NULL
+                    """;
+
+                await using var reader = await selectMissing.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    if (Guid.TryParse(reader[0]?.ToString(), out var id))
+                    {
+                        missingIds.Add(id);
+                    }
+                }
+            }
+
+            if (missingIds.Count == 0)
+            {
+                return 0;
+            }
+
+            var recovered = 0;
+            foreach (var id in missingIds)
+            {
+                var blobPath = GetLegacyBlobPath(id);
+                if (!File.Exists(blobPath))
+                {
+                    continue;
+                }
+
+                string? nzbContents;
+                await using (var fileStream = File.OpenRead(blobPath))
+                using (var streamReader = new StreamReader(fileStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+                {
+                    nzbContents = await streamReader.ReadToEndAsync().ConfigureAwait(false);
+                }
+
+                if (string.IsNullOrWhiteSpace(nzbContents))
+                {
+                    continue;
+                }
+
+                await using var insert = connection.CreateCommand();
+                insert.CommandText =
+                    """
+                    INSERT OR IGNORE INTO QueueNzbContents (Id, NzbContents)
+                    VALUES (@id, @nzb)
+                    """;
+
+                var idParam = insert.CreateParameter();
+                idParam.ParameterName = "@id";
+                idParam.Value = id;
+                insert.Parameters.Add(idParam);
+
+                var nzbParam = insert.CreateParameter();
+                nzbParam.ParameterName = "@nzb";
+                nzbParam.Value = nzbContents;
+                insert.Parameters.Add(nzbParam);
+
+                recovered += await insert.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            return recovered;
+        }
+        finally
+        {
+            if (shouldClose)
+            {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static string GetLegacyBlobPath(Guid id)
+    {
+        var guidWithoutHyphens = id.ToString("N");
+        var firstTwo = guidWithoutHyphens[..2];
+        var nextTwo = guidWithoutHyphens.Substring(2, 2);
+        return Path.Combine(DavDatabaseContext.ConfigPath, "blobs", firstTwo, nextTwo, id.ToString());
+    }
+
     private static async Task NormalizeLegacyDavItemTypesAsync(DavDatabaseContext databaseContext)
     {
         if (!await TableExistsAsync(databaseContext, "DavItems").ConfigureAwait(false))
@@ -402,11 +512,39 @@ class Program
             return;
         }
 
+        var fixedSubtypeNzb = 0;
+        var fixedSubtypeRar = 0;
+        var fixedSubtypeMultipart = 0;
+        var fixedSubtypeSymlinkRoot = 0;
+        var fixedSubtypeIdsRoot = 0;
+
+        if (await ColumnExistsAsync(databaseContext, "DavItems", "SubType").ConfigureAwait(false))
+        {
+            // v1/newer schema used Type=2 (UsenetFile) with SubType 201/202/203.
+            fixedSubtypeNzb = await databaseContext.Database.ExecuteSqlRawAsync(
+                "UPDATE DavItems SET Type = 3 WHERE Type = 2 AND SubType = 201")
+                .ConfigureAwait(false);
+            fixedSubtypeRar = await databaseContext.Database.ExecuteSqlRawAsync(
+                "UPDATE DavItems SET Type = 4 WHERE Type = 2 AND SubType = 202")
+                .ConfigureAwait(false);
+            fixedSubtypeMultipart = await databaseContext.Database.ExecuteSqlRawAsync(
+                "UPDATE DavItems SET Type = 6 WHERE Type = 2 AND SubType = 203")
+                .ConfigureAwait(false);
+
+            // Keep special root folders aligned with this fork's enum values.
+            fixedSubtypeSymlinkRoot = await databaseContext.Database.ExecuteSqlRawAsync(
+                "UPDATE DavItems SET Type = 2 WHERE Type = 1 AND SubType = 105")
+                .ConfigureAwait(false);
+            fixedSubtypeIdsRoot = await databaseContext.Database.ExecuteSqlRawAsync(
+                "UPDATE DavItems SET Type = 5 WHERE Type = 1 AND SubType = 106")
+                .ConfigureAwait(false);
+        }
+
         var fixedNzbTypes = await databaseContext.Database.ExecuteSqlRawAsync(
             """
             UPDATE DavItems
             SET Type = 3
-            WHERE Type = 1
+            WHERE Type IN (1, 2)
               AND EXISTS (SELECT 1 FROM DavNzbFiles n WHERE n.Id = DavItems.Id)
             """)
             .ConfigureAwait(false);
@@ -415,7 +553,7 @@ class Program
             """
             UPDATE DavItems
             SET Type = 4
-            WHERE Type = 1
+                        WHERE Type IN (1, 2)
               AND EXISTS (SELECT 1 FROM DavRarFiles r WHERE r.Id = DavItems.Id)
             """)
             .ConfigureAwait(false);
@@ -424,17 +562,24 @@ class Program
             """
             UPDATE DavItems
             SET Type = 6
-            WHERE Type = 1
+            WHERE Type IN (1, 2)
               AND EXISTS (SELECT 1 FROM DavMultipartFiles m WHERE m.Id = DavItems.Id)
             """)
             .ConfigureAwait(false);
 
-        var totalFixed = fixedNzbTypes + fixedRarTypes + fixedMultipartTypes;
+        var totalFixed = fixedNzbTypes + fixedRarTypes + fixedMultipartTypes +
+            fixedSubtypeNzb + fixedSubtypeRar + fixedSubtypeMultipart +
+            fixedSubtypeSymlinkRoot + fixedSubtypeIdsRoot;
         if (totalFixed > 0)
         {
             Log.Warning(
-                "[SchemaCompat] Normalized {Total} legacy DavItems types (Nzb={Nzb}, Rar={Rar}, Multipart={Multipart})",
+                "[SchemaCompat] Normalized {Total} legacy DavItems types (SubtypeMap: Nzb={SubtypeNzb}, Rar={SubtypeRar}, Multipart={SubtypeMultipart}, SymlinkRoot={SubtypeSymlinkRoot}, IdsRoot={SubtypeIdsRoot}; TableMap: Nzb={Nzb}, Rar={Rar}, Multipart={Multipart})",
                 totalFixed,
+                fixedSubtypeNzb,
+                fixedSubtypeRar,
+                fixedSubtypeMultipart,
+                fixedSubtypeSymlinkRoot,
+                fixedSubtypeIdsRoot,
                 fixedNzbTypes,
                 fixedRarTypes,
                 fixedMultipartTypes);

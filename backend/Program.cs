@@ -59,8 +59,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-23-V1-MIGRATION-SUBTYPE-NULLABLE");
-            Log.Warning("  FEATURE: Fix NOT NULL constraint on legacy SubType column during queue processing");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-23-V1-MIGRATION-FK-INDEX-DRIFT-FIXES");
+            Log.Warning("  FEATURE: Remove unintended DavItems History FK and heal pre-existing QueueItems index drift");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -163,6 +163,7 @@ class Program
 
             await EnsureMigrationDropIndexPrerequisitesAsync(databaseContext).ConfigureAwait(false);
             await EnsureAddHistoryCleanupMigrationCompatibilityAsync(databaseContext).ConfigureAwait(false);
+            await EnsureQueueCategoryFileNameIndexMigrationCompatibilityAsync(databaseContext).ConfigureAwait(false);
 
             Log.Warning("  → Running migrations...");
             var argIndex = args.ToList().IndexOf("--db-migration");
@@ -327,6 +328,8 @@ class Program
             "CREATE INDEX IF NOT EXISTS IX_HistoryItems_Category_DownloadDirId ON HistoryItems (Category, DownloadDirId);")
             .ConfigureAwait(false);
 
+        await EnsureDavItemsHistoryItemIdForeignKeyCompatibilityAsync(databaseContext).ConfigureAwait(false);
+
         // Fix legacy v1 schema: SubType should be nullable for new DavItems
         // The issue: v1 databases have SubType NOT NULL, but v2 EF model doesn't know about it,
         // causing INSERT failures when new DavItems are created without SubType value
@@ -367,8 +370,7 @@ class Program
                         IsCorrupted INTEGER NOT NULL DEFAULT 0,
                         HistoryItemId TEXT,
                         SubType INTEGER,
-                        CONSTRAINT FK_DavItems_DavItems_ParentId FOREIGN KEY (ParentId) REFERENCES DavItems(Id) ON DELETE CASCADE,
-                        CONSTRAINT FK_DavItems_HistoryItems_HistoryItemId FOREIGN KEY (HistoryItemId) REFERENCES HistoryItems(Id)
+                        CONSTRAINT FK_DavItems_DavItems_ParentId FOREIGN KEY (ParentId) REFERENCES DavItems(Id) ON DELETE CASCADE
                     );
                     """)
                     .ConfigureAwait(false);
@@ -461,25 +463,15 @@ class Program
             return;
         }
 
-        // Check migration history using scalar query.
+        if (await IsMigrationAppliedAsync(databaseContext, migrationId).ConfigureAwait(false))
+        {
+            return;
+        }
+
         await using var connection = databaseContext.Database.GetDbConnection();
         if (connection.State != ConnectionState.Open)
         {
             await connection.OpenAsync().ConfigureAwait(false);
-        }
-
-        await using var checkCmd = connection.CreateCommand();
-        checkCmd.CommandText = "SELECT COUNT(1) FROM __EFMigrationsHistory WHERE MigrationId = @migrationId";
-        var migrationParam = checkCmd.CreateParameter();
-        migrationParam.ParameterName = "@migrationId";
-        migrationParam.Value = migrationId;
-        checkCmd.Parameters.Add(migrationParam);
-
-        var existingCountObj = await checkCmd.ExecuteScalarAsync().ConfigureAwait(false);
-        var existingCount = Convert.ToInt32(existingCountObj ?? 0);
-        if (existingCount > 0)
-        {
-            return;
         }
 
         var hasHistoryItemId = await ColumnExistsAsync(databaseContext, "DavItems", "HistoryItemId").ConfigureAwait(false);
@@ -515,6 +507,187 @@ class Program
         pvParam.Value = productVersion;
         insertCmd.Parameters.Add(pvParam);
         await insertCmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+    }
+
+    private static async Task EnsureQueueCategoryFileNameIndexMigrationCompatibilityAsync(DavDatabaseContext databaseContext)
+    {
+        const string migrationId = "20260408180402_ChangeQueueItemsFileNameIndexToCategoryFileName";
+
+        if (!await TableExistsAsync(databaseContext, "__EFMigrationsHistory").ConfigureAwait(false)
+            || !await TableExistsAsync(databaseContext, "QueueItems").ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (await IsMigrationAppliedAsync(databaseContext, migrationId).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        if (!await IndexExistsAsync(databaseContext, "IX_QueueItems_Category_FileName").ConfigureAwait(false))
+        {
+            return;
+        }
+
+        // Drift case: index already exists before migration runs, so migration fails while creating it.
+        // Drop it so the migration can recreate it cleanly.
+        Log.Warning("[SchemaCompat] Detected pre-existing IX_QueueItems_Category_FileName before migration. Dropping for replay.");
+        await databaseContext.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_QueueItems_Category_FileName;")
+            .ConfigureAwait(false);
+    }
+
+    private static async Task EnsureDavItemsHistoryItemIdForeignKeyCompatibilityAsync(DavDatabaseContext databaseContext)
+    {
+        if (!await TableExistsAsync(databaseContext, "DavItems").ConfigureAwait(false)
+            || !await ColumnExistsAsync(databaseContext, "DavItems", "HistoryItemId").ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var hasUnexpectedHistoryItemFk = false;
+        var connection = databaseContext.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+        }
+
+        await using (var fkCmd = connection.CreateCommand())
+        {
+            fkCmd.CommandText = "PRAGMA foreign_key_list('DavItems')";
+            await using var reader = await fkCmd.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                var targetTable = reader[2]?.ToString(); // table
+                var fromColumn = reader[3]?.ToString();  // from
+                if (string.Equals(targetTable, "HistoryItems", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(fromColumn, "HistoryItemId", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasUnexpectedHistoryItemFk = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasUnexpectedHistoryItemFk)
+        {
+            return;
+        }
+
+        Log.Warning("[SchemaCompat] Removing unexpected FK DavItems.HistoryItemId -> HistoryItems.Id");
+        await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;").ConfigureAwait(false);
+        try
+        {
+            await databaseContext.Database.ExecuteSqlRawAsync(
+                "CREATE TABLE IF NOT EXISTS DavItems_backup AS SELECT * FROM DavItems;")
+                .ConfigureAwait(false);
+            await databaseContext.Database.ExecuteSqlRawAsync("DROP TABLE DavItems;").ConfigureAwait(false);
+            await databaseContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE DavItems (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    ParentId TEXT,
+                    Name TEXT NOT NULL,
+                    FileSize INTEGER,
+                    Type INTEGER NOT NULL,
+                    CreatedAt TEXT NOT NULL DEFAULT '0001-01-01 00:00:00',
+                    Path TEXT NOT NULL DEFAULT '',
+                    IdPrefix TEXT NOT NULL DEFAULT '',
+                    LastHealthCheck INTEGER,
+                    NextHealthCheck INTEGER,
+                    ReleaseDate INTEGER,
+                    MediaInfo TEXT,
+                    CorruptionReason TEXT,
+                    IsCorrupted INTEGER NOT NULL DEFAULT 0,
+                    HistoryItemId TEXT,
+                    SubType INTEGER,
+                    CONSTRAINT FK_DavItems_DavItems_ParentId FOREIGN KEY (ParentId) REFERENCES DavItems(Id) ON DELETE CASCADE
+                );
+                """)
+                .ConfigureAwait(false);
+
+            await databaseContext.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO DavItems 
+                (Id, ParentId, Name, FileSize, Type, CreatedAt, Path, IdPrefix,
+                 LastHealthCheck, NextHealthCheck, ReleaseDate, MediaInfo,
+                 CorruptionReason, IsCorrupted, HistoryItemId, SubType)
+                SELECT
+                    COALESCE(Id, ''),
+                    ParentId,
+                    COALESCE(Name, ''),
+                    FileSize,
+                    COALESCE(Type, 1),
+                    COALESCE(CreatedAt, '0001-01-01 00:00:00'),
+                    COALESCE(Path, ''),
+                    COALESCE(IdPrefix, ''),
+                    LastHealthCheck,
+                    NextHealthCheck,
+                    ReleaseDate,
+                    MediaInfo,
+                    CorruptionReason,
+                    COALESCE(IsCorrupted, 0),
+                    HistoryItemId,
+                    SubType
+                FROM DavItems_backup;
+                """)
+                .ConfigureAwait(false);
+
+            await databaseContext.Database.ExecuteSqlRawAsync(
+                "CREATE UNIQUE INDEX IF NOT EXISTS IX_DavItems_ParentId_Name ON DavItems (ParentId, Name);")
+                .ConfigureAwait(false);
+            await databaseContext.Database.ExecuteSqlRawAsync(
+                "CREATE INDEX IF NOT EXISTS IX_DavItems_IdPrefix_Type ON DavItems (IdPrefix, Type);")
+                .ConfigureAwait(false);
+            await databaseContext.Database.ExecuteSqlRawAsync(
+                "CREATE INDEX IF NOT EXISTS IX_DavItems_Path ON DavItems (Path);")
+                .ConfigureAwait(false);
+
+            await databaseContext.Database.ExecuteSqlRawAsync("DROP TABLE DavItems_backup;").ConfigureAwait(false);
+        }
+        finally
+        {
+            await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;").ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<bool> IsMigrationAppliedAsync(DavDatabaseContext databaseContext, string migrationId)
+    {
+        var connection = databaseContext.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+        }
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(1) FROM __EFMigrationsHistory WHERE MigrationId = @migrationId";
+        var param = cmd.CreateParameter();
+        param.ParameterName = "@migrationId";
+        param.Value = migrationId;
+        cmd.Parameters.Add(param);
+
+        var countObj = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+        var count = Convert.ToInt32(countObj ?? 0);
+        return count > 0;
+    }
+
+    private static async Task<bool> IndexExistsAsync(DavDatabaseContext databaseContext, string indexName)
+    {
+        var connection = databaseContext.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+        }
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(1) FROM sqlite_master WHERE type = 'index' AND name = @indexName";
+        var param = cmd.CreateParameter();
+        param.ParameterName = "@indexName";
+        param.Value = indexName;
+        cmd.Parameters.Add(param);
+
+        var countObj = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+        var count = Convert.ToInt32(countObj ?? 0);
+        return count > 0;
     }
 
     private static async Task EnsureQueueNzbContentsConsistencyAsync(DavDatabaseContext databaseContext)

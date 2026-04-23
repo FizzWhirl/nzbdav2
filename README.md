@@ -118,6 +118,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## v0.6.Z (2026-04-23)
 *   **Fix**: Resolve "NOT NULL constraint failed: DavItems.SubType" error when migrating from v1 databases. The compat layer now recreates the DavItems table with nullable SubType column to allow new item creation during queue processing.
+*   **Fix**: Corrected `DavItems` schema compatibility rebuild to avoid creating an unintended foreign key from `DavItems.HistoryItemId` to `HistoryItems.Id`, which caused queue item saves to fail with `FOREIGN KEY constraint failed`.
+*   **Reliability**: Added pre-migration drift handling for `20260408180402_ChangeQueueItemsFileNameIndexToCategoryFileName` so pre-existing `IX_QueueItems_Category_FileName` no longer crashes startup migrations.
+*   **Reliability**: Added startup self-heal to detect and remove the unintended `DavItems.HistoryItemId -> HistoryItems.Id` foreign key on already-affected databases.
 
 ## v0.7.22 (2026-04-23)
 *   **Fix**: Added v1-compatible `DavItems` type normalization for databases that use `Type=2` + `SubType` (`201/202/203`) so files are no longer misclassified as folders in UI/WebDAV/rclone mounts.

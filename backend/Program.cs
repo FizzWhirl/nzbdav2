@@ -59,8 +59,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-23-V1-MIGRATION-FK-INDEX-DRIFT-FIXES");
-            Log.Warning("  FEATURE: Remove unintended DavItems History FK and heal pre-existing QueueItems index drift");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-RANGE-BOUNDED-PREFETCH");
+            Log.Warning("  FEATURE: Bound BufferedSegmentStream prefetch to requested HTTP Range end (+4 segment overshoot)");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

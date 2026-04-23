@@ -116,6 +116,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.Z (2026-04-24)
+*   **Performance**: Bound `BufferedSegmentStream` prefetch to the requested HTTP `Range` end byte (plus a 4-segment overshoot) instead of always queueing every segment to EOF. Prevents ~40 MB of speculative Usenet reads per ranged request — the root cause of slow Radarr imports, ffprobe seek storms, and backend `OutOfMemoryException` on the SAB `mode=history` endpoint when many bounded reads (rclone vfs-cache fills, HDR ffprobe `GetFrameJson` seeks) were in flight concurrently.
+*   **Performance**: Skip the shared-stream pump for requests with a closed `bytes=X-Y` range — discrete bounded reads now take the direct bounded-prefetch path instead of attaching to a streaming pump that would prefetch to EOF for downstream readers.
+*   **Reliability**: Open-ended (`bytes=X-`) and unbounded GETs are unchanged — Plex/Jellyfin/rclone full-file streaming continues to use the shared streaming pump with full read-ahead.
+
 ## v0.6.Z (2026-04-23)
 *   **Fix**: Resolve "NOT NULL constraint failed: DavItems.SubType" error when migrating from v1 databases. The compat layer now recreates the DavItems table with nullable SubType column to allow new item creation during queue processing.
 *   **Fix**: Corrected `DavItems` schema compatibility rebuild to avoid creating an unintended foreign key from `DavItems.HistoryItemId` to `HistoryItems.Id`, which caused queue item saves to fail with `FOREIGN KEY constraint failed`.

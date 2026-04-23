@@ -138,6 +138,18 @@ public class DatabaseStoreNzbFile(
                 Name, id, clientIp, userAgent, rangeHeader);
         }
 
+        // Honor the consumer's HTTP Range end byte (set by GetAndHeadHandlerPatch when the
+        // request specifies bytes=X-Y). The stream prefetch will be bounded to that segment
+        // (plus a small overshoot), preventing ~40 MB over-fetch per ranged read for clients
+        // like rclone vfs-cache and ffprobe seeks.
+        long? requestedEndByte = null;
+        if (!isAnalysisMode && !isPreviewMode && !isPreviewHlsMode &&
+            httpContext.Items.TryGetValue("RequestedRangeEnd", out var endObj) &&
+            endObj is long endByte)
+        {
+            requestedEndByte = endByte;
+        }
+
         // Non-HLS preview seeks use zero grace period so SharedStreamManager immediately releases
         // permits when the browser jumps to a different position. HLS preview keeps the normal
         // grace period so the next segment can reuse the warmed shared stream.
@@ -150,7 +162,8 @@ public class DatabaseStoreNzbFile(
             bufferSize,
             file.GetSegmentSizes(),
             file.SegmentFallbacks,
-            sharedStreamGracePeriod: isPreviewHlsMode ? null : isPreviewMode ? 0 : null
+            sharedStreamGracePeriod: isPreviewHlsMode ? null : isPreviewMode ? 0 : null,
+            requestedEndByte: requestedEndByte
         );
 
         return stream;

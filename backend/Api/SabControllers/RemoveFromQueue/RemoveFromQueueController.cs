@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
+using NzbWebDAV.Extensions;
 using NzbWebDAV.Queue;
 using NzbWebDAV.Websocket;
 
@@ -15,6 +16,8 @@ public class RemoveFromQueueController(
     WebsocketManager websocketManager
 ) : SabApiController.BaseController(httpContext, configManager)
 {
+    private bool IsStrictDeleteRequest => httpContext.GetQueryParam("strict") == "1";
+
     public async Task<RemoveFromQueueResponse> RemoveFromQueue(RemoveFromQueueRequest request)
     {
         try
@@ -24,8 +27,17 @@ public class RemoveFromQueueController(
         }
         catch (Exception ex)
         {
-            // Always return success to Sonarr/Radarr to prevent errors on their side
-            // If item doesn't exist or there's a temporary failure, returning success is harmless
+            if (IsStrictDeleteRequest)
+            {
+                Serilog.Log.Error(ex, "[RemoveFromQueue] Strict delete failed for items {Ids}", string.Join(",", request.NzoIds));
+                return new RemoveFromQueueResponse
+                {
+                    Status = false,
+                    Error = ex.Message
+                };
+            }
+
+            // Keep legacy behavior for non-strict API clients.
             Serilog.Log.Warning("[RemoveFromQueue] Failed to remove items {Ids}, but returning success to prevent Arr errors: {Message}",
                 string.Join(",", request.NzoIds), ex.Message);
         }

@@ -75,26 +75,34 @@ export default function Queue(props: Route.ComponentProps) {
     const disableLiveView = queueSlots.length == maxItems || historySlots.length == maxItems;
     const error = props.actionData?.error;
 
+    const refreshQueue = useCallback(async (pageOverride?: number) => {
+        try {
+            const page = pageOverride ?? queueCurrentPage;
+            const searchParam = queueSearchQuery ? `&search=${encodeURIComponent(queueSearchQuery)}` : '';
+            const start = (page - 1) * queuePageSize;
+            const response = await fetch(`/api?mode=queue&start=${start}&limit=${queuePageSize}${searchParam}`);
+            if (!response.ok) return;
+
+            const data = await response.json();
+            if (!data.queue?.slots) return;
+
+            const totalCount = data.queue.noofslots || 0;
+            setQueueSlots(data.queue.slots);
+            setTotalQueueCount(totalCount);
+
+            const totalPages = Math.max(1, Math.ceil(totalCount / queuePageSize));
+            if (page > totalPages) {
+                setQueueCurrentPage(totalPages);
+            }
+        } catch (e) {
+            console.error('Failed to refresh queue', e);
+        }
+    }, [queueCurrentPage, queueSearchQuery]);
+
     // Refresh queue when page or search changes
     useEffect(() => {
-        const refreshQueue = async () => {
-            try {
-                const searchParam = queueSearchQuery ? `&search=${encodeURIComponent(queueSearchQuery)}` : '';
-                const start = (queueCurrentPage - 1) * queuePageSize;
-                const response = await fetch(`/api?mode=queue&start=${start}&limit=${queuePageSize}${searchParam}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.queue?.slots) {
-                        setQueueSlots(data.queue.slots);
-                        setTotalQueueCount(data.queue.noofslots || 0);
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to refresh queue', e);
-            }
-        };
         refreshQueue();
-    }, [queueCurrentPage, queueSearchQuery]);
+    }, [queueCurrentPage, queueSearchQuery, refreshQueue]);
 
     // Refresh history when showHidden, page, search, or failureReason changes
     useEffect(() => {
@@ -134,8 +142,11 @@ export default function Queue(props: Route.ComponentProps) {
     }, [setQueueSlots]);
 
     const onRemoveQueueSlots = useCallback((ids: Set<string>) => {
+        // Optimistically remove and update count, then fetch from server so shifted items fill the current page.
         setQueueSlots(slots => slots.filter(x => !ids.has(x.nzo_id)));
-    }, [setQueueSlots]);
+        setTotalQueueCount(count => Math.max(0, count - ids.size));
+        void refreshQueue();
+    }, [refreshQueue]);
 
     const onChangeQueueSlotStatus = useCallback((message: string) => {
         const [nzo_id, status] = message.split('|');
@@ -148,19 +159,9 @@ export default function Queue(props: Route.ComponentProps) {
     }, [setQueueSlots]);
 
     const onQueuePriorityChanged = useCallback(async () => {
-        // Refresh the queue to get the new order
-        try {
-            const response = await fetch(`/api?mode=queue&limit=${maxItems}`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.queue?.slots) {
-                    setQueueSlots(data.queue.slots);
-                }
-            }
-        } catch (e) {
-            console.error('Failed to refresh queue after priority change', e);
-        }
-    }, [setQueueSlots]);
+        // Keep queue in the current paginated/search context after reorder actions.
+        await refreshQueue();
+    }, [refreshQueue]);
 
     // history events
     const onAddHistorySlot = useCallback((historySlot: HistorySlot) => {
@@ -276,7 +277,7 @@ export default function Queue(props: Route.ComponentProps) {
             }
 
             {/* queue */}
-            {(queueSlots.length > 0 || queueSearchQuery || queueCurrentPage > 1) ?
+            {(queueSlots.length > 0 || totalQueueCount > 0 || queueSearchQuery || queueCurrentPage > 1) ?
                 <div className={styles.section}>
                     <QueueTable
                         queueSlots={queueSlots}

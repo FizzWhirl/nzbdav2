@@ -121,6 +121,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Fix**: Corrected `DavItems` schema compatibility rebuild to avoid creating an unintended foreign key from `DavItems.HistoryItemId` to `HistoryItems.Id`, which caused queue item saves to fail with `FOREIGN KEY constraint failed`.
 *   **Reliability**: Added pre-migration drift handling for `20260408180402_ChangeQueueItemsFileNameIndexToCategoryFileName` so pre-existing `IX_QueueItems_Category_FileName` no longer crashes startup migrations.
 *   **Reliability**: Added startup self-heal to detect and remove the unintended `DavItems.HistoryItemId -> HistoryItems.Id` foreign key on already-affected databases.
+*   **UI**: Restored queue pagination controls and queue search UI rendering on the Queue page so large queues no longer fall back to the old unpaged "show everything" behavior.
+*   **Logic**: Queue priority-change refresh now preserves current `start`, `limit`, and `search` parameters instead of forcing a `limit=100` snapshot, preventing pagination state resets after moving items.
+*   **Fix**: Queue removals now trigger a paginated server refresh (with page clamping) so deleting an entire page immediately pulls in the next items instead of showing a temporary empty queue until manual reload.
+*   **UI**: Queue empty-state rendering now considers total queue count, preventing false "nothing left" flashes while the next page is being fetched after bulk deletes.
+*   **Reliability**: Queue delete requests from the web UI now use strict mode so backend removal failures are returned as errors instead of being silently reported as success, preventing items from disappearing and then reappearing after refresh.
 
 ## v0.7.22 (2026-04-23)
 *   **Fix**: Added v1-compatible `DavItems` type normalization for databases that use `Type=2` + `SubType` (`201/202/203`) so files are no longer misclassified as folders in UI/WebDAV/rclone mounts.

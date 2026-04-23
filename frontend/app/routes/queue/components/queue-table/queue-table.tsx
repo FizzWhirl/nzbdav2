@@ -1,12 +1,12 @@
 import pageStyles from "../../route.module.css"
 import { ActionButton } from "../action-button/action-button"
 import { PageRow, PageTable } from "../page-table/page-table"
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ConfirmModal } from "../confirm-modal/confirm-modal"
 import type { PresentationQueueSlot } from "../../route"
 import type { TriCheckboxState } from "../tri-checkbox/tri-checkbox"
 import { useFetcher } from "react-router"
-import { Alert, Button } from "react-bootstrap"
+import { Alert, Button, Pagination } from "react-bootstrap"
 
 export type QueueTableProps = {
     queueSlots: PresentationQueueSlot[],
@@ -21,12 +21,29 @@ export type QueueTableProps = {
     onRemoved: (nzo_ids: Set<string>) => void,
 }
 
-export function QueueTable({ queueSlots, onIsSelectedChanged, onIsRemovingChanged, onRemoved }: QueueTableProps) {
+export function QueueTable({
+    queueSlots,
+    totalCount = queueSlots.length,
+    currentPage = 1,
+    pageSize = queueSlots.length || 1,
+    searchQuery = '',
+    onPageChange,
+    onSearchChange,
+    onIsSelectedChanged,
+    onIsRemovingChanged,
+    onRemoved
+}: QueueTableProps) {
     const [isConfirmingRemoval, setIsConfirmingRemoval] = useState(false);
+        const [localSearch, setLocalSearch] = useState(searchQuery);
         const fetcher = useFetcher();
         const formRef = useRef<HTMLFormElement>(null);
         const inputRef = useRef<HTMLInputElement>(null);
         const isUploading = fetcher.state === 'submitting';
+        const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+        useEffect(() => {
+            setLocalSearch(searchQuery);
+        }, [searchQuery]);
 
         const onUploadClick = useCallback(() => {
             inputRef.current?.click();
@@ -58,7 +75,7 @@ export function QueueTable({ queueSlots, onIsSelectedChanged, onIsRemovingChange
         setIsConfirmingRemoval(false);
         onIsRemovingChanged(nzo_ids, true);
         try {
-            const url = `/api?mode=queue&name=delete`;
+            const url = `/api?mode=queue&name=delete&strict=1`;
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -77,10 +94,34 @@ export function QueueTable({ queueSlots, onIsSelectedChanged, onIsRemovingChange
         onIsRemovingChanged(nzo_ids, false);
     }, [queueSlots, setIsConfirmingRemoval, onIsRemovingChanged, onRemoved]);
 
+    const handleSearchKeyPress = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' && onSearchChange && onPageChange) {
+            onSearchChange(localSearch);
+            onPageChange(1);
+        }
+    }, [localSearch, onSearchChange, onPageChange]);
+
     return (
         <>
             <div className={pageStyles["section-title"]}>
                 <h3>Queue</h3>
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        {onSearchChange && (
+                            <input
+                                type="text"
+                                placeholder="Search..."
+                                value={localSearch}
+                                onChange={(e) => setLocalSearch(e.target.value)}
+                                onKeyPress={handleSearchKeyPress}
+                                style={{
+                                    padding: '0.35rem 0.75rem',
+                                    fontSize: '0.875rem',
+                                    borderRadius: '0.25rem',
+                                    border: '1px solid #dee2e6',
+                                    minWidth: '200px'
+                                }}
+                            />
+                        )}
                     {fetcher.data?.error && (
                         <Alert variant="danger" style={{ margin: 0, padding: '0.25rem 0.75rem', fontSize: '0.875rem' }}>
                             {fetcher.data.error}
@@ -92,6 +133,7 @@ export function QueueTable({ queueSlots, onIsSelectedChanged, onIsRemovingChange
                     <Button variant="outline-secondary" size="sm" onClick={onUploadClick} disabled={isUploading} style={{ marginLeft: '0.5rem' }}>
                         {isUploading ? 'Uploading...' : '+ Add NZB'}
                     </Button>
+                    </div>
                 {headerCheckboxState !== 'none' &&
                     <ActionButton type="delete" onClick={onRemove} />
                 }
@@ -116,6 +158,40 @@ export function QueueTable({ queueSlots, onIsSelectedChanged, onIsRemovingChange
                 message={`${selectedCount} item(s) will be removed`}
                 onConfirm={onConfirmRemoval}
                 onCancel={onCancelRemoval} />
+
+            {onPageChange && totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem' }}>
+                    <Pagination>
+                        <Pagination.First onClick={() => onPageChange(1)} disabled={currentPage === 1} />
+                        <Pagination.Prev onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1} />
+
+                        {[...Array(totalPages)].map((_, i) => {
+                            const page = i + 1;
+                            if (
+                                page === 1 ||
+                                page === totalPages ||
+                                (page >= currentPage - 2 && page <= currentPage + 2)
+                            ) {
+                                return (
+                                    <Pagination.Item
+                                        key={page}
+                                        active={page === currentPage}
+                                        onClick={() => onPageChange(page)}
+                                    >
+                                        {page}
+                                    </Pagination.Item>
+                                );
+                            } else if (page === currentPage - 3 || page === currentPage + 3) {
+                                return <Pagination.Ellipsis key={page} disabled />;
+                            }
+                            return null;
+                        })}
+
+                        <Pagination.Next onClick={() => onPageChange(currentPage + 1)} disabled={currentPage === totalPages} />
+                        <Pagination.Last onClick={() => onPageChange(totalPages)} disabled={currentPage === totalPages} />
+                    </Pagination>
+                </div>
+            )}
         </>
     );
 }
@@ -144,7 +220,7 @@ export function QueueRow({ slot, onIsSelectedChanged, onIsRemovingChanged, onRem
         setIsConfirmingRemoval(false);
         onIsRemovingChanged(slot.nzo_id, true);
         try {
-            const url = '/api?mode=queue&name=delete'
+            const url = '/api?mode=queue&name=delete&strict=1'
                 + `&value=${encodeURIComponent(slot.nzo_id)}`;
             const response = await fetch(url);
             if (response.ok) {

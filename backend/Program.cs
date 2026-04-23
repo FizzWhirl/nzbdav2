@@ -58,8 +58,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-23-V1-MIGRATION-FILETYPE-QUEUE-RECOVERY");
-            Log.Warning("  FEATURE: v1 Type/SubType normalization plus queue blob recovery from /config/blobs");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-23-V1-MIGRATION-SUBTYPE-NULLABLE");
+            Log.Warning("  FEATURE: Fix NOT NULL constraint on legacy SubType column during queue processing");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -324,6 +324,84 @@ class Program
         await databaseContext.Database.ExecuteSqlRawAsync(
             "CREATE INDEX IF NOT EXISTS IX_HistoryItems_Category_DownloadDirId ON HistoryItems (Category, DownloadDirId);")
             .ConfigureAwait(false);
+
+        // Fix legacy v1 schema: SubType should be nullable for new DavItems
+        // The issue: v1 databases have SubType NOT NULL, but v2 EF model doesn't know about it,
+        // causing INSERT failures when new DavItems are created without SubType value
+        if (await ColumnExistsAsync(databaseContext, "DavItems", "SubType").ConfigureAwait(false))
+        {
+            try
+            {
+                Log.Warning("[SchemaCompat] Fixing legacy SubType NOT NULL constraint for DavItems");
+                
+                // Disable foreign keys during table recreation
+                await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;").ConfigureAwait(false);
+                
+                // Create backup of existing data
+                await databaseContext.Database.ExecuteSqlRawAsync(
+                    "CREATE TABLE IF NOT EXISTS DavItems_backup AS SELECT * FROM DavItems;")
+                    .ConfigureAwait(false);
+                
+                // Drop old table
+                await databaseContext.Database.ExecuteSqlRawAsync("DROP TABLE DavItems;").ConfigureAwait(false);
+                
+                // Recreate with nullable SubType
+                await databaseContext.Database.ExecuteSqlRawAsync(
+                    """
+                    CREATE TABLE DavItems (
+                        Id TEXT NOT NULL PRIMARY KEY,
+                        ParentId TEXT,
+                        Name TEXT NOT NULL,
+                        FileSize INTEGER,
+                        Type INTEGER NOT NULL,
+                        CreatedAt TEXT NOT NULL DEFAULT '0001-01-01 00:00:00',
+                        Path TEXT NOT NULL DEFAULT '',
+                        IdPrefix TEXT NOT NULL DEFAULT '',
+                        LastHealthCheck INTEGER,
+                        NextHealthCheck INTEGER,
+                        ReleaseDate INTEGER,
+                        MediaInfo TEXT,
+                        CorruptionReason TEXT,
+                        IsCorrupted INTEGER NOT NULL DEFAULT 0,
+                        HistoryItemId TEXT,
+                        SubType INTEGER,
+                        CONSTRAINT FK_DavItems_DavItems_ParentId FOREIGN KEY (ParentId) REFERENCES DavItems(Id) ON DELETE CASCADE,
+                        CONSTRAINT FK_DavItems_HistoryItems_HistoryItemId FOREIGN KEY (HistoryItemId) REFERENCES HistoryItems(Id)
+                    );
+                    """)
+                    .ConfigureAwait(false);
+                
+                // Restore data
+                await databaseContext.Database.ExecuteSqlRawAsync(
+                    "INSERT INTO DavItems SELECT * FROM DavItems_backup;")
+                    .ConfigureAwait(false);
+                
+                // Recreate indexes
+                await databaseContext.Database.ExecuteSqlRawAsync(
+                    "CREATE UNIQUE INDEX IX_DavItems_ParentId_Name ON DavItems (ParentId, Name);")
+                    .ConfigureAwait(false);
+                await databaseContext.Database.ExecuteSqlRawAsync(
+                    "CREATE INDEX IX_DavItems_IdPrefix_Type ON DavItems (IdPrefix, Type);")
+                    .ConfigureAwait(false);
+                await databaseContext.Database.ExecuteSqlRawAsync(
+                    "CREATE INDEX IX_DavItems_Path ON DavItems (Path);")
+                    .ConfigureAwait(false);
+                
+                // Drop backup
+                await databaseContext.Database.ExecuteSqlRawAsync("DROP TABLE DavItems_backup;").ConfigureAwait(false);
+                
+                // Re-enable foreign keys
+                await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;").ConfigureAwait(false);
+                
+                Log.Warning("[SchemaCompat] Successfully made SubType nullable");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[SchemaCompat] Error fixing SubType: {ex.Message}. Continuing anyway...");
+                // Try to re-enable foreign keys even on error
+                try { await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;").ConfigureAwait(false); } catch { }
+            }
+        }
 
         await EnsureQueueNzbContentsConsistencyAsync(databaseContext).ConfigureAwait(false);
         await NormalizeLegacyDavItemTypesAsync(databaseContext).ConfigureAwait(false);

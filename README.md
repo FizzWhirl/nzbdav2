@@ -116,6 +116,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.Z (2026-04-23)
+*   **Fix**: Resolve "NOT NULL constraint failed: DavItems.SubType" error when migrating from v1 databases. The compat layer now recreates the DavItems table with nullable SubType column to allow new item creation during queue processing.
+
 ## v0.7.22 (2026-04-23)
 *   **Fix**: Added v1-compatible `DavItems` type normalization for databases that use `Type=2` + `SubType` (`201/202/203`) so files are no longer misclassified as folders in UI/WebDAV/rclone mounts.
 *   **Fix**: Added queue recovery from legacy blob files at startup (`/config/blobs/{firstTwo}/{nextTwo}/{guid}`) to repopulate `QueueNzbContents` before orphan cleanup.

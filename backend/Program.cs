@@ -371,9 +371,33 @@ class Program
                     """)
                     .ConfigureAwait(false);
                 
-                // Restore data
+                // Restore data - explicitly select only the columns we need, in the right order
+                // This handles cases where the backup may have extra or differently-ordered columns
                 await databaseContext.Database.ExecuteSqlRawAsync(
-                    "INSERT INTO DavItems SELECT * FROM DavItems_backup;")
+                    """
+                    INSERT INTO DavItems 
+                    (Id, ParentId, Name, FileSize, Type, CreatedAt, Path, IdPrefix, 
+                     LastHealthCheck, NextHealthCheck, ReleaseDate, MediaInfo, 
+                     CorruptionReason, IsCorrupted, HistoryItemId, SubType)
+                    SELECT 
+                        COALESCE(Id, ''),
+                        ParentId,
+                        COALESCE(Name, ''),
+                        FileSize,
+                        COALESCE(Type, 1),
+                        COALESCE(CreatedAt, '0001-01-01 00:00:00'),
+                        COALESCE(Path, ''),
+                        COALESCE(IdPrefix, ''),
+                        LastHealthCheck,
+                        NextHealthCheck,
+                        ReleaseDate,
+                        MediaInfo,
+                        CorruptionReason,
+                        COALESCE(IsCorrupted, 0),
+                        HistoryItemId,
+                        SubType
+                    FROM DavItems_backup;
+                    """)
                     .ConfigureAwait(false);
                 
                 // Recreate indexes

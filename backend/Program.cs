@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Data;
 using System.Text;
 using NWebDav.Server;
 using NWebDav.Server.Stores;
@@ -161,6 +162,7 @@ class Program
             }
 
             await EnsureMigrationDropIndexPrerequisitesAsync(databaseContext).ConfigureAwait(false);
+            await EnsureAddHistoryCleanupMigrationCompatibilityAsync(databaseContext).ConfigureAwait(false);
 
             Log.Warning("  → Running migrations...");
             var argIndex = args.ToList().IndexOf("--db-migration");
@@ -448,6 +450,71 @@ class Program
                 "CREATE INDEX IF NOT EXISTS IX_QueueItems_FileName ON QueueItems (FileName);")
                 .ConfigureAwait(false);
         }
+    }
+
+    private static async Task EnsureAddHistoryCleanupMigrationCompatibilityAsync(DavDatabaseContext databaseContext)
+    {
+        const string migrationId = "20260313005733_AddHistoryCleanup";
+
+        if (!await TableExistsAsync(databaseContext, "__EFMigrationsHistory").ConfigureAwait(false))
+        {
+            return;
+        }
+
+        // Check migration history using scalar query.
+        await using var connection = databaseContext.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+        }
+
+        await using var checkCmd = connection.CreateCommand();
+        checkCmd.CommandText = "SELECT COUNT(1) FROM __EFMigrationsHistory WHERE MigrationId = @migrationId";
+        var migrationParam = checkCmd.CreateParameter();
+        migrationParam.ParameterName = "@migrationId";
+        migrationParam.Value = migrationId;
+        checkCmd.Parameters.Add(migrationParam);
+
+        var existingCountObj = await checkCmd.ExecuteScalarAsync().ConfigureAwait(false);
+        var existingCount = Convert.ToInt32(existingCountObj ?? 0);
+        if (existingCount > 0)
+        {
+            return;
+        }
+
+        var hasHistoryItemId = await ColumnExistsAsync(databaseContext, "DavItems", "HistoryItemId").ConfigureAwait(false);
+        var hasHistoryCleanupItems = await TableExistsAsync(databaseContext, "HistoryCleanupItems").ConfigureAwait(false);
+        if (!hasHistoryItemId || !hasHistoryCleanupItems)
+        {
+            return;
+        }
+
+        // Schema already contains what this migration adds. Create expected indexes and mark migration as applied.
+        Log.Warning("[SchemaCompat] Detected drifted schema for AddHistoryCleanup. Marking migration as applied.");
+        await databaseContext.Database.ExecuteSqlRawAsync(
+            "CREATE INDEX IF NOT EXISTS IX_DavItems_HistoryItemId_Type_CreatedAt ON DavItems (HistoryItemId, Type, CreatedAt);")
+            .ConfigureAwait(false);
+        await databaseContext.Database.ExecuteSqlRawAsync(
+            "CREATE INDEX IF NOT EXISTS IX_DavItems_Type_HistoryItemId_NextHealthCheck_ReleaseDate_Id ON DavItems (Type, HistoryItemId, NextHealthCheck, ReleaseDate, Id);")
+            .ConfigureAwait(false);
+
+        string productVersion;
+        await using var productVersionCmd = connection.CreateCommand();
+        productVersionCmd.CommandText = "SELECT ProductVersion FROM __EFMigrationsHistory ORDER BY MigrationId DESC LIMIT 1";
+        var productVersionObj = await productVersionCmd.ExecuteScalarAsync().ConfigureAwait(false);
+        productVersion = productVersionObj?.ToString() ?? "10.0.0";
+
+        await using var insertCmd = connection.CreateCommand();
+        insertCmd.CommandText = "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES (@migrationId, @productVersion)";
+        var idParam = insertCmd.CreateParameter();
+        idParam.ParameterName = "@migrationId";
+        idParam.Value = migrationId;
+        insertCmd.Parameters.Add(idParam);
+        var pvParam = insertCmd.CreateParameter();
+        pvParam.ParameterName = "@productVersion";
+        pvParam.Value = productVersion;
+        insertCmd.Parameters.Add(pvParam);
+        await insertCmd.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     private static async Task EnsureQueueNzbContentsConsistencyAsync(DavDatabaseContext databaseContext)

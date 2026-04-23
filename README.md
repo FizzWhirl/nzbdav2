@@ -126,6 +126,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Fix**: Queue removals now trigger a paginated server refresh (with page clamping) so deleting an entire page immediately pulls in the next items instead of showing a temporary empty queue until manual reload.
 *   **UI**: Queue empty-state rendering now considers total queue count, preventing false "nothing left" flashes while the next page is being fetched after bulk deletes.
 *   **Reliability**: Queue delete requests from the web UI now use strict mode so backend removal failures are returned as errors instead of being silently reported as success, preventing items from disappearing and then reappearing after refresh.
+*   **Fix**: Hardened WebSocket message parsing in the queue UI to ignore malformed/non-JSON frames instead of throwing client-side runtime errors in production chunks, improving real-time queue stability.
 
 ## v0.7.22 (2026-04-23)
 *   **Fix**: Added v1-compatible `DavItems` type normalization for databases that use `Type=2` + `SubType` (`201/202/203`) so files are no longer misclassified as folders in UI/WebDAV/rclone mounts.

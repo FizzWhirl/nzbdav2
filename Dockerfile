@@ -73,9 +73,11 @@ ENV LOG_LEVEL=warning
 #   2GB VPS:  DOTNET_GCServer=0  DOTNET_GCHeapHardLimit=0x40000000  (1GB)
 #   4GB+ NAS: DOTNET_GCServer=1  DOTNET_GCHeapHardLimit=0x80000000  (2GB)
 #
-# Default is set to 1GB to avoid OOM storms during concurrent streaming and queue probing.
-# If your host has less RAM, override this in compose/environment.
-ENV DOTNET_GCServer=0
-ENV DOTNET_GCHeapHardLimit=0x40000000
+# Default is set to 2GB with Server GC to handle concurrent streaming and queue probing
+# without OOM storms on hosts with 4GB+ RAM. If your host has less RAM, override these
+# in compose/environment (see recommendations above).
+ENV DOTNET_GCServer=1
+ENV DOTNET_GCConcurrent=1
+ENV DOTNET_GCHeapHardLimit=0x80000000
 
 CMD ["/entrypoint.sh"]

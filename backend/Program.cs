@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOB-HEXDUMP");
-            Log.Warning("  FEATURE: V1 blobstore migration with raw 64-byte hex dump of 3 sample blobs + fast 200-row overlap check (no slow temp-table). One last sanity check before declaring 25k items unrecoverable.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BACKUP-ATTACH");
+            Log.Warning("  FEATURE: V1 blobstore migration uses /config/backup/db.sqlite (or /config/v1-backup.sqlite) to recover the DavItem.Id → FileBlobId mapping that was destroyed when the FileBlobId column was dropped. Resolves blob paths via the recovered map.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -921,31 +921,36 @@ class Program
         var candidates = await LoadBlobstoreMigrationCandidatesAsync(databaseContext, hasSubType).ConfigureAwait(false);
         if (candidates.Count == 0) return;
 
-        Log.Warning(
-            "[BlobstoreMigration] Found {Count} DavItems needing recovery from upstream blobstore " +
-            "(blobs root: {BlobsRoot}). Building blob index…",
-            candidates.Count, blobsRoot);
-
-        // Pre-scan ALL blob files and build DavItem.Id → blob path index. This is the workaround
-        // for the dropped FileBlobId column: the embedded Id inside each blob is now the only
-        // remaining link between DavItems and blob files.
-        var indexStart = DateTimeOffset.UtcNow;
-        var blobIndex = await BuildBlobIdIndexAsync(blobsRoot).ConfigureAwait(false);
-        Log.Warning(
-            "[BlobstoreMigration] Indexed {Indexed} blob files in {Elapsed:c}. Resolving {Count} candidates…",
-            blobIndex.Count, DateTimeOffset.UtcNow - indexStart, candidates.Count);
-
-        // Sanity check: dump 5 sample indexed Ids + 5 sample candidate Ids + count overlap with
-        // DavItems. If overlap is 0, the embedded-Id assumption is wrong (e.g. byte order, wrong
-        // MemoryPack offset, or the embedded field is something other than DavItem.Id).
-        var overlap = await DiagnoseBlobIndexAsync(databaseContext, blobIndex, candidates).ConfigureAwait(false);
-        if (overlap == 0)
+        // The fork's FileBlobId column was dropped, destroying the only DavItem.Id → blob filename
+        // mapping. To recover, the user must place a v1 backup DB (which still has the FileBlobId
+        // column populated) at one of these paths. We try each in order. If none exist, we cannot
+        // recover and the items remain orphaned.
+        var v1BackupPath = FindV1BackupDbPath();
+        if (v1BackupPath is null)
         {
             Log.Warning(
-                "[BlobstoreMigration] ABORTING: zero indexed Ids match any DavItem. The embedded-Id " +
-                "assumption is wrong on this database. Skipping migration to avoid mass-orphaning " +
-                "{Count} items. See [BlobIndexDiag] output above for sample Ids — please report this.",
+                "[BlobstoreMigration] {Count} DavItems need recovery, but no v1 backup database was " +
+                "found at any of: /config/v1-backup.sqlite, /config/backup/db.sqlite. Without that " +
+                "backup the DavItem.Id → blob filename mapping cannot be reconstructed (the " +
+                "FileBlobId column was dropped from this database). Items will remain orphaned. " +
+                "Place a copy of the v1 db.sqlite at /config/v1-backup.sqlite and restart to recover.",
                 candidates.Count);
+            return;
+        }
+
+        Log.Warning(
+            "[BlobstoreMigration] Found {Count} DavItems needing recovery. Reading FileBlobId " +
+            "mapping from v1 backup at {Path}…",
+            candidates.Count, v1BackupPath);
+
+        var fileBlobMap = await LoadFileBlobMapFromBackupAsync(v1BackupPath).ConfigureAwait(false);
+        Log.Warning(
+            "[BlobstoreMigration] Loaded {Count} DavItem.Id → FileBlobId mappings from backup.",
+            fileBlobMap.Count);
+
+        if (fileBlobMap.Count == 0)
+        {
+            Log.Warning("[BlobstoreMigration] Backup contains no FileBlobId mappings. Aborting.");
             return;
         }
 
@@ -984,10 +989,12 @@ class Program
                     },
                 };
 
-                // Resolve blob via the pre-built index (NOT by computing path from DavItem.Id).
-                if (!blobIndex.TryGetValue(davItemId, out var blobPath))
+                // Resolve blob path via the v1 backup's FileBlobId mapping. The blob filename on
+                // disk equals FileBlobId (verified above by sample row inspection).
+                string? blobPath = null;
+                if (fileBlobMap.TryGetValue(davItemId, out var fileBlobId))
                 {
-                    blobPath = null;
+                    blobPath = GetLegacyBlobPath(fileBlobId);
                 }
 
                 try
@@ -1054,146 +1061,49 @@ class Program
     }
 
     /// <summary>
-    /// Walks the blobs directory and builds a <c>DavItem.Id → blob path</c> index by extracting
-    /// the embedded Id from each blob's MemoryPack payload. Skips files whose payload doesn't
-    /// look like a v1 metadata blob (e.g. raw NZB XML, HTML error pages, queue contents).
-    /// Runs in parallel for throughput.
+    /// Locates the v1 backup db.sqlite (used to recover the DavItem.Id → FileBlobId mapping
+    /// that was destroyed when the FileBlobId column was dropped from this fork's DavItems table).
+    /// Returns the first existing path, or null if none found.
     /// </summary>
-    private static async Task<Dictionary<Guid, string>> BuildBlobIdIndexAsync(string blobsRoot)
+    private static string? FindV1BackupDbPath()
     {
-        var index = new System.Collections.Concurrent.ConcurrentDictionary<Guid, string>();
-        var allFiles = Directory.EnumerateFiles(blobsRoot, "*", SearchOption.AllDirectories).ToArray();
-
-        // Cap parallelism to keep IO + decompression CPU usage reasonable on small hosts.
-        var parallelism = Math.Max(2, Math.Min(8, Environment.ProcessorCount));
-        var sem = new SemaphoreSlim(parallelism, parallelism);
-        var tasks = new List<Task>(allFiles.Length);
-
-        foreach (var file in allFiles)
+        var candidates = new[]
         {
-            await sem.WaitAsync().ConfigureAwait(false);
-            tasks.Add(Task.Run(async () =>
-            {
-                try
-                {
-                    var id = await BlobStoreReader.TryReadEmbeddedIdAsync(file).ConfigureAwait(false);
-                    if (id.HasValue && id.Value != Guid.Empty)
-                    {
-                        // Last-write-wins on duplicate Ids; in practice each DavItem.Id maps to a
-                        // unique blob, so this is just defensive.
-                        index[id.Value] = file;
-                    }
-                }
-                finally
-                {
-                    sem.Release();
-                }
-            }));
+            Path.Combine(DavDatabaseContext.ConfigPath, "v1-backup.sqlite"),
+            Path.Combine(DavDatabaseContext.ConfigPath, "backup", "db.sqlite"),
+        };
+        foreach (var p in candidates)
+        {
+            if (File.Exists(p)) return p;
         }
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-        return new Dictionary<Guid, string>(index);
+        return null;
     }
 
     /// <summary>
-    /// Diagnostic: dumps 5 sample indexed Guids + 5 sample candidate Guids + counts how many of
-    /// the indexed Guids actually exist in the DavItems table (by Id). If overlap is 0, our
-    /// embedded-Id assumption is wrong and we need to pivot strategy. Logged at Warning so it
-    /// shows up clearly in container logs.
+    /// Opens the v1 backup DB read-only and returns a <c>DavItem.Id → FileBlobId</c> map for
+    /// every row where <c>FileBlobId</c> is non-null. The blob filename on disk equals
+    /// <c>FileBlobId</c> (verified against the on-disk blobstore at the time this was written).
     /// </summary>
-    private static async Task<long> DiagnoseBlobIndexAsync(
-        DavDatabaseContext databaseContext,
-        Dictionary<Guid, string> blobIndex,
-        List<BlobstoreCandidate> candidates)
+    private static async Task<Dictionary<Guid, Guid>> LoadFileBlobMapFromBackupAsync(string backupDbPath)
     {
-        long matchCount = 0;
-        try
+        var map = new Dictionary<Guid, Guid>(capacity: 32_000);
+        var connStr = $"Data Source={backupDbPath};Mode=ReadOnly;Cache=Shared";
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection(connStr);
+        await conn.OpenAsync().ConfigureAwait(false);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT Id, FileBlobId FROM DavItems WHERE FileBlobId IS NOT NULL";
+        await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+        while (await reader.ReadAsync().ConfigureAwait(false))
         {
-            var sampleIndexed = blobIndex.Take(5).ToList();
-            var sampleCandidates = candidates.Take(5).ToList();
-
-            Log.Warning("[BlobIndexDiag] Sample of 5 indexed (embeddedId → blobPath):");
-            foreach (var (id, path) in sampleIndexed)
+            var idStr = reader.GetString(0);
+            var blobStr = reader.GetString(1);
+            if (Guid.TryParse(idStr, out var davItemId) && Guid.TryParse(blobStr, out var fileBlobId))
             {
-                Log.Warning("[BlobIndexDiag]   {Id} → {Path}", id, path);
-            }
-
-            Log.Warning("[BlobIndexDiag] Sample of 5 candidate DavItem.Ids needing recovery:");
-            foreach (var c in sampleCandidates)
-            {
-                Log.Warning("[BlobIndexDiag]   {Id} (Type={Type}, SubType={Sub})",
-                    c.DavItemId, c.CurrentType, c.SubType?.ToString() ?? "null");
-            }
-
-            // Count overlap: of the 5 indexed sample Ids, how many exist in DavItems?
-            var connection = databaseContext.Database.GetDbConnection();
-            var shouldClose = connection.State != ConnectionState.Open;
-            if (shouldClose) await connection.OpenAsync().ConfigureAwait(false);
-
-            try
-            {
-                foreach (var (id, _) in sampleIndexed)
-                {
-                    await using var cmd = connection.CreateCommand();
-                    cmd.CommandText = "SELECT Id, Name, Type FROM DavItems WHERE lower(Id) = lower(@id) LIMIT 1";
-                    var p = cmd.CreateParameter();
-                    p.ParameterName = "@id";
-                    p.Value = id.ToString();
-                    cmd.Parameters.Add(p);
-                    await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
-                    if (await reader.ReadAsync().ConfigureAwait(false))
-                    {
-                        Log.Warning("[BlobIndexDiag] HIT  {Id} → DavItem name={Name} type={Type}",
-                            id, reader.GetString(1), reader.GetValue(2));
-                    }
-                    else
-                    {
-                        Log.Warning("[BlobIndexDiag] MISS {Id} → not found in DavItems.Id", id);
-                    }
-                }
-
-                // Lightweight overlap estimate (sample first 200 indexed Ids; avoids 25k+ INSERTs).
-                long sampled = 0;
-                long sampleHits = 0;
-                await using (var existsCmd = connection.CreateCommand())
-                {
-                    existsCmd.CommandText = "SELECT 1 FROM DavItems WHERE lower(Id)=lower(@id) LIMIT 1";
-                    var p = existsCmd.CreateParameter();
-                    p.ParameterName = "@id";
-                    existsCmd.Parameters.Add(p);
-                    foreach (var key in blobIndex.Keys.Take(200))
-                    {
-                        p.Value = key.ToString();
-                        var v = await existsCmd.ExecuteScalarAsync().ConfigureAwait(false);
-                        sampled++;
-                        if (v is not null and not DBNull) sampleHits++;
-                    }
-                }
-                Log.Warning(
-                    "[BlobIndexDiag] Sampled {Sampled} of {IndexedTotal} indexed Ids: {Hits} match DavItems.Id",
-                    sampled, blobIndex.Count, sampleHits);
-                matchCount = sampleHits;
-
-                // Hex dump first 64 decompressed bytes of 3 sample blobs so we can locate where
-                // the DavItem.Id (if any) actually lives in the payload.
-                Log.Warning("[BlobIndexDiag] Raw payload dumps (first 64 decompressed bytes):");
-                foreach (var (id, path) in blobIndex.Take(3))
-                {
-                    var head = await BlobStoreReader.TryReadDecompressedHeadAsync(path, 64).ConfigureAwait(false);
-                    Log.Warning("[BlobIndexDiag]   blob={Path}\n              extractedId={Id}\n              hex64={Hex}",
-                        path, id, head is null ? "<null>" : Convert.ToHexString(head));
-                }
-            }
-            finally
-            {
-                if (shouldClose) await connection.CloseAsync().ConfigureAwait(false);
+                map[davItemId] = fileBlobId;
             }
         }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "[BlobIndexDiag] Diagnostic failed (non-fatal).");
-        }
-        return matchCount;
+        return map;
     }
 
     private enum MigrationKind { Unknown, Nzb, Rar, Multipart }

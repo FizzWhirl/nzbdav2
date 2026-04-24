@@ -1,0 +1,247 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 2.88kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1.4
+#2 DONE 1.4s
+
+#3 docker-image://docker.io/docker/dockerfile:1.4@sha256:9ba7531bd80fb0a858632727cf7a112fbfd19b17e94c4e84ced81e24ef1a0dbc
+#3 resolve docker.io/docker/dockerfile:1.4@sha256:9ba7531bd80fb0a858632727cf7a112fbfd19b17e94c4e84ced81e24ef1a0dbc 0.0s done
+#3 DONE 0.0s
+
+#3 docker-image://docker.io/docker/dockerfile:1.4@sha256:9ba7531bd80fb0a858632727cf7a112fbfd19b17e94c4e84ced81e24ef1a0dbc
+#3 CACHED
+
+#4 [internal] load .dockerignore
+#4 transferring context:
+#4 transferring context: 115B done
+#4 DONE 0.5s
+
+#5 [internal] load metadata for mcr.microsoft.com/dotnet/sdk:10.0
+#5 DONE 0.0s
+
+#6 [internal] load metadata for docker.io/library/node:alpine
+#6 ...
+
+#7 [internal] load metadata for mcr.microsoft.com/dotnet/aspnet:10.0-alpine
+#7 DONE 0.3s
+
+#6 [internal] load metadata for docker.io/library/node:alpine
+#6 DONE 1.6s
+
+#8 [frontend-build 1/7] FROM docker.io/library/node:alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4
+#8 resolve docker.io/library/node:alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 0.0s done
+#8 DONE 0.0s
+
+#9 [backend-build 1/4] FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:127d7d4d601ae26b8e04c54efb37e9ce8766931bded0ee59fcd799afd21d6850
+#9 resolve mcr.microsoft.com/dotnet/sdk:10.0@sha256:127d7d4d601ae26b8e04c54efb37e9ce8766931bded0ee59fcd799afd21d6850 0.0s done
+#9 DONE 0.0s
+
+#10 [stage-2  1/10] FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine@sha256:60eb031b554df75a4b9f358290a2fa15d8961a3bc79b47bb34a00e31f7b78c69
+#10 resolve mcr.microsoft.com/dotnet/aspnet:10.0-alpine@sha256:60eb031b554df75a4b9f358290a2fa15d8961a3bc79b47bb34a00e31f7b78c69 0.0s done
+#10 DONE 0.0s
+
+#11 [internal] load build context
+#11 transferring context: 249.26kB 0.1s done
+#11 DONE 0.1s
+
+#12 [backend-build 2/4] WORKDIR /backend
+#12 CACHED
+
+#13 [backend-build 3/4] COPY ./backend ./
+#13 DONE 0.4s
+
+#14 [backend-build 4/4] RUN case "arm64" in       amd64) DOTNET_ARCH=x64 ;;       arm64) DOTNET_ARCH=arm64 ;;       *) echo "Unsupported TARGETARCH: arm64" && exit 1 ;;     esac &&     dotnet restore &&     dotnet publish -c Release -r linux-musl-$DOTNET_ARCH -o ./publish
+#14 0.771   Determining projects to restore...
+#14 4.077   Restored /backend/Libs/SharpCompress/src/SharpCompress/SharpCompress.csproj (in 2.51 sec).
+#14 4.079   Restored /backend/Libs/UsenetSharp/UsenetSharp/UsenetSharp.csproj (in 2.51 sec).
+#14 6.764   Restored /backend/NzbWebDAV.csproj (in 5.24 sec).
+#14 7.511   Determining projects to restore...
+#14 8.201   Restored /backend/Libs/UsenetSharp/UsenetSharp/UsenetSharp.csproj (in 265 ms).
+#14 9.082   Restored /backend/NzbWebDAV.csproj (in 1.14 sec).
+#14 9.955   Restored /backend/Libs/SharpCompress/src/SharpCompress/SharpCompress.csproj (in 2.03 sec).
+#14 12.47 /backend/Libs/UsenetSharp/UsenetSharp/Clients/UsenetClient.Helpers.cs(75,43): warning CS0168: The variable 'e' is declared but never used [/backend/Libs/UsenetSharp/UsenetSharp/UsenetSharp.csproj]
+#14 12.47 /backend/Libs/UsenetSharp/UsenetSharp/Clients/UsenetClient.Helpers.cs(88,43): warning CS0168: The variable 'e' is declared but never used [/backend/Libs/UsenetSharp/UsenetSharp/UsenetSharp.csproj]
+#14 12.47 /backend/Libs/UsenetSharp/UsenetSharp/Clients/UsenetClient.Helpers.cs(101,43): warning CS0168: The variable 'e' is declared but never used [/backend/Libs/UsenetSharp/UsenetSharp/UsenetSharp.csproj]
+#14 12.50   UsenetSharp -> /backend/Libs/UsenetSharp/UsenetSharp/bin/Release/net10.0/UsenetSharp.dll
+#14 12.56 /root/.nuget/packages/microsoft.build.tasks.git/8.0.0/build/Microsoft.Build.Tasks.Git.targets(25,5): warning : Unable to locate repository with working directory that contains directory '/backend/Libs/SharpCompress/src/SharpCompress'. [/backend/Libs/SharpCompress/src/SharpCompress/SharpCompress.csproj::TargetFramework=net10.0]
+#14 12.57 /root/.nuget/packages/microsoft.sourcelink.common/8.0.0/build/Microsoft.SourceLink.Common.targets(53,5): warning : Source control information is not available - the generated source link is empty. [/backend/Libs/SharpCompress/src/SharpCompress/SharpCompress.csproj::TargetFramework=net10.0]
+#14 15.95   SharpCompress -> /backend/Libs/SharpCompress/src/SharpCompress/bin/Release/net10.0/SharpCompress.dll
+#14 19.03 /backend/Api/SabControllers/AddUrl/AddUrlRequest.cs(18,45): warning CS0108: 'AddUrlRequest.New(HttpContext, ConfigManager)' hides inherited member 'AddFileRequest.New(HttpContext, ConfigManager)'. Use the new keyword if hiding was intended. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/Usenet/Connections/ConnectionPool.cs(57,82): warning CS8714: The type 'T' cannot be used as type parameter 'TKey' in the generic type or method 'ConcurrentDictionary<TKey, TValue>'. Nullability of type argument 'T' doesn't match 'notnull' constraint. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Par2Recovery/Par2.cs(31,56): warning CS8425: Async-iterator 'Par2.ReadFileDescriptions(Stream, CancellationToken, int?)' has one or more parameters of type 'CancellationToken' but none of them is decorated with the 'EnumeratorCancellation' attribute, so the cancellation token parameter from the generated 'IAsyncEnumerable<>.GetAsyncEnumerator' will be unconsumed [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/WebDav/Base/BaseStoreCollection.cs(49,47): warning CS8425: Async-iterator 'BaseStoreCollection.GetItemsAsync(CancellationToken)' has one or more parameters of type 'CancellationToken' but none of them is decorated with the 'EnumeratorCancellation' attribute, so the cancellation token parameter from the generated 'IAsyncEnumerable<>.GetAsyncEnumerator' will be unconsumed [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/AddFile/AddFileRequest.cs(10,19): warning CS8618: Non-nullable property 'FileName' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/AddFile/AddFileRequest.cs(12,19): warning CS8618: Non-nullable property 'NzbFileContents' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/AddFile/AddFileRequest.cs(13,19): warning CS8618: Non-nullable property 'Category' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/HistoryItem.cs(10,19): warning CS8618: Non-nullable property 'Category' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/HealthCheckResult.cs(8,19): warning CS8618: Non-nullable property 'Path' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/TestUsenetThroughput/TestUsenetThroughputResponse.cs(7,19): warning CS8618: Non-nullable property 'Message' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/DavMultipartFile.cs(8,17): warning CS8618: Non-nullable property 'Metadata' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/DavMultipartFile.cs(26,26): warning CS8618: Non-nullable property 'SegmentIdByteRange' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/DavMultipartFile.cs(30,26): warning CS8618: Non-nullable property 'FilePartByteRange' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/AddFile/AddFileController.cs(22,37): warning CS9107: Parameter 'HttpContext httpContext' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/AddFile/AddFileController.cs(22,50): warning CS9107: Parameter 'ConfigManager configManager' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/DavItem.cs(11,19): warning CS8618: Non-nullable property 'IdPrefix' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/Account.cs(6,19): warning CS8618: Non-nullable property 'Username' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/Account.cs(7,19): warning CS8618: Non-nullable property 'PasswordHash' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Models/Account.cs(8,19): warning CS8618: Non-nullable property 'RandomSalt' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/ChangeQueuePriority/ChangeQueuePriorityController.cs(15,37): warning CS9107: Parameter 'HttpContext httpContext' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/RequeueHistoryItem/RequeueHistoryItemController.cs(23,37): warning CS9107: Parameter 'HttpContext httpContext' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/RequeueHistoryItem/RequeueHistoryItemController.cs(23,50): warning CS9107: Parameter 'ConfigManager configManager' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/TestUsenetThroughput/TestUsenetThroughputController.cs(32,80): warning CS8625: Cannot convert null literal to non-nullable reference type. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetConfig/GetConfigController.cs(14,50): warning CS9107: Parameter 'ConfigManager configManager' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/TestUsenetConnection/TestUsenetConnectionController.cs(15,92): warning CS8625: Cannot convert null literal to non-nullable reference type. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetFullStatus/GetFullStatusController.cs(11,50): warning CS9107: Parameter 'ConfigManager configManager' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryResponse.cs(11,26): warning CS8618: Non-nullable property 'History' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryController.cs(14,37): warning CS9107: Parameter 'HttpContext httpContext' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryController.cs(14,50): warning CS9107: Parameter 'ConfigManager configManager' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryResponse.cs(25,23): warning CS8618: Non-nullable property 'NzoId' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryResponse.cs(28,23): warning CS8618: Non-nullable property 'NzbName' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryResponse.cs(31,23): warning CS8618: Non-nullable property 'JobName' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryResponse.cs(34,23): warning CS8618: Non-nullable property 'Category' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryResponse.cs(53,23): warning CS8618: Non-nullable property 'FailMessage' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetHistory/GetHistoryResponse.cs(16,34): warning CS8618: Non-nullable property 'Slots' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/GetWebdavItem/GetWebdavItemRequest.cs(20,13): warning CS8602: Dereference of a possibly null reference. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/ListWebdavDirectory/ListWebdavDirectoryController.cs(15,112): warning CS9113: Parameter 'dbClient' is unread. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/ListWebdavDirectory/ListWebdavDirectoryController.cs(15,161): warning CS9113: Parameter 'logger' is unread. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/AddUrl/AddUrlController.cs(17,37): warning CS9107: Parameter 'HttpContext httpContext' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/AddUrl/AddUrlController.cs(17,50): warning CS9107: Parameter 'ConfigManager configManager' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrField.cs(9,19): warning CS8618: Non-nullable property 'Name' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrField.cs(12,19): warning CS8618: Non-nullable property 'Label' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrDownloadClient.cs(11,19): warning CS8618: Non-nullable property 'Protocol' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrDownloadClient.cs(14,19): warning CS8618: Non-nullable property 'Name' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrDownloadClient.cs(17,27): warning CS8618: Non-nullable property 'Fields' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrCommand.cs(11,19): warning CS8618: Non-nullable property 'Name' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrCommand.cs(14,19): warning CS8618: Non-nullable property 'CommandName' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrCommand.cs(17,19): warning CS8618: Non-nullable property 'Result' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrCommand.cs(20,19): warning CS8618: Non-nullable property 'Status' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/RadarrSonarr/BaseModels/ArrCommand.cs(23,19): warning CS8618: Non-nullable property 'Priority' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/PreviewHls/PreviewHlsController.cs(19,77): warning CS9113: Parameter 'store' is unread. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/RemoveFromQueue/RemoveFromQueueController.cs(17,37): warning CS9107: Parameter 'HttpContext httpContext' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(30,23): warning CS8618: Non-nullable property 'NzoId' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(33,23): warning CS8618: Non-nullable property 'Priority' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(36,23): warning CS8618: Non-nullable property 'Filename' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(39,23): warning CS8618: Non-nullable property 'Category' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(42,23): warning CS8618: Non-nullable property 'Percentage' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(45,23): warning CS8618: Non-nullable property 'TruePercentage' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(48,23): warning CS8618: Non-nullable property 'Status' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(55,23): warning CS8618: Non-nullable property 'SizeInMB' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueResponse.cs(58,23): warning CS8618: Non-nullable property 'SizeLeftInMB' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/GetQueue/GetQueueController.cs(14,37): warning CS9107: Parameter 'HttpContext httpContext' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/SearchWebdav/SearchWebdavController.cs(14,105): warning CS9113: Parameter 'dbClient' is unread. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/SabControllers/RemoveFromHistory/RemoveFromHistoryController.cs(15,37): warning CS9107: Parameter 'HttpContext httpContext' is captured into the state of the enclosing type and its value is also passed to the base constructor. The value might be captured by the base class as well. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Api/Controllers/Stats/StatsController.cs(252,69): warning CS8602: Dereference of a possibly null reference. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Par2Recovery/Par2.cs(211,30): warning CS0168: The variable 'e' is declared but never used [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Par2Recovery/Packets/FileDesc.cs(15,16): warning CS8618: Non-nullable property 'FileID' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Par2Recovery/Packets/FileDesc.cs(15,16): warning CS8618: Non-nullable property 'FileHash' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Par2Recovery/Packets/FileDesc.cs(15,16): warning CS8618: Non-nullable property 'File16kHash' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Par2Recovery/Packets/FileDesc.cs(15,16): warning CS8618: Non-nullable property 'FileName' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/QueueManager.cs(321,26): warning CS8618: Non-nullable property 'QueueItem' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/QueueManager.cs(323,21): warning CS8618: Non-nullable property 'ProcessingTask' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/QueueManager.cs(324,40): warning CS8618: Non-nullable property 'CancellationTokenSource' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the property as nullable. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Streams/NzbFileStream.cs(296,27): warning CS0618: 'CombinedStream.DiscardBytesAsync(long)' is obsolete: 'Use Seek() instead for better performance' [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/ArrMonitoringService.cs(164,29): warning CS8629: Nullable value type may be null. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Streams/MaxBytesReadStream.cs(6,42): warning CS9124: Parameter 'long maxBytes' is captured into the state of the enclosing type and its value is also used to initialize a field, property, or event. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(96,13): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(104,17): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(105,17): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(147,17): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(170,21): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(171,21): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(180,21): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(189,13): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(190,13): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(198,13): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/NzbAnalysisService.cs(116,53): warning CS8601: Possible null reference assignment. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/DeobfuscationSteps/1.FetchFirstSegment/FetchFirstSegmentsStep.cs(79,37): warning CS8602: Dereference of a possibly null reference. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/DeobfuscationSteps/1.FetchFirstSegment/FetchFirstSegmentsStep.cs(83,32): warning CS8602: Dereference of a possibly null reference. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/DeobfuscationSteps/1.FetchFirstSegment/FetchFirstSegmentsStep.cs(88,70): warning CS8602: Dereference of a possibly null reference. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/DeobfuscationSteps/1.FetchFirstSegment/FetchFirstSegmentsStep.cs(92,35): warning CS8602: Dereference of a possibly null reference. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/DeobfuscationSteps/1.FetchFirstSegment/FetchFirstSegmentsStep.cs(166,43): warning CS0168: The variable 'ex' is declared but never used [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/DeobfuscationSteps/1.FetchFirstSegment/FetchFirstSegmentsStep.cs(173,43): warning CS0168: The variable 'ex' is declared but never used [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Program.cs(1002,53): warning CS8524: The switch expression does not handle some values of its input type (it is not exhaustive) involving an unnamed enum value. For example, the pattern '((NzbWebDAV.Program.MigrationKind)4, not null)' is not covered. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Database/Migrations/20260109220000_Add-OperationType-BytesTransferred-To-ProviderUsageEvents.Designer.cs(269,38): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Streams/BufferedSegmentStream.cs(762,30): warning CS0219: The variable 'isUrgent' is assigned but its value is never used [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/QueueItemProcessor.cs(579,21): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/QueueItemProcessor.cs(594,29): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/QueueItemProcessor.cs(600,29): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/QueueItemProcessor.cs(606,29): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Queue/QueueItemProcessor.cs(612,29): warning CS4014: Because this call is not awaited, execution of the current method continues before the call is completed. Consider applying the 'await' operator to the result of the call. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Streams/BufferedSegmentStream.cs(163,18): warning CS0649: Field 'BufferedSegmentStream._totalDecodeTimeMs' is never assigned to, and will always have its default value 0 [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Streams/BufferedSegmentStream.cs(85,24): warning CS0414: The field 'BufferedSegmentStream.s_streamCount' is assigned but its value is never used [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Clients/Usenet/ThreadSafeNntpClient.cs(22,21): warning CS0414: The field 'ThreadSafeNntpClient._currentGroup' is assigned but its value is never used [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Tasks/RemoveUnlinkedFilesTask.cs(143,14): warning EF1002: Method 'SqlQueryRaw' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'SqlQuery' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Tasks/RemoveUnlinkedFilesTask.cs(168,18): warning EF1002: Method 'SqlQueryRaw' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'SqlQuery' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Tasks/RemoveUnlinkedFilesTask.cs(183,38): warning EF1002: Method 'ExecuteSqlRawAsync' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'ExecuteSqlAsync' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Tasks/RemoveUnlinkedFilesTask.cs(111,38): warning EF1002: Method 'ExecuteSqlRawAsync' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'ExecuteSqlAsync' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Tasks/RemoveUnlinkedFilesTask.cs(209,18): warning EF1002: Method 'SqlQueryRaw' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'SqlQuery' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Tasks/RemoveUnlinkedFilesTask.cs(225,38): warning EF1002: Method 'ExecuteSqlRawAsync' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'ExecuteSqlAsync' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Tasks/RemoveUnlinkedFilesTask.cs(239,14): warning EF1002: Method 'SqlQueryRaw' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'SqlQuery' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/DatabaseMaintenanceService.cs(87,57): warning EF1002: Method 'ExecuteSqlRawAsync' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'ExecuteSqlAsync' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/DatabaseMaintenanceService.cs(98,54): warning EF1002: Method 'ExecuteSqlRawAsync' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'ExecuteSqlAsync' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/DatabaseMaintenanceService.cs(107,54): warning EF1002: Method 'ExecuteSqlRawAsync' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'ExecuteSqlAsync' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Services/DatabaseMaintenanceService.cs(115,57): warning EF1002: Method 'ExecuteSqlRawAsync' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'ExecuteSqlAsync' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.03 /backend/Program.cs(1456,40): warning EF1002: Method 'ExecuteSqlRawAsync' inserts interpolated strings directly into the SQL, without any protection against SQL injection. Consider using 'ExecuteSqlAsync' instead, which protects against SQL injection, or make sure that the value is sanitized and suppress the warning. [/backend/NzbWebDAV.csproj]
+#14 19.12   NzbWebDAV -> /backend/bin/Release/net10.0/linux-musl-arm64/NzbWebDAV.dll
+#14 19.17   NzbWebDAV -> /backend/publish/
+#14 DONE 19.5s
+
+#15 [frontend-build 7/7] RUN npm prune --omit=dev
+#15 CACHED
+
+#16 [stage-2  4/10] COPY --from=frontend-build /frontend/node_modules ./frontend/node_modules
+#16 CACHED
+
+#17 [stage-2  5/10] COPY --from=frontend-build /frontend/package.json ./frontend/package.json
+#17 CACHED
+
+#18 [stage-2  6/10] COPY --from=frontend-build /frontend/dist-node/server.js ./frontend/dist-node/server.js
+#18 CACHED
+
+#19 [stage-2  3/10] RUN mkdir /config     && apk add --no-cache nodejs npm libc6-compat shadow su-exec bash curl sqlite ffmpeg rclone fuse3
+#19 CACHED
+
+#20 [frontend-build 6/7] RUN npm run build:server
+#20 CACHED
+
+#21 [frontend-build 3/7] COPY ./frontend ./
+#21 CACHED
+
+#22 [frontend-build 4/7] RUN npm install
+#22 CACHED
+
+#23 [frontend-build 5/7] RUN npm run build
+#23 CACHED
+
+#24 [frontend-build 2/7] WORKDIR /frontend
+#24 CACHED
+
+#25 [stage-2  2/10] WORKDIR /app
+#25 CACHED
+
+#26 [stage-2  7/10] COPY --from=frontend-build /frontend/build ./frontend/build
+#26 CACHED
+
+#27 [stage-2  8/10] COPY --from=backend-build /backend/publish ./backend
+#27 DONE 0.0s
+
+#28 [stage-2  9/10] COPY entrypoint.sh /entrypoint.sh
+#28 DONE 0.0s
+
+#29 [stage-2 10/10] RUN chmod +x /entrypoint.sh
+#29 DONE 0.1s
+
+#30 exporting to image
+#30 exporting layers
+#30 exporting layers 0.4s done
+#30 exporting manifest sha256:1f683afdf0072a7e6e737d1dcc4eaab6589bd07a24e6fd905e2e79e4dcd708aa
+#30 exporting manifest sha256:1f683afdf0072a7e6e737d1dcc4eaab6589bd07a24e6fd905e2e79e4dcd708aa done
+#30 exporting config sha256:712d4c24448a7392f5cef57787fad5d61f17ede37d779c58feaab8c541fb4574 done
+#30 exporting attestation manifest sha256:56d6009f5dfe2c3831b4410e80c9ca9af689016699864ce87318eda17f6dce2e done
+#30 exporting manifest list sha256:45ea4d20fb01957270180e348f745750a17cb31bcd14fecf7cdd1fb3dd3e29ff done
+#30 naming to docker.io/local/nzbdav:3 done
+#30 unpacking to docker.io/local/nzbdav:3 0.1s done
+#30 DONE 0.6s

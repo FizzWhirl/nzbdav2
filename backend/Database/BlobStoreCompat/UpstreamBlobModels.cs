@@ -5,32 +5,31 @@ namespace NzbWebDAV.Database.BlobStoreCompat;
 // MemoryPack contracts that exactly mirror upstream nzbdav-dev's BlobStore-era schema.
 // Used ONLY to deserialize migrated v1 (upstream blobstore-era) blob files; never written.
 //
-// These are intentionally separate POCOs from the fork's own DavNzbFile/DavRarFile/
-// DavMultipartFile models because:
-//   1. Upstream's contracts have fewer fields (this fork added SegmentSizes, SegmentFallbacks,
-//      ObfuscationKey, etc.) and MemoryPack is field-position-sensitive — adding fields to the
-//      fork's models would break direct deserialization of upstream blobs.
-//   2. Keeping the upstream contract isolated lets us re-derive missing fields (e.g. cached
-//      segment sizes) on demand later without polluting the production model.
+// CRITICAL: Every type here MUST use [MemoryPackable(GenerateType.VersionTolerant)] because
+// upstream's BlobStore.WriteBlob<T> serialises using the VersionTolerant format. The default
+// GenerateType.Object format has a completely different on-the-wire layout and produces the
+// "property count is 2 but binary's header marked as N" error from MemoryPack. LongRange is a
+// `partial record` (reference type) NOT a struct — upstream models it that way and the binary
+// layout differs between struct and class for VersionTolerant.
 //
 // Source contracts captured from:
 //   https://github.com/nzbdav-dev/nzbdav (BlobStore-era commits, see docs/upstream-sync-2026-03-10.md)
 
-[MemoryPackable]
+[MemoryPackable(GenerateType.VersionTolerant)]
 internal partial class UpstreamDavNzbFile
 {
     [MemoryPackOrder(0)] public Guid Id { get; set; }
     [MemoryPackOrder(1)] public string[] SegmentIds { get; set; } = [];
 }
 
-[MemoryPackable]
+[MemoryPackable(GenerateType.VersionTolerant)]
 internal partial class UpstreamDavRarFile
 {
     [MemoryPackOrder(0)] public Guid Id { get; set; }
     [MemoryPackOrder(1)] public UpstreamRarPart[] RarParts { get; set; } = [];
 }
 
-[MemoryPackable]
+[MemoryPackable(GenerateType.VersionTolerant)]
 internal partial class UpstreamRarPart
 {
     [MemoryPackOrder(0)] public string[] SegmentIds { get; set; } = [];
@@ -39,36 +38,38 @@ internal partial class UpstreamRarPart
     [MemoryPackOrder(3)] public long ByteCount { get; set; }
 }
 
-[MemoryPackable]
+[MemoryPackable(GenerateType.VersionTolerant)]
 internal partial class UpstreamDavMultipartFile
 {
     [MemoryPackOrder(0)] public Guid Id { get; set; }
     [MemoryPackOrder(1)] public UpstreamMultipartMeta Metadata { get; set; } = new();
 }
 
-[MemoryPackable]
+[MemoryPackable(GenerateType.VersionTolerant)]
 internal partial class UpstreamMultipartMeta
 {
     [MemoryPackOrder(0)] public UpstreamAesParams? AesParams { get; set; }
     [MemoryPackOrder(1)] public UpstreamFilePart[] FileParts { get; set; } = [];
 }
 
-[MemoryPackable]
+[MemoryPackable(GenerateType.VersionTolerant)]
 internal partial class UpstreamFilePart
 {
     [MemoryPackOrder(0)] public string[] SegmentIds { get; set; } = [];
-    [MemoryPackOrder(1)] public UpstreamLongRange SegmentIdByteRange { get; set; }
-    [MemoryPackOrder(2)] public UpstreamLongRange FilePartByteRange { get; set; }
+    [MemoryPackOrder(1)] public UpstreamLongRange SegmentIdByteRange { get; set; } = new();
+    [MemoryPackOrder(2)] public UpstreamLongRange FilePartByteRange { get; set; } = new();
 }
 
-[MemoryPackable]
-internal partial struct UpstreamLongRange
+// LongRange is a partial RECORD (reference type) in upstream — MemoryPack VersionTolerant
+// has a different layout for structs vs classes/records, and upstream uses the class layout.
+[MemoryPackable(GenerateType.VersionTolerant)]
+internal partial record UpstreamLongRange
 {
     [MemoryPackOrder(0)] public long StartInclusive { get; set; }
     [MemoryPackOrder(1)] public long EndExclusive { get; set; }
 }
 
-[MemoryPackable]
+[MemoryPackable(GenerateType.VersionTolerant)]
 internal partial class UpstreamAesParams
 {
     [MemoryPackOrder(0)] public long DecodedSize { get; set; }

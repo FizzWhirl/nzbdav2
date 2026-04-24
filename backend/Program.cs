@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BACKUP-ATTACH");
-            Log.Warning("  FEATURE: V1 blobstore migration uses /config/backup/db.sqlite (or /config/v1-backup.sqlite) to recover the DavItem.Id → FileBlobId mapping that was destroyed when the FileBlobId column was dropped. Resolves blob paths via the recovered map.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-VERSIONTOLERANT-FIX");
+            Log.Warning("  FEATURE: Upstream blob shim POCOs now use [MemoryPackable(GenerateType.VersionTolerant)] and LongRange is a record (matches upstream). Fixes 'property count is 2 but binary's header marked as N' deserialization failures during v1→v2 blobstore migration.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

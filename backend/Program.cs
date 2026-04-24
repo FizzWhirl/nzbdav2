@@ -991,13 +991,19 @@ class Program
         try
         {
             await using var cmd = connection.CreateCommand();
-            // Type=2 = upstream UsenetFile. Restrict to items still missing metadata in this
-            // fork's tables (so re-runs are idempotent and cheap).
+            // Upstream-blobstore-era items are uniquely identified by FileBlobId IS NOT NULL
+            // (this column does not exist in the fork's DavItem model, so native v2 items never
+            // populate it). We deliberately do NOT filter on Type, because an earlier v2 build
+            // shipped a buggy NormalizeLegacyDavItemTypesAsync that unconditionally promoted
+            // SubType 201/202/203 -> Type 3/4/6 without ever populating the metadata tables.
+            // Those force-promoted-but-orphaned items must also be migrated here, otherwise they
+            // throw FileNotFoundException on every stream open.
+            // SubType is the source of truth for which deserializer to use.
             cmd.CommandText =
                 """
                 SELECT d.Id, d.FileBlobId, d.SubType
                 FROM DavItems d
-                WHERE d.Type = 2
+                WHERE d.FileBlobId IS NOT NULL
                   AND (d.IsCorrupted = 0 OR d.IsCorrupted IS NULL)
                   AND NOT EXISTS (SELECT 1 FROM DavNzbFiles n WHERE n.Id = d.Id)
                   AND NOT EXISTS (SELECT 1 FROM DavRarFiles r WHERE r.Id = d.Id)
@@ -1109,8 +1115,19 @@ class Program
         DavDatabaseContext databaseContext, Guid davItemId, string reason)
     {
         // Use raw SQL so this works whether or not the DavItem entity is currently tracked.
+        // Also revert Type back to 2 (upstream UsenetFile / "folder") if a previous buggy v2 build
+        // had already force-promoted this item to Type=3/4/6 without populating metadata. Without
+        // this revert the item would continue to be surfaced as a "file" in WebDAV listings and
+        // throw FileNotFoundException on every stream attempt; reverting to Type=2 makes its
+        // unrecoverable state visible to the user (it shows as a directory) and stops the spam.
         await databaseContext.Database.ExecuteSqlRawAsync(
-            "UPDATE DavItems SET IsCorrupted = 1, CorruptionReason = {0} WHERE Id = {1}",
+            """
+            UPDATE DavItems
+            SET IsCorrupted = 1,
+                CorruptionReason = {0},
+                Type = CASE WHEN Type IN (3, 4, 6) THEN 2 ELSE Type END
+            WHERE Id = {1}
+            """,
             reason, davItemId).ConfigureAwait(false);
     }
 

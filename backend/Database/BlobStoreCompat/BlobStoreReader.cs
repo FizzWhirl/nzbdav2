@@ -120,12 +120,24 @@ internal static class BlobStoreReader
 
             stage = "decompress";
             await using var decompress = new DecompressionStream(fileStream);
-            using var ms = new MemoryStream();
+            // Pre-size the MemoryStream so we avoid repeated buffer doublings on large blobs.
+            // Most blobs are well under 8 MB; the buffer grows on demand if needed.
+            using var ms = new MemoryStream(capacity: (int)Math.Min(fileStream.Length * 4, 1 << 23));
             await decompress.CopyToAsync(ms, ct).ConfigureAwait(false);
-            decompressed = ms.ToArray();
 
             stage = "deserialize";
-            return MemoryPackSerializer.Deserialize<T>(decompressed);
+            // Avoid ms.ToArray() — it allocates a SECOND full-size buffer. Deserialize directly
+            // from the MemoryStream's internal buffer via GetBuffer() + slice. Cuts transient
+            // memory roughly in half per blob (critical when running 25k of these in a loop
+            // inside a memory-constrained container).
+            var bufferLength = (int)ms.Length;
+            var bufferSegment = new ReadOnlyMemory<byte>(ms.GetBuffer(), 0, bufferLength);
+            // Keep `decompressed` only sized for the diagnostic head; avoids holding the full
+            // payload around for the catch path.
+            decompressed = bufferLength <= 32
+                ? ms.GetBuffer().AsSpan(0, bufferLength).ToArray()
+                : ms.GetBuffer().AsSpan(0, 32).ToArray();
+            return MemoryPackSerializer.Deserialize<T>(bufferSegment.Span);
         }
         catch (Exception ex)
         {
@@ -134,12 +146,12 @@ internal static class BlobStoreReader
             {
                 Log.Warning(
                     "[BlobStoreReader] FAIL #{N} type={ContractType} stage={Stage} blob={Path} " +
-                    "raw_head={RawHead} decompressed_len={DecLen} decompressed_head={DecHead} " +
+                    "raw_head={RawHead} decompressed_head_len={DecHeadLen} decompressed_head={DecHead} " +
                     "exception={ExType}: {Error}",
                     n, typeof(T).Name, stage, blobPath,
                     rawHead is null ? "<empty>" : Convert.ToHexString(rawHead),
                     decompressed?.Length ?? -1,
-                    decompressed is null ? "<n/a>" : Convert.ToHexString(decompressed.AsSpan(0, Math.Min(32, decompressed.Length))),
+                    decompressed is null ? "<n/a>" : Convert.ToHexString(decompressed),
                     ex.GetType().FullName, ex.Message);
             }
             else

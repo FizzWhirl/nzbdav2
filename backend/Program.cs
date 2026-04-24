@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-VERSIONTOLERANT-FIX");
-            Log.Warning("  FEATURE: Upstream blob shim POCOs now use [MemoryPackable(GenerateType.VersionTolerant)] and LongRange is a record (matches upstream). Fixes 'property count is 2 but binary's header marked as N' deserialization failures during v1→v2 blobstore migration.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-MIGRATION-OOM-FIX");
+            Log.Warning("  FEATURE: V1 blobstore migration now clears the EF change tracker between batches and reads decompressed blobs without copying via MemoryStream.GetBuffer(). Fixes System.OutOfMemoryException at ~6.5k items into a 25k-item migration.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -961,7 +961,7 @@ class Program
         var failed = 0;
         var unknownKind = 0;
 
-        const int BatchSize = 500;
+        const int BatchSize = 100;
         var processed = 0;
         var startedAt = DateTimeOffset.UtcNow;
 
@@ -1046,6 +1046,16 @@ class Program
 
             // Save the batch and report progress.
             await databaseContext.SaveChangesAsync().ConfigureAwait(false);
+            // CRITICAL: clear the EF change tracker between batches. Without this, every entity
+            // we Add()ed stays tracked as Unchanged forever, so the change tracker grows to hold
+            // all 25k+ migrated rows simultaneously — which combined with ZstdSharp's per-blob
+            // decompress buffers quickly exhausts the container's heap and triggers OOM during
+            // decompression of larger multipart blobs.
+            databaseContext.ChangeTracker.Clear();
+            // Hint the GC to compact the LOH between batches — each blob decompressed buffer
+            // is typically >85KB (LOH threshold), and without an explicit collection the LOH
+            // becomes heavily fragmented over thousands of allocations.
+            GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: true);
             Log.Warning(
                 "[BlobstoreMigration] Progress: {Processed}/{Total} (Nzb={Nzb}, Rar={Rar}, " +
                 "Multipart={Multipart}, Orphaned={Orphaned}, Failed={Failed})",

@@ -54,11 +54,7 @@ public class DatabaseStoreRarFile(
         // return the stream
         var id = davRarFile.Id;
         var rarFile = await dbClient.Ctx.RarFiles.Where(x => x.Id == id).FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (rarFile is null)
-            throw new FileNotFoundException(
-                $"No RAR segment metadata for item {id} (path: {davRarFile.Path}). " +
-                "This usually means the v1→v2 migration could not recover the upstream blob " +
-                "file (mounted at {CONFIG_PATH}/blobs). Re-download via Sonarr/Radarr to recover.");
+        if (rarFile is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
         var stream = new DavMultipartFileStream
         (
             rarFile.ToDavMultipartFileMeta().FileParts,

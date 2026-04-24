@@ -11,8 +11,6 @@ using NzbWebDAV.Auth;
 using NzbWebDAV.Clients.Usenet;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
-using NzbWebDAV.Database.BlobStoreCompat;
-using NzbWebDAV.Database.Models;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Middlewares;
 using NzbWebDAV.Queue;
@@ -61,8 +59,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOBSTORE-MIGRATION");
-            Log.Warning("  FEATURE: Auto-migrate v1 (upstream blobstore-era) DavItems into v2 metadata tables on startup");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-RANGE-BOUNDED-PREFETCH");
+            Log.Warning("  FEATURE: Bound BufferedSegmentStream prefetch to requested HTTP Range end (+4 segment overshoot)");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -434,7 +432,6 @@ class Program
         }
 
         await EnsureQueueNzbContentsConsistencyAsync(databaseContext).ConfigureAwait(false);
-        await MigrateDavItemsFromBlobstoreAsync(databaseContext).ConfigureAwait(false);
         await NormalizeLegacyDavItemTypesAsync(databaseContext).ConfigureAwait(false);
     }
 
@@ -850,270 +847,6 @@ class Program
         return Path.Combine(DavDatabaseContext.ConfigPath, "blobs", firstTwo, nextTwo, id.ToString());
     }
 
-    /// <summary>
-    /// Migrates DavItems metadata from upstream nzbdav-dev's filesystem blobstore (Zstd-compressed
-    /// MemoryPack) into this fork's relational <c>DavNzbFiles</c> / <c>DavRarFiles</c> /
-    /// <c>DavMultipartFiles</c> tables.
-    ///
-    /// Trigger conditions (idempotent — safe to run on every startup):
-    ///   1. <c>DavItems</c> has the upstream <c>FileBlobId</c> column.
-    ///   2. The blobs directory exists at <c>{ConfigPath}/blobs</c>.
-    ///   3. There is at least one <c>Type=2</c> DavItem still missing its metadata row.
-    ///
-    /// For each candidate item:
-    ///   - Reads + decompresses + deserializes the upstream blob.
-    ///   - Inserts the corresponding metadata row using EF (so JSON+Zstd value-converters apply).
-    ///   - Items whose blob is missing or unreadable are flagged
-    ///     <c>IsCorrupted = true</c> with a clear <c>CorruptionReason</c> and left as
-    ///     <c>Type=2</c>; <see cref="NormalizeLegacyDavItemTypesAsync"/> only promotes items
-    ///     that successfully landed in the metadata table.
-    /// </summary>
-    private static async Task MigrateDavItemsFromBlobstoreAsync(DavDatabaseContext databaseContext)
-    {
-        if (!await TableExistsAsync(databaseContext, "DavItems").ConfigureAwait(false)) return;
-        if (!await ColumnExistsAsync(databaseContext, "DavItems", "FileBlobId").ConfigureAwait(false)) return;
-        if (!await ColumnExistsAsync(databaseContext, "DavItems", "SubType").ConfigureAwait(false)) return;
-
-        var blobsRoot = Path.Combine(DavDatabaseContext.ConfigPath, "blobs");
-        if (!Directory.Exists(blobsRoot))
-        {
-            Log.Warning(
-                "[BlobstoreMigration] DavItems has FileBlobId column (upstream blobstore-era schema) " +
-                "but no blobs directory found at {BlobsRoot}. Items missing metadata rows will remain " +
-                "as Type=2 and be flagged corrupted. Mount the v1 blobs at this path to enable recovery.",
-                blobsRoot);
-            return;
-        }
-
-        // Collect candidate work items (Id, FileBlobId, SubType) for any Type=2 DavItem that does
-        // NOT yet have a metadata row in this fork's tables. Process in chunks to keep memory low.
-        var candidates = await LoadBlobstoreMigrationCandidatesAsync(databaseContext).ConfigureAwait(false);
-        if (candidates.Count == 0) return;
-
-        Log.Warning(
-            "[BlobstoreMigration] Found {Count} DavItems needing recovery from upstream blobstore " +
-            "(blobs root: {BlobsRoot}). Migrating now…",
-            candidates.Count, blobsRoot);
-
-        var migratedNzb = 0;
-        var migratedRar = 0;
-        var migratedMultipart = 0;
-        var orphaned = 0;
-        var failed = 0;
-        var unknownSubtype = 0;
-
-        const int BatchSize = 500;
-        var processed = 0;
-        var startedAt = DateTimeOffset.UtcNow;
-
-        foreach (var batch in candidates.Chunk(BatchSize))
-        {
-            foreach (var (davItemId, fileBlobId, subType) in batch)
-            {
-                if (fileBlobId is null)
-                {
-                    await MarkOrphanAsync(databaseContext, davItemId,
-                        "Upstream blobstore item with no FileBlobId — cannot recover metadata.")
-                        .ConfigureAwait(false);
-                    orphaned++;
-                    continue;
-                }
-
-                var blobPath = BlobStoreReader.GetBlobPath(blobsRoot, fileBlobId.Value);
-
-                try
-                {
-                    var inserted = subType switch
-                    {
-                        201 => await TryMigrateNzbAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
-                        202 => await TryMigrateRarAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
-                        203 => await TryMigrateMultipartAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
-                        _ => -1,
-                    };
-
-                    switch (subType)
-                    {
-                        case 201 when inserted == 1: migratedNzb++; break;
-                        case 202 when inserted == 1: migratedRar++; break;
-                        case 203 when inserted == 1: migratedMultipart++; break;
-                        case 201 or 202 or 203 when inserted == 0:
-                            await MarkOrphanAsync(databaseContext, davItemId,
-                                $"Upstream blob file missing or unreadable at {blobPath}. " +
-                                "Re-download via Sonarr/Radarr to recover.")
-                                .ConfigureAwait(false);
-                            orphaned++;
-                            break;
-                        default:
-                            // Unknown SubType — leave Type=2 and flag with a clear reason.
-                            await MarkOrphanAsync(databaseContext, davItemId,
-                                $"Unknown upstream SubType={subType}; this fork does not know how " +
-                                "to migrate this item.")
-                                .ConfigureAwait(false);
-                            unknownSubtype++;
-                            break;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Error(ex, "[BlobstoreMigration] Unhandled error migrating item {DavItemId} " +
-                        "(blob={BlobPath}, subType={SubType})", davItemId, blobPath, subType);
-                    failed++;
-                }
-
-                processed++;
-            }
-
-            // Save the batch and report progress.
-            await databaseContext.SaveChangesAsync().ConfigureAwait(false);
-            Log.Warning(
-                "[BlobstoreMigration] Progress: {Processed}/{Total} (Nzb={Nzb}, Rar={Rar}, " +
-                "Multipart={Multipart}, Orphaned={Orphaned}, Failed={Failed})",
-                processed, candidates.Count, migratedNzb, migratedRar, migratedMultipart, orphaned, failed);
-        }
-
-        var elapsed = DateTimeOffset.UtcNow - startedAt;
-        Log.Warning(
-            "[BlobstoreMigration] Complete in {Elapsed:c}. Migrated: Nzb={Nzb}, Rar={Rar}, " +
-            "Multipart={Multipart}. Orphaned (no recoverable blob)={Orphaned}, " +
-            "UnknownSubType={UnknownSubtype}, Failed={Failed}.",
-            elapsed, migratedNzb, migratedRar, migratedMultipart, orphaned, unknownSubtype, failed);
-    }
-
-    private record struct BlobstoreCandidate(Guid DavItemId, Guid? FileBlobId, int? SubType);
-
-    private static async Task<List<BlobstoreCandidate>> LoadBlobstoreMigrationCandidatesAsync(
-        DavDatabaseContext databaseContext)
-    {
-        var connection = databaseContext.Database.GetDbConnection();
-        var shouldClose = connection.State != ConnectionState.Open;
-        if (shouldClose) await connection.OpenAsync().ConfigureAwait(false);
-
-        try
-        {
-            await using var cmd = connection.CreateCommand();
-            // Type=2 = upstream UsenetFile. Restrict to items still missing metadata in this
-            // fork's tables (so re-runs are idempotent and cheap).
-            cmd.CommandText =
-                """
-                SELECT d.Id, d.FileBlobId, d.SubType
-                FROM DavItems d
-                WHERE d.Type = 2
-                  AND (d.IsCorrupted = 0 OR d.IsCorrupted IS NULL)
-                  AND NOT EXISTS (SELECT 1 FROM DavNzbFiles n WHERE n.Id = d.Id)
-                  AND NOT EXISTS (SELECT 1 FROM DavRarFiles r WHERE r.Id = d.Id)
-                  AND NOT EXISTS (SELECT 1 FROM DavMultipartFiles m WHERE m.Id = d.Id)
-                """;
-
-            var results = new List<BlobstoreCandidate>();
-            await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
-            {
-                if (!Guid.TryParse(reader[0]?.ToString(), out var davItemId)) continue;
-
-                Guid? fileBlobId = null;
-                if (!reader.IsDBNull(1) && Guid.TryParse(reader[1]?.ToString(), out var parsedBlobId))
-                {
-                    fileBlobId = parsedBlobId;
-                }
-
-                int? subType = null;
-                if (!reader.IsDBNull(2) && int.TryParse(reader[2]?.ToString(), out var parsedSubType))
-                {
-                    subType = parsedSubType;
-                }
-
-                results.Add(new BlobstoreCandidate(davItemId, fileBlobId, subType));
-            }
-
-            return results;
-        }
-        finally
-        {
-            if (shouldClose) await connection.CloseAsync().ConfigureAwait(false);
-        }
-    }
-
-    /// <returns>1 if migrated, 0 if blob missing/unreadable, -1 if SubType unsupported.</returns>
-    private static async Task<int> TryMigrateNzbAsync(
-        DavDatabaseContext databaseContext, Guid davItemId, string blobPath)
-    {
-        var blob = await BlobStoreReader.TryReadAsync<UpstreamDavNzbFile>(blobPath).ConfigureAwait(false);
-        if (blob is null) return 0;
-
-        databaseContext.NzbFiles.Add(new DavNzbFile
-        {
-            Id = davItemId,
-            SegmentIds = blob.SegmentIds ?? [],
-            // SegmentSizes / SegmentFallbacks are additive in this fork; left null and lazily
-            // populated by NzbAnalysisService on first stream open.
-        });
-        return 1;
-    }
-
-    private static async Task<int> TryMigrateRarAsync(
-        DavDatabaseContext databaseContext, Guid davItemId, string blobPath)
-    {
-        var blob = await BlobStoreReader.TryReadAsync<UpstreamDavRarFile>(blobPath).ConfigureAwait(false);
-        if (blob is null) return 0;
-
-        databaseContext.RarFiles.Add(new DavRarFile
-        {
-            Id = davItemId,
-            RarParts = (blob.RarParts ?? []).Select(p => new DavRarFile.RarPart
-            {
-                SegmentIds = p.SegmentIds ?? [],
-                PartSize = p.PartSize,
-                Offset = p.Offset,
-                ByteCount = p.ByteCount,
-                // ObfuscationKey is additive in this fork; not present in upstream contract.
-            }).ToArray(),
-        });
-        return 1;
-    }
-
-    private static async Task<int> TryMigrateMultipartAsync(
-        DavDatabaseContext databaseContext, Guid davItemId, string blobPath)
-    {
-        var blob = await BlobStoreReader.TryReadAsync<UpstreamDavMultipartFile>(blobPath).ConfigureAwait(false);
-        if (blob is null) return 0;
-
-        var meta = blob.Metadata ?? new UpstreamMultipartMeta();
-        databaseContext.MultipartFiles.Add(new DavMultipartFile
-        {
-            Id = davItemId,
-            Metadata = new DavMultipartFile.Meta
-            {
-                AesParams = meta.AesParams is null ? null : new NzbWebDAV.Models.AesParams
-                {
-                    DecodedSize = meta.AesParams.DecodedSize,
-                    Iv = meta.AesParams.Iv ?? [],
-                    Key = meta.AesParams.Key ?? [],
-                },
-                FileParts = (meta.FileParts ?? []).Select(fp => new DavMultipartFile.FilePart
-                {
-                    SegmentIds = fp.SegmentIds ?? [],
-                    SegmentIdByteRange = new NzbWebDAV.Models.LongRange(
-                        fp.SegmentIdByteRange.StartInclusive,
-                        fp.SegmentIdByteRange.EndExclusive),
-                    FilePartByteRange = new NzbWebDAV.Models.LongRange(
-                        fp.FilePartByteRange.StartInclusive,
-                        fp.FilePartByteRange.EndExclusive),
-                    // SegmentFallbacks is additive in this fork; not present in upstream contract.
-                }).ToArray(),
-            },
-        });
-        return 1;
-    }
-
-    private static async Task MarkOrphanAsync(
-        DavDatabaseContext databaseContext, Guid davItemId, string reason)
-    {
-        // Use raw SQL so this works whether or not the DavItem entity is currently tracked.
-        await databaseContext.Database.ExecuteSqlRawAsync(
-            "UPDATE DavItems SET IsCorrupted = 1, CorruptionReason = {0} WHERE Id = {1}",
-            reason, davItemId).ConfigureAwait(false);
-    }
-
     private static async Task NormalizeLegacyDavItemTypesAsync(DavDatabaseContext databaseContext)
     {
         if (!await TableExistsAsync(databaseContext, "DavItems").ConfigureAwait(false))
@@ -1129,33 +862,15 @@ class Program
 
         if (await ColumnExistsAsync(databaseContext, "DavItems", "SubType").ConfigureAwait(false))
         {
-            // v1/upstream-blobstore schema used Type=2 (UsenetFile) with SubType 201/202/203.
-            // Only promote to this fork's enum values when the corresponding metadata row
-            // already exists (DavNzbFiles/DavRarFiles/DavMultipartFiles). The blobstore
-            // migration phase (MigrateDavItemsFromBlobstoreAsync) populates those rows from
-            // the upstream blob files; items missing both a metadata row AND a recoverable
-            // blob remain Type=2 (and are flagged IsCorrupted with a clear reason) so they
-            // are not silently surfaced as unreadable files in WebDAV / Plex / rclone mounts.
+            // v1/newer schema used Type=2 (UsenetFile) with SubType 201/202/203.
             fixedSubtypeNzb = await databaseContext.Database.ExecuteSqlRawAsync(
-                """
-                UPDATE DavItems SET Type = 3
-                WHERE Type = 2 AND SubType = 201
-                  AND EXISTS (SELECT 1 FROM DavNzbFiles n WHERE n.Id = DavItems.Id)
-                """)
+                "UPDATE DavItems SET Type = 3 WHERE Type = 2 AND SubType = 201")
                 .ConfigureAwait(false);
             fixedSubtypeRar = await databaseContext.Database.ExecuteSqlRawAsync(
-                """
-                UPDATE DavItems SET Type = 4
-                WHERE Type = 2 AND SubType = 202
-                  AND EXISTS (SELECT 1 FROM DavRarFiles r WHERE r.Id = DavItems.Id)
-                """)
+                "UPDATE DavItems SET Type = 4 WHERE Type = 2 AND SubType = 202")
                 .ConfigureAwait(false);
             fixedSubtypeMultipart = await databaseContext.Database.ExecuteSqlRawAsync(
-                """
-                UPDATE DavItems SET Type = 6
-                WHERE Type = 2 AND SubType = 203
-                  AND EXISTS (SELECT 1 FROM DavMultipartFiles m WHERE m.Id = DavItems.Id)
-                """)
+                "UPDATE DavItems SET Type = 6 WHERE Type = 2 AND SubType = 203")
                 .ConfigureAwait(false);
 
             // Keep special root folders aligned with this fork's enum values.

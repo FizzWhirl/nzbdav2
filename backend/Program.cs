@@ -855,37 +855,39 @@ class Program
     /// MemoryPack) into this fork's relational <c>DavNzbFiles</c> / <c>DavRarFiles</c> /
     /// <c>DavMultipartFiles</c> tables.
     ///
-    /// Blob lookup: in this codebase the blob filename equals the <c>DavItem.Id</c> (verified by
-    /// the existing <see cref="RecoverQueueNzbContentsFromBlobStoreAsync"/> which uses the same
-    /// <see cref="GetLegacyBlobPath"/> helper). The <c>FileBlobId</c> column is not used as a key.
-    ///
     /// Trigger conditions (idempotent — safe to run on every startup):
-    ///   1. The blobs directory exists at <c>{ConfigPath}/blobs</c>.
-    ///   2. There is at least one DavItem that "should" have metadata (SubType 201/202/203 OR
-    ///      already-promoted Type 3/4/6) but is missing its row in the corresponding metadata table.
+    ///   1. <c>DavItems</c> has the upstream <c>FileBlobId</c> column.
+    ///   2. The blobs directory exists at <c>{ConfigPath}/blobs</c>.
+    ///   3. There is at least one <c>Type=2</c> DavItem still missing its metadata row.
     ///
     /// For each candidate item:
-    ///   - Reads + decompresses + deserializes the blob at <c>blobs/{first2}/{next2}/{itemId}</c>.
+    ///   - Reads + decompresses + deserializes the upstream blob.
     ///   - Inserts the corresponding metadata row using EF (so JSON+Zstd value-converters apply).
-    ///   - Items whose blob is missing or unreadable are flagged <c>IsCorrupted = true</c> with a
-    ///     clear <c>CorruptionReason</c> and reverted to <c>Type=2</c> (folder) so they aren't
-    ///     surfaced as broken files in WebDAV / Plex / rclone mounts.
+    ///   - Items whose blob is missing or unreadable are flagged
+    ///     <c>IsCorrupted = true</c> with a clear <c>CorruptionReason</c> and left as
+    ///     <c>Type=2</c>; <see cref="NormalizeLegacyDavItemTypesAsync"/> only promotes items
+    ///     that successfully landed in the metadata table.
     /// </summary>
     private static async Task MigrateDavItemsFromBlobstoreAsync(DavDatabaseContext databaseContext)
     {
         if (!await TableExistsAsync(databaseContext, "DavItems").ConfigureAwait(false)) return;
+        if (!await ColumnExistsAsync(databaseContext, "DavItems", "FileBlobId").ConfigureAwait(false)) return;
+        if (!await ColumnExistsAsync(databaseContext, "DavItems", "SubType").ConfigureAwait(false)) return;
 
         var blobsRoot = Path.Combine(DavDatabaseContext.ConfigPath, "blobs");
-        if (!Directory.Exists(blobsRoot)) return;
+        if (!Directory.Exists(blobsRoot))
+        {
+            Log.Warning(
+                "[BlobstoreMigration] DavItems has FileBlobId column (upstream blobstore-era schema) " +
+                "but no blobs directory found at {BlobsRoot}. Items missing metadata rows will remain " +
+                "as Type=2 and be flagged corrupted. Mount the v1 blobs at this path to enable recovery.",
+                blobsRoot);
+            return;
+        }
 
-        var hasSubType = await ColumnExistsAsync(databaseContext, "DavItems", "SubType").ConfigureAwait(false);
-
-        // Collect candidate work items. Two complementary cases:
-        //   A. SubType 201/202/203 with Type=2 (untouched legacy items).
-        //   B. Type 3/4/6 with no metadata row (force-promoted by an earlier buggy v2 build).
-        // Case B is what bites users who already ran the previous broken migration — we MUST
-        // pick those up here too, otherwise streaming continues to fail forever.
-        var candidates = await LoadBlobstoreMigrationCandidatesAsync(databaseContext, hasSubType).ConfigureAwait(false);
+        // Collect candidate work items (Id, FileBlobId, SubType) for any Type=2 DavItem that does
+        // NOT yet have a metadata row in this fork's tables. Process in chunks to keep memory low.
+        var candidates = await LoadBlobstoreMigrationCandidatesAsync(databaseContext).ConfigureAwait(false);
         if (candidates.Count == 0) return;
 
         Log.Warning(
@@ -898,7 +900,7 @@ class Program
         var migratedMultipart = 0;
         var orphaned = 0;
         var failed = 0;
-        var unknownKind = 0;
+        var unknownSubtype = 0;
 
         const int BatchSize = 500;
         var processed = 0;
@@ -906,48 +908,35 @@ class Program
 
         foreach (var batch in candidates.Chunk(BatchSize))
         {
-            foreach (var (davItemId, currentType, subType) in batch)
+            foreach (var (davItemId, fileBlobId, subType) in batch)
             {
-                // Pick deserializer kind: SubType is authoritative when present (legacy untouched
-                // items); otherwise fall back to the already-promoted Type for items the buggy
-                // earlier v2 build force-promoted before the SubType column was dropped.
-                //   201 / Type=3 → Nzb
-                //   202 / Type=4 → Rar
-                //   203 / Type=6 → Multipart
-                var kind = subType switch
+                if (fileBlobId is null)
                 {
-                    201 => MigrationKind.Nzb,
-                    202 => MigrationKind.Rar,
-                    203 => MigrationKind.Multipart,
-                    _ => currentType switch
-                    {
-                        3 => MigrationKind.Nzb,
-                        4 => MigrationKind.Rar,
-                        6 => MigrationKind.Multipart,
-                        _ => MigrationKind.Unknown,
-                    },
-                };
+                    await MarkOrphanAsync(databaseContext, davItemId,
+                        "Upstream blobstore item with no FileBlobId — cannot recover metadata.")
+                        .ConfigureAwait(false);
+                    orphaned++;
+                    continue;
+                }
 
-                // Blob filename = DavItem.Id (matches GetLegacyBlobPath; verified by the existing
-                // RecoverQueueNzbContentsFromBlobStoreAsync which uses the same scheme).
-                var blobPath = GetLegacyBlobPath(davItemId);
+                var blobPath = BlobStoreReader.GetBlobPath(blobsRoot, fileBlobId.Value);
 
                 try
                 {
-                    var inserted = kind switch
+                    var inserted = subType switch
                     {
-                        MigrationKind.Nzb => await TryMigrateNzbAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
-                        MigrationKind.Rar => await TryMigrateRarAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
-                        MigrationKind.Multipart => await TryMigrateMultipartAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
+                        201 => await TryMigrateNzbAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
+                        202 => await TryMigrateRarAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
+                        203 => await TryMigrateMultipartAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
                         _ => -1,
                     };
 
-                    switch (kind)
+                    switch (subType)
                     {
-                        case MigrationKind.Nzb when inserted == 1: migratedNzb++; break;
-                        case MigrationKind.Rar when inserted == 1: migratedRar++; break;
-                        case MigrationKind.Multipart when inserted == 1: migratedMultipart++; break;
-                        case MigrationKind.Nzb or MigrationKind.Rar or MigrationKind.Multipart when inserted == 0:
+                        case 201 when inserted == 1: migratedNzb++; break;
+                        case 202 when inserted == 1: migratedRar++; break;
+                        case 203 when inserted == 1: migratedMultipart++; break;
+                        case 201 or 202 or 203 when inserted == 0:
                             await MarkOrphanAsync(databaseContext, davItemId,
                                 $"Upstream blob file missing or unreadable at {blobPath}. " +
                                 "Re-download via Sonarr/Radarr to recover.")
@@ -955,20 +944,19 @@ class Program
                             orphaned++;
                             break;
                         default:
-                            // Unknown kind — neither SubType nor Type identified the item.
+                            // Unknown SubType — leave Type=2 and flag with a clear reason.
                             await MarkOrphanAsync(databaseContext, davItemId,
-                                $"Could not determine blobstore item kind (Type={currentType}, " +
-                                $"SubType={subType?.ToString() ?? "null"}); this fork does not " +
-                                "know how to migrate this item.")
+                                $"Unknown upstream SubType={subType}; this fork does not know how " +
+                                "to migrate this item.")
                                 .ConfigureAwait(false);
-                            unknownKind++;
+                            unknownSubtype++;
                             break;
                     }
                 }
                 catch (Exception ex)
                 {
                     Log.Error(ex, "[BlobstoreMigration] Unhandled error migrating item {DavItemId} " +
-                        "(blob={BlobPath}, kind={Kind})", davItemId, blobPath, kind);
+                        "(blob={BlobPath}, subType={SubType})", davItemId, blobPath, subType);
                     failed++;
                 }
 
@@ -987,16 +975,14 @@ class Program
         Log.Warning(
             "[BlobstoreMigration] Complete in {Elapsed:c}. Migrated: Nzb={Nzb}, Rar={Rar}, " +
             "Multipart={Multipart}. Orphaned (no recoverable blob)={Orphaned}, " +
-            "UnknownKind={UnknownKind}, Failed={Failed}.",
-            elapsed, migratedNzb, migratedRar, migratedMultipart, orphaned, unknownKind, failed);
+            "UnknownSubType={UnknownSubtype}, Failed={Failed}.",
+            elapsed, migratedNzb, migratedRar, migratedMultipart, orphaned, unknownSubtype, failed);
     }
 
-    private enum MigrationKind { Unknown, Nzb, Rar, Multipart }
-
-    private record struct BlobstoreCandidate(Guid DavItemId, int CurrentType, int? SubType);
+    private record struct BlobstoreCandidate(Guid DavItemId, Guid? FileBlobId, int? SubType);
 
     private static async Task<List<BlobstoreCandidate>> LoadBlobstoreMigrationCandidatesAsync(
-        DavDatabaseContext databaseContext, bool hasSubType)
+        DavDatabaseContext databaseContext)
     {
         var connection = databaseContext.Database.GetDbConnection();
         var shouldClose = connection.State != ConnectionState.Open;
@@ -1005,26 +991,20 @@ class Program
         try
         {
             await using var cmd = connection.CreateCommand();
-            // Two complementary cases unioned together:
-            //   A. Untouched legacy items: SubType in (201,202,203). These typically still have
-            //      Type=2 if NormalizeLegacyDavItemTypesAsync hasn't promoted them yet.
-            //   B. Force-promoted-but-orphaned items: Type in (3,4,6) with no metadata row. This
-            //      is the hot path for users who already ran the buggy earlier v2 build.
-            //
-            // We exclude items that already have a metadata row (idempotent re-runs) and items
-            // already flagged corrupted (don't keep retrying known-bad items every startup).
-            var subtypeClause = hasSubType
-                ? "OR (d.SubType IN (201, 202, 203))"
-                : string.Empty;
+            // Upstream-blobstore-era items are uniquely identified by FileBlobId IS NOT NULL
+            // (this column does not exist in the fork's DavItem model, so native v2 items never
+            // populate it). We deliberately do NOT filter on Type, because an earlier v2 build
+            // shipped a buggy NormalizeLegacyDavItemTypesAsync that unconditionally promoted
+            // SubType 201/202/203 -> Type 3/4/6 without ever populating the metadata tables.
+            // Those force-promoted-but-orphaned items must also be migrated here, otherwise they
+            // throw FileNotFoundException on every stream open.
+            // SubType is the source of truth for which deserializer to use.
             cmd.CommandText =
-                $"""
-                SELECT d.Id, d.Type, {(hasSubType ? "d.SubType" : "NULL AS SubType")}
+                """
+                SELECT d.Id, d.FileBlobId, d.SubType
                 FROM DavItems d
-                WHERE (d.IsCorrupted = 0 OR d.IsCorrupted IS NULL)
-                  AND (
-                        d.Type IN (3, 4, 6)
-                        {subtypeClause}
-                      )
+                WHERE d.FileBlobId IS NOT NULL
+                  AND (d.IsCorrupted = 0 OR d.IsCorrupted IS NULL)
                   AND NOT EXISTS (SELECT 1 FROM DavNzbFiles n WHERE n.Id = d.Id)
                   AND NOT EXISTS (SELECT 1 FROM DavRarFiles r WHERE r.Id = d.Id)
                   AND NOT EXISTS (SELECT 1 FROM DavMultipartFiles m WHERE m.Id = d.Id)
@@ -1036,10 +1016,10 @@ class Program
             {
                 if (!Guid.TryParse(reader[0]?.ToString(), out var davItemId)) continue;
 
-                var currentType = 0;
-                if (!reader.IsDBNull(1) && int.TryParse(reader[1]?.ToString(), out var parsedType))
+                Guid? fileBlobId = null;
+                if (!reader.IsDBNull(1) && Guid.TryParse(reader[1]?.ToString(), out var parsedBlobId))
                 {
-                    currentType = parsedType;
+                    fileBlobId = parsedBlobId;
                 }
 
                 int? subType = null;
@@ -1048,7 +1028,7 @@ class Program
                     subType = parsedSubType;
                 }
 
-                results.Add(new BlobstoreCandidate(davItemId, currentType, subType));
+                results.Add(new BlobstoreCandidate(davItemId, fileBlobId, subType));
             }
 
             return results;

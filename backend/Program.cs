@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-QUEUE-PROBE-TIMEOUT");
-            Log.Warning("  FEATURE: Step 3 (smart article probe) per-file timeout bumped from 15s to 30s. Geographically distant providers (e.g. Frugal AU from non-AU users) need more headroom for TCP+TLS+NNTP greeting before the per-file deadline kills the in-flight connection.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-LOG-LEVELS");
+            Log.Warning("  FEATURE: Quieter logs for benign cancellation. ConnectionPool now logs caller-token cancellations at Debug (HTTP client disconnect, per-file probe deadline, etc.) and CancellationTokenContext nested-scope removals are Debug instead of Warning. True connection failures still log at Warning/Error and trip the circuit breaker as before.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

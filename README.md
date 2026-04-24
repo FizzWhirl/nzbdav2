@@ -117,6 +117,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-24)
+*   **Migration**: Auto-migrate v1 (upstream blobstore-era) DavItems into v2 metadata tables on startup. Reads each item's Zstd+MemoryPack-encoded blob from `{CONFIG_PATH}/blobs/`, deserializes via upstream-compatible POCOs, and inserts the equivalent row into `DavNzbFiles` / `DavRarFiles` / `DavMultipartFiles`. Symlinks pointing into `.ids/` no longer 404 after the v1→v2 upgrade.
+*   **Reliability**: `NormalizeLegacyDavItemTypesAsync` no longer unconditionally promotes `Type=2 SubType=201/202/203` items to v2 file types — promotion is now gated on the corresponding metadata row existing. Items whose blobs are missing or unreadable are flagged `IsCorrupted=1` with a clear `CorruptionReason` and remain `Type=2` so they aren't silently surfaced as broken files in WebDAV / Plex / rclone mounts.
+*   **Fix**: When a streaming request hits a DavItem with no metadata row, the runtime error now points at the v1→v2 migration and the `{CONFIG_PATH}/blobs` mount path instead of the cryptic `Could not find nzb file with id: …`.
+
+## v0.6.Z (2026-04-24)
 *   **Performance**: Bound `BufferedSegmentStream` prefetch to the requested HTTP `Range` end byte (plus a 4-segment overshoot) instead of always queueing every segment to EOF. Prevents ~40 MB of speculative Usenet reads per ranged request — the root cause of slow Radarr imports, ffprobe seek storms, and backend `OutOfMemoryException` on the SAB `mode=history` endpoint when many bounded reads (rclone vfs-cache fills, HDR ffprobe `GetFrameJson` seeks) were in flight concurrently.
 *   **Performance**: Skip the shared-stream pump for requests with a closed `bytes=X-Y` range — discrete bounded reads now take the direct bounded-prefetch path instead of attaching to a streaming pump that would prefetch to EOF for downstream readers.
 *   **Reliability**: Open-ended (`bytes=X-`) and unbounded GETs are unchanged — Plex/Jellyfin/rclone full-file streaming continues to use the shared streaming pump with full read-ahead.

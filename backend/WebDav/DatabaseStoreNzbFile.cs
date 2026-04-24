@@ -56,7 +56,11 @@ public class DatabaseStoreNzbFile(
         // return the stream with usage context and buffering options
         var id = davNzbFile.Id;
         var file = await dbClient.GetNzbFileAsync(id, cancellationToken).ConfigureAwait(false);
-        if (file is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
+        if (file is null)
+            throw new FileNotFoundException(
+                $"No NZB segment metadata for item {id} (path: {davNzbFile.Path}). " +
+                "This usually means the v1→v2 migration could not recover the upstream blob " +
+                "file (mounted at {CONFIG_PATH}/blobs). Re-download via Sonarr/Radarr to recover.");
 
         // Trigger background analysis if cache is missing
         if (file.SegmentSizes == null)

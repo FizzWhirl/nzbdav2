@@ -56,7 +56,11 @@ public class DatabaseStoreMultipartFile(
         // return the stream
         var id = davMultipartFile.Id;
         var multipartFile = await dbClient.Ctx.MultipartFiles.Where(x => x.Id == id).FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (multipartFile is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
+        if (multipartFile is null)
+            throw new FileNotFoundException(
+                $"No multipart segment metadata for item {id} (path: {davMultipartFile.Path}). " +
+                "This usually means the v1→v2 migration could not recover the upstream blob " +
+                "file (mounted at {CONFIG_PATH}/blobs). Re-download via Sonarr/Radarr to recover.");
         var packedStream = new DavMultipartFileStream(
             multipartFile.Metadata.FileParts,
             usenetClient,

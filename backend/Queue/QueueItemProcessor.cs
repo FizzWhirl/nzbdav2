@@ -352,7 +352,7 @@ public class QueueItemProcessor(
                         for (var attempt = 0; attempt < 2; attempt++)
                         {
                             using var fileCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                            fileCts.CancelAfter(TimeSpan.FromSeconds(15));
+                            fileCts.CancelAfter(TimeSpan.FromSeconds(30));
                             using var _fileCtx = fileCts.Token.SetScopedContext(probeContext);
 
                             try

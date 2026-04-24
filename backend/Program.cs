@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-MIGRATION-OOM-FIX");
-            Log.Warning("  FEATURE: V1 blobstore migration now clears the EF change tracker between batches and reads decompressed blobs without copying via MemoryStream.GetBuffer(). Fixes System.OutOfMemoryException at ~6.5k items into a 25k-item migration.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-QUEUE-PROBE-TIMEOUT");
+            Log.Warning("  FEATURE: Step 3 (smart article probe) per-file timeout bumped from 15s to 30s. Geographically distant providers (e.g. Frugal AU from non-AU users) need more headroom for TCP+TLS+NNTP greeting before the per-file deadline kills the in-flight connection.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

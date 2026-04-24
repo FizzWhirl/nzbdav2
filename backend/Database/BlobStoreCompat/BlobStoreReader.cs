@@ -48,16 +48,26 @@ internal static class BlobStoreReader
     /// </summary>
     public static async Task<Guid?> TryReadEmbeddedIdAsync(string blobPath, CancellationToken ct = default)
     {
-        if (!File.Exists(blobPath)) return null;
+        var head = await TryReadDecompressedHeadAsync(blobPath, 17, ct).ConfigureAwait(false);
+        if (head is null || head.Length < 17) return null;
+        // 255 = MemoryPack null sentinel; anything else is the member count.
+        if (head[0] == 255) return null;
+        return new Guid(head.AsSpan(1, 16));
+    }
 
+    /// <summary>
+    /// Decompresses the first <paramref name="maxBytes"/> bytes of a blob's payload.
+    /// Returns null if the file is missing or doesn't decompress at all.
+    /// </summary>
+    public static async Task<byte[]?> TryReadDecompressedHeadAsync(
+        string blobPath, int maxBytes, CancellationToken ct = default)
+    {
+        if (!File.Exists(blobPath)) return null;
         try
         {
             await using var fileStream = File.OpenRead(blobPath);
             await using var decompress = new DecompressionStream(fileStream);
-
-            // We only need the first 17 bytes; bound the decompressed buffer to keep this cheap
-            // even on partially valid blobs.
-            var buffer = new byte[17];
+            var buffer = new byte[maxBytes];
             var totalRead = 0;
             while (totalRead < buffer.Length)
             {
@@ -65,12 +75,8 @@ internal static class BlobStoreReader
                 if (read <= 0) break;
                 totalRead += read;
             }
-
-            if (totalRead < 17) return null;
-            // 255 = MemoryPack null sentinel; anything else is the member count.
-            if (buffer[0] == 255) return null;
-
-            return new Guid(buffer.AsSpan(1, 16));
+            if (totalRead < buffer.Length) Array.Resize(ref buffer, totalRead);
+            return buffer;
         }
         catch (Exception ex)
         {

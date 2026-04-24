@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOB-INDEX-DIAG2");
-            Log.Warning("  FEATURE: V1 blobstore migration with per-blob embedded-Id diagnostic + safe abort if zero indexed Ids match DavItems (prevents mass re-orphaning while we figure out the real mapping).");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOB-HEXDUMP");
+            Log.Warning("  FEATURE: V1 blobstore migration with raw 64-byte hex dump of 3 sample blobs + fast 200-row overlap check (no slow temp-table). One last sanity check before declaring 25k items unrecoverable.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -1152,46 +1152,36 @@ class Program
                     }
                 }
 
-                // Bulk overlap count: count how many of ALL indexed Ids exist in DavItems.
-                // Use a temp table for efficiency on 25k+ items.
-                await using (var ddl = connection.CreateCommand())
+                // Lightweight overlap estimate (sample first 200 indexed Ids; avoids 25k+ INSERTs).
+                long sampled = 0;
+                long sampleHits = 0;
+                await using (var existsCmd = connection.CreateCommand())
                 {
-                    ddl.CommandText = "CREATE TEMP TABLE IF NOT EXISTS _diag_indexed_ids(Id TEXT PRIMARY KEY)";
-                    await ddl.ExecuteNonQueryAsync().ConfigureAwait(false);
-                    ddl.CommandText = "DELETE FROM _diag_indexed_ids";
-                    await ddl.ExecuteNonQueryAsync().ConfigureAwait(false);
-                }
-                await using (var tx = await connection.BeginTransactionAsync().ConfigureAwait(false))
-                {
-                    await using (var ins = connection.CreateCommand())
+                    existsCmd.CommandText = "SELECT 1 FROM DavItems WHERE lower(Id)=lower(@id) LIMIT 1";
+                    var p = existsCmd.CreateParameter();
+                    p.ParameterName = "@id";
+                    existsCmd.Parameters.Add(p);
+                    foreach (var key in blobIndex.Keys.Take(200))
                     {
-                        ins.Transaction = tx;
-                        ins.CommandText = "INSERT OR IGNORE INTO _diag_indexed_ids(Id) VALUES (@id)";
-                        var p = ins.CreateParameter();
-                        p.ParameterName = "@id";
-                        ins.Parameters.Add(p);
-                        foreach (var key in blobIndex.Keys)
-                        {
-                            p.Value = key.ToString();
-                            await ins.ExecuteNonQueryAsync().ConfigureAwait(false);
-                        }
+                        p.Value = key.ToString();
+                        var v = await existsCmd.ExecuteScalarAsync().ConfigureAwait(false);
+                        sampled++;
+                        if (v is not null and not DBNull) sampleHits++;
                     }
-                    await tx.CommitAsync().ConfigureAwait(false);
                 }
-                await using (var match = connection.CreateCommand())
+                Log.Warning(
+                    "[BlobIndexDiag] Sampled {Sampled} of {IndexedTotal} indexed Ids: {Hits} match DavItems.Id",
+                    sampled, blobIndex.Count, sampleHits);
+                matchCount = sampleHits;
+
+                // Hex dump first 64 decompressed bytes of 3 sample blobs so we can locate where
+                // the DavItem.Id (if any) actually lives in the payload.
+                Log.Warning("[BlobIndexDiag] Raw payload dumps (first 64 decompressed bytes):");
+                foreach (var (id, path) in blobIndex.Take(3))
                 {
-                    match.CommandText = "SELECT COUNT(*) FROM _diag_indexed_ids x WHERE EXISTS (SELECT 1 FROM DavItems d WHERE lower(d.Id)=lower(x.Id))";
-                    var n = await match.ExecuteScalarAsync().ConfigureAwait(false);
-                    matchCount = n is null or DBNull ? 0L : Convert.ToInt64(n);
-                    Log.Warning("[BlobIndexDiag] Of {IndexedTotal} indexed Ids, {Matched} match DavItems.Id",
-                        blobIndex.Count, matchCount);
-                }
-                await using (var matchCand = connection.CreateCommand())
-                {
-                    matchCand.CommandText = "SELECT COUNT(*) FROM _diag_indexed_ids x WHERE EXISTS (SELECT 1 FROM DavItems d WHERE lower(d.Id)=lower(x.Id) AND (d.IsCorrupted = 0 OR d.IsCorrupted IS NULL))";
-                    var n = await matchCand.ExecuteScalarAsync().ConfigureAwait(false);
-                    Log.Warning("[BlobIndexDiag] Of {IndexedTotal} indexed Ids, {Matched} match a non-corrupted DavItem",
-                        blobIndex.Count, n);
+                    var head = await BlobStoreReader.TryReadDecompressedHeadAsync(path, 64).ConfigureAwait(false);
+                    Log.Warning("[BlobIndexDiag]   blob={Path}\n              extractedId={Id}\n              hex64={Hex}",
+                        path, id, head is null ? "<null>" : Convert.ToHexString(head));
                 }
             }
             finally

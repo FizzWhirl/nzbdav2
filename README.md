@@ -117,6 +117,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-24)
+*   **Fix**: V1 blobstore migration now resolves blobs by scanning files and reading the embedded `DavItem.Id` from each blob's MemoryPack payload, instead of computing the path from `DavItem.Id` (which broke when the `FileBlobId` column was dropped from `DavItems`). Recovers thousands of items previously orphaned with `FileNotFoundException` errors during streaming.
+*   **Logging**: New startup `[OrphanReport]` summarises remaining unrecoverable items (blob files genuinely missing from disk) with sample paths so users know what to re-import via Sonarr/Radarr.
+
+## v0.6.Z (2026-04-24)
 *   **Migration**: Auto-migrate v1 (upstream blobstore-era) DavItems into v2 metadata tables on startup. Reads each item's Zstd+MemoryPack-encoded blob from `{CONFIG_PATH}/blobs/`, deserializes via upstream-compatible POCOs, and inserts the equivalent row into `DavNzbFiles` / `DavRarFiles` / `DavMultipartFiles`. Symlinks pointing into `.ids/` no longer 404 after the v1→v2 upgrade.
 *   **Reliability**: `NormalizeLegacyDavItemTypesAsync` no longer unconditionally promotes `Type=2 SubType=201/202/203` items to v2 file types — promotion is now gated on the corresponding metadata row existing. Items whose blobs are missing or unreadable are flagged `IsCorrupted=1` with a clear `CorruptionReason` and remain `Type=2` so they aren't silently surfaced as broken files in WebDAV / Plex / rclone mounts.
 *   **Fix**: When a streaming request hits a DavItem with no metadata row, the runtime error now points at the v1→v2 migration and the `{CONFIG_PATH}/blobs` mount path instead of the cryptic `Could not find nzb file with id: …`.

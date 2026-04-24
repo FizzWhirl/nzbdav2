@@ -29,6 +29,63 @@ internal static class BlobStoreReader
     }
 
     /// <summary>
+    /// Extracts the embedded DavItem.Id from a v1 blob WITHOUT a full deserialization.
+    ///
+    /// All three upstream metadata contracts (UpstreamDavNzbFile, UpstreamDavRarFile,
+    /// UpstreamDavMultipartFile) declare <c>[MemoryPackOrder(0)] Guid Id</c> as their first
+    /// member. MemoryPack object wire format for a non-null reference type is:
+    ///   byte 0  : member count (255 = null reference)
+    ///   bytes 1..16 : first member, raw 16 bytes for Guid
+    ///   ...     : remaining members
+    ///
+    /// So we only need to decompress the blob and read 17 bytes to recover the embedded Id.
+    /// This is critical for the v1→v2 migration on installs where the FileBlobId column
+    /// (which previously stored DavItem.Id → blob filename mapping) was dropped — the embedded
+    /// Id is the ONLY remaining link between a blob file and its owning DavItem.
+    ///
+    /// Returns null if the file is missing, unreadable, the payload is shorter than 17 bytes,
+    /// or the leading byte indicates a null reference.
+    /// </summary>
+    public static async Task<Guid?> TryReadEmbeddedIdAsync(string blobPath, CancellationToken ct = default)
+    {
+        if (!File.Exists(blobPath)) return null;
+
+        try
+        {
+            await using var fileStream = File.OpenRead(blobPath);
+            await using var decompress = new DecompressionStream(fileStream);
+
+            // We only need the first 17 bytes; bound the decompressed buffer to keep this cheap
+            // even on partially valid blobs.
+            var buffer = new byte[17];
+            var totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                var read = await decompress.ReadAsync(buffer.AsMemory(totalRead), ct).ConfigureAwait(false);
+                if (read <= 0) break;
+                totalRead += read;
+            }
+
+            if (totalRead < 17) return null;
+            // 255 = MemoryPack null sentinel; anything else is the member count.
+            if (buffer[0] == 255) return null;
+
+            return new Guid(buffer.AsSpan(1, 16));
+        }
+        catch (Exception ex)
+        {
+            var n = Interlocked.Increment(ref _verboseFailures);
+            if (n <= VerboseFailureCap)
+            {
+                Log.Warning(
+                    "[BlobStoreReader] FAIL #{N} (Id-extract) blob={Path} exception={ExType}: {Error}",
+                    n, blobPath, ex.GetType().FullName, ex.Message);
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Attempts to deserialize a blob file. Returns null and logs a debug message if the file is
     /// missing, unreadable, malformed, or not a valid blob of the expected type.
     /// The first <see cref="VerboseFailureCap"/> failures are logged at Warning with full

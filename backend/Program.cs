@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOBSTORE-DIAG");
-            Log.Warning("  FEATURE: V1 blobstore migration with verbose first-10 failure diagnostics + auto-reset of broken-migration corruption flags");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOB-INDEX");
+            Log.Warning("  FEATURE: V1 blobstore migration uses BLOB-DRIVEN index (DavItem.Id extracted from each blob's MemoryPack payload) instead of broken id→path scheme. Recovers items where the dropped FileBlobId column made the upstream path scheme unusable.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -436,6 +436,7 @@ class Program
         await EnsureQueueNzbContentsConsistencyAsync(databaseContext).ConfigureAwait(false);
         await MigrateDavItemsFromBlobstoreAsync(databaseContext).ConfigureAwait(false);
         await NormalizeLegacyDavItemTypesAsync(databaseContext).ConfigureAwait(false);
+        await ReportOrphanedDavItemsAsync(databaseContext).ConfigureAwait(false);
     }
 
     private static async Task EnsureMigrationDropIndexPrerequisitesAsync(DavDatabaseContext databaseContext)
@@ -855,9 +856,17 @@ class Program
     /// MemoryPack) into this fork's relational <c>DavNzbFiles</c> / <c>DavRarFiles</c> /
     /// <c>DavMultipartFiles</c> tables.
     ///
-    /// Blob lookup: in this codebase the blob filename equals the <c>DavItem.Id</c> (verified by
-    /// the existing <see cref="RecoverQueueNzbContentsFromBlobStoreAsync"/> which uses the same
-    /// <see cref="GetLegacyBlobPath"/> helper). The <c>FileBlobId</c> column is not used as a key.
+    /// Blob lookup strategy (BLOB-DRIVEN, NOT id-derived path):
+    /// This fork once had a <c>FileBlobId</c> column on <c>DavItems</c> that mapped each
+    /// DavItem.Id to its blob filename (which is a different GUID). That column has since been
+    /// dropped, destroying the only DB-side link between an item and its blob. Computing the
+    /// blob path from <c>DavItem.Id</c> alone (as upstream does) does NOT work on this fork.
+    ///
+    /// Instead, we recover the mapping from the BLOBS THEMSELVES: every upstream metadata blob
+    /// (Nzb / Rar / Multipart) embeds <c>[MemoryPackOrder(0)] Guid Id = DavItem.Id</c> as its
+    /// first member. We scan the blobs directory once, decompress each file, read 17 bytes, and
+    /// build an in-memory <c>Dictionary&lt;Guid, string&gt;</c> from DavItem.Id → blob path.
+    /// Candidates are then resolved via lookup, not path-derivation.
     ///
     /// Trigger conditions (idempotent — safe to run on every startup):
     ///   1. The blobs directory exists at <c>{ConfigPath}/blobs</c>.
@@ -865,11 +874,10 @@ class Program
     ///      already-promoted Type 3/4/6) but is missing its row in the corresponding metadata table.
     ///
     /// For each candidate item:
-    ///   - Reads + decompresses + deserializes the blob at <c>blobs/{first2}/{next2}/{itemId}</c>.
-    ///   - Inserts the corresponding metadata row using EF (so JSON+Zstd value-converters apply).
-    ///   - Items whose blob is missing or unreadable are flagged <c>IsCorrupted = true</c> with a
-    ///     clear <c>CorruptionReason</c> and reverted to <c>Type=2</c> (folder) so they aren't
-    ///     surfaced as broken files in WebDAV / Plex / rclone mounts.
+    ///   - Looks up the blob path in the pre-built index.
+    ///   - If found: deserializes via the appropriate Upstream contract and inserts the metadata row.
+    ///   - If NOT found: flagged <c>IsCorrupted = true</c> with a clear <c>CorruptionReason</c> and
+    ///     reverted to <c>Type=2</c> (folder) so it isn't surfaced as a broken file.
     /// </summary>
     private static async Task MigrateDavItemsFromBlobstoreAsync(DavDatabaseContext databaseContext)
     {
@@ -911,8 +919,17 @@ class Program
 
         Log.Warning(
             "[BlobstoreMigration] Found {Count} DavItems needing recovery from upstream blobstore " +
-            "(blobs root: {BlobsRoot}). Migrating now…",
+            "(blobs root: {BlobsRoot}). Building blob index…",
             candidates.Count, blobsRoot);
+
+        // Pre-scan ALL blob files and build DavItem.Id → blob path index. This is the workaround
+        // for the dropped FileBlobId column: the embedded Id inside each blob is now the only
+        // remaining link between DavItems and blob files.
+        var indexStart = DateTimeOffset.UtcNow;
+        var blobIndex = await BuildBlobIdIndexAsync(blobsRoot).ConfigureAwait(false);
+        Log.Warning(
+            "[BlobstoreMigration] Indexed {Indexed} blob files in {Elapsed:c}. Resolving {Count} candidates…",
+            blobIndex.Count, DateTimeOffset.UtcNow - indexStart, candidates.Count);
 
         var migratedNzb = 0;
         var migratedRar = 0;
@@ -949,18 +966,21 @@ class Program
                     },
                 };
 
-                // Blob filename = DavItem.Id (matches GetLegacyBlobPath; verified by the existing
-                // RecoverQueueNzbContentsFromBlobStoreAsync which uses the same scheme).
-                var blobPath = GetLegacyBlobPath(davItemId);
+                // Resolve blob via the pre-built index (NOT by computing path from DavItem.Id).
+                if (!blobIndex.TryGetValue(davItemId, out var blobPath))
+                {
+                    blobPath = null;
+                }
 
                 try
                 {
-                    var inserted = kind switch
+                    var inserted = (kind, blobPath) switch
                     {
-                        MigrationKind.Nzb => await TryMigrateNzbAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
-                        MigrationKind.Rar => await TryMigrateRarAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
-                        MigrationKind.Multipart => await TryMigrateMultipartAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
-                        _ => -1,
+                        (MigrationKind.Unknown, _) => -1,
+                        (_, null) => 0,
+                        (MigrationKind.Nzb, _) => await TryMigrateNzbAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
+                        (MigrationKind.Rar, _) => await TryMigrateRarAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
+                        (MigrationKind.Multipart, _) => await TryMigrateMultipartAsync(databaseContext, davItemId, blobPath).ConfigureAwait(false),
                     };
 
                     switch (kind)
@@ -970,8 +990,11 @@ class Program
                         case MigrationKind.Multipart when inserted == 1: migratedMultipart++; break;
                         case MigrationKind.Nzb or MigrationKind.Rar or MigrationKind.Multipart when inserted == 0:
                             await MarkOrphanAsync(databaseContext, davItemId,
-                                $"Upstream blob file missing or unreadable at {blobPath}. " +
-                                "Re-download via Sonarr/Radarr to recover.")
+                                blobPath is null
+                                    ? "Upstream blob file is missing from disk (no blob found whose " +
+                                      "embedded Id matches this DavItem). Re-download via Sonarr/Radarr to recover."
+                                    : $"Upstream blob file at {blobPath} could not be deserialized as " +
+                                      $"the expected type ({kind}). Re-download via Sonarr/Radarr to recover.")
                                 .ConfigureAwait(false);
                             orphaned++;
                             break;
@@ -989,7 +1012,7 @@ class Program
                 catch (Exception ex)
                 {
                     Log.Error(ex, "[BlobstoreMigration] Unhandled error migrating item {DavItemId} " +
-                        "(blob={BlobPath}, kind={Kind})", davItemId, blobPath, kind);
+                        "(blob={BlobPath}, kind={Kind})", davItemId, blobPath ?? "<not-indexed>", kind);
                     failed++;
                 }
 
@@ -1010,6 +1033,48 @@ class Program
             "Multipart={Multipart}. Orphaned (no recoverable blob)={Orphaned}, " +
             "UnknownKind={UnknownKind}, Failed={Failed}.",
             elapsed, migratedNzb, migratedRar, migratedMultipart, orphaned, unknownKind, failed);
+    }
+
+    /// <summary>
+    /// Walks the blobs directory and builds a <c>DavItem.Id → blob path</c> index by extracting
+    /// the embedded Id from each blob's MemoryPack payload. Skips files whose payload doesn't
+    /// look like a v1 metadata blob (e.g. raw NZB XML, HTML error pages, queue contents).
+    /// Runs in parallel for throughput.
+    /// </summary>
+    private static async Task<Dictionary<Guid, string>> BuildBlobIdIndexAsync(string blobsRoot)
+    {
+        var index = new System.Collections.Concurrent.ConcurrentDictionary<Guid, string>();
+        var allFiles = Directory.EnumerateFiles(blobsRoot, "*", SearchOption.AllDirectories).ToArray();
+
+        // Cap parallelism to keep IO + decompression CPU usage reasonable on small hosts.
+        var parallelism = Math.Max(2, Math.Min(8, Environment.ProcessorCount));
+        var sem = new SemaphoreSlim(parallelism, parallelism);
+        var tasks = new List<Task>(allFiles.Length);
+
+        foreach (var file in allFiles)
+        {
+            await sem.WaitAsync().ConfigureAwait(false);
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    var id = await BlobStoreReader.TryReadEmbeddedIdAsync(file).ConfigureAwait(false);
+                    if (id.HasValue && id.Value != Guid.Empty)
+                    {
+                        // Last-write-wins on duplicate Ids; in practice each DavItem.Id maps to a
+                        // unique blob, so this is just defensive.
+                        index[id.Value] = file;
+                    }
+                }
+                finally
+                {
+                    sem.Release();
+                }
+            }));
+        }
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+        return new Dictionary<Guid, string>(index);
     }
 
     private enum MigrationKind { Unknown, Nzb, Rar, Multipart }
@@ -1170,6 +1235,82 @@ class Program
             WHERE Id = {1}
             """,
             reason, davItemId).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reports DavItems that remain unrecoverable after the v1 blobstore migration.
+    /// These are items whose blob file is missing from disk (no blob with a matching embedded
+    /// DavItem.Id was found) — they cannot be streamed and must be re-imported via Sonarr/Radarr.
+    ///
+    /// Logged at startup so the user knows exactly how many items + a sample of paths are
+    /// affected. Idempotent: read-only, runs every startup.
+    /// </summary>
+    private static async Task ReportOrphanedDavItemsAsync(DavDatabaseContext databaseContext)
+    {
+        if (!await TableExistsAsync(databaseContext, "DavItems").ConfigureAwait(false)) return;
+        if (!await ColumnExistsAsync(databaseContext, "DavItems", "IsCorrupted").ConfigureAwait(false)) return;
+
+        var connection = databaseContext.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        try
+        {
+            if (shouldClose) await connection.OpenAsync().ConfigureAwait(false);
+
+            await using var countCmd = connection.CreateCommand();
+            countCmd.CommandText =
+                """
+                SELECT COUNT(*) FROM DavItems
+                WHERE IsCorrupted = 1
+                  AND CorruptionReason LIKE 'Upstream blob file %'
+                """;
+            var totalObj = await countCmd.ExecuteScalarAsync().ConfigureAwait(false);
+            var total = totalObj is null or DBNull ? 0L : Convert.ToInt64(totalObj);
+            if (total == 0) return;
+
+            var samples = new List<string>();
+            await using var sampleCmd = connection.CreateCommand();
+            sampleCmd.CommandText =
+                """
+                SELECT COALESCE(Path, Name) FROM DavItems
+                WHERE IsCorrupted = 1
+                  AND CorruptionReason LIKE 'Upstream blob file %'
+                ORDER BY CreatedAt DESC
+                LIMIT 10
+                """;
+            await using (var reader = await sampleCmd.ExecuteReaderAsync().ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    var path = reader.IsDBNull(0) ? "(unnamed)" : reader.GetString(0);
+                    samples.Add(path);
+                }
+            }
+
+            Log.Warning("═══════════════════════════════════════════════════════════════");
+            Log.Warning(
+                "[OrphanReport] {Total} DavItem(s) are unrecoverable: their upstream v1 blob file " +
+                "is missing from /config/blobs and cannot be streamed.",
+                total);
+            Log.Warning(
+                "[OrphanReport] Recovery: re-import these via Sonarr/Radarr to redownload from " +
+                "Usenet. The orphan flag is harmless — items remain hidden until you choose to " +
+                "delete the row.");
+            Log.Warning("[OrphanReport] Sample of up to 10 most-recent affected paths:");
+            foreach (var p in samples)
+            {
+                Log.Warning("[OrphanReport]   {Path}", p);
+            }
+            Log.Warning("═══════════════════════════════════════════════════════════════");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[OrphanReport] Failed to enumerate orphaned DavItems (non-fatal).");
+        }
+        finally
+        {
+            if (shouldClose) await connection.CloseAsync().ConfigureAwait(false);
+        }
     }
 
     private static async Task NormalizeLegacyDavItemTypesAsync(DavDatabaseContext databaseContext)

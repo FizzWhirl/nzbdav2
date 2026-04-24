@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOBSTORE-MIGRATION");
-            Log.Warning("  FEATURE: Auto-migrate v1 (upstream blobstore-era) DavItems into v2 metadata tables on startup");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOBSTORE-DIAG");
+            Log.Warning("  FEATURE: V1 blobstore migration with verbose first-10 failure diagnostics + auto-reset of broken-migration corruption flags");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -877,6 +877,27 @@ class Program
 
         var blobsRoot = Path.Combine(DavDatabaseContext.ConfigPath, "blobs");
         if (!Directory.Exists(blobsRoot)) return;
+
+        // One-time recovery: a previous build of this fork had a broken BlobStoreReader that
+        // could not deserialize ANY zstd blob and therefore mass-flagged items IsCorrupted=1
+        // with the reason "Upstream blob file missing or unreadable…". If those items' blob
+        // files actually still exist on disk, clear the flag so the (now-fixed) reader gets a
+        // chance to retry them. We only touch our own marker (by exact CorruptionReason prefix)
+        // to avoid clobbering corruption flags set by anything else.
+        var resetCount = await databaseContext.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE DavItems
+            SET IsCorrupted = 0,
+                CorruptionReason = NULL
+            WHERE IsCorrupted = 1
+              AND CorruptionReason LIKE 'Upstream blob file missing or unreadable%'
+            """).ConfigureAwait(false);
+        if (resetCount > 0)
+        {
+            Log.Warning(
+                "[BlobstoreMigration] Reset IsCorrupted=0 on {Count} DavItems previously marked " +
+                "by a broken migration so the fixed reader can retry them.", resetCount);
+        }
 
         var hasSubType = await ColumnExistsAsync(databaseContext, "DavItems", "SubType").ConfigureAwait(false);
 

@@ -61,8 +61,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOB-INDEX");
-            Log.Warning("  FEATURE: V1 blobstore migration uses BLOB-DRIVEN index (DavItem.Id extracted from each blob's MemoryPack payload) instead of broken id→path scheme. Recovers items where the dropped FileBlobId column made the upstream path scheme unusable.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-V1-BLOB-INDEX-DIAG2");
+            Log.Warning("  FEATURE: V1 blobstore migration with per-blob embedded-Id diagnostic + safe abort if zero indexed Ids match DavItems (prevents mass re-orphaning while we figure out the real mapping).");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -898,7 +898,11 @@ class Program
             SET IsCorrupted = 0,
                 CorruptionReason = NULL
             WHERE IsCorrupted = 1
-              AND CorruptionReason LIKE 'Upstream blob file missing or unreadable%'
+              AND (
+                    CorruptionReason LIKE 'Upstream blob file missing or unreadable%'
+                 OR CorruptionReason LIKE 'Upstream blob file is missing from disk%'
+                 OR CorruptionReason LIKE 'Upstream blob file at %could not be deserialized%'
+              )
             """).ConfigureAwait(false);
         if (resetCount > 0)
         {
@@ -930,6 +934,20 @@ class Program
         Log.Warning(
             "[BlobstoreMigration] Indexed {Indexed} blob files in {Elapsed:c}. Resolving {Count} candidates…",
             blobIndex.Count, DateTimeOffset.UtcNow - indexStart, candidates.Count);
+
+        // Sanity check: dump 5 sample indexed Ids + 5 sample candidate Ids + count overlap with
+        // DavItems. If overlap is 0, the embedded-Id assumption is wrong (e.g. byte order, wrong
+        // MemoryPack offset, or the embedded field is something other than DavItem.Id).
+        var overlap = await DiagnoseBlobIndexAsync(databaseContext, blobIndex, candidates).ConfigureAwait(false);
+        if (overlap == 0)
+        {
+            Log.Warning(
+                "[BlobstoreMigration] ABORTING: zero indexed Ids match any DavItem. The embedded-Id " +
+                "assumption is wrong on this database. Skipping migration to avoid mass-orphaning " +
+                "{Count} items. See [BlobIndexDiag] output above for sample Ids — please report this.",
+                candidates.Count);
+            return;
+        }
 
         var migratedNzb = 0;
         var migratedRar = 0;
@@ -1075,6 +1093,117 @@ class Program
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
         return new Dictionary<Guid, string>(index);
+    }
+
+    /// <summary>
+    /// Diagnostic: dumps 5 sample indexed Guids + 5 sample candidate Guids + counts how many of
+    /// the indexed Guids actually exist in the DavItems table (by Id). If overlap is 0, our
+    /// embedded-Id assumption is wrong and we need to pivot strategy. Logged at Warning so it
+    /// shows up clearly in container logs.
+    /// </summary>
+    private static async Task<long> DiagnoseBlobIndexAsync(
+        DavDatabaseContext databaseContext,
+        Dictionary<Guid, string> blobIndex,
+        List<BlobstoreCandidate> candidates)
+    {
+        long matchCount = 0;
+        try
+        {
+            var sampleIndexed = blobIndex.Take(5).ToList();
+            var sampleCandidates = candidates.Take(5).ToList();
+
+            Log.Warning("[BlobIndexDiag] Sample of 5 indexed (embeddedId → blobPath):");
+            foreach (var (id, path) in sampleIndexed)
+            {
+                Log.Warning("[BlobIndexDiag]   {Id} → {Path}", id, path);
+            }
+
+            Log.Warning("[BlobIndexDiag] Sample of 5 candidate DavItem.Ids needing recovery:");
+            foreach (var c in sampleCandidates)
+            {
+                Log.Warning("[BlobIndexDiag]   {Id} (Type={Type}, SubType={Sub})",
+                    c.DavItemId, c.CurrentType, c.SubType?.ToString() ?? "null");
+            }
+
+            // Count overlap: of the 5 indexed sample Ids, how many exist in DavItems?
+            var connection = databaseContext.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+            if (shouldClose) await connection.OpenAsync().ConfigureAwait(false);
+
+            try
+            {
+                foreach (var (id, _) in sampleIndexed)
+                {
+                    await using var cmd = connection.CreateCommand();
+                    cmd.CommandText = "SELECT Id, Name, Type FROM DavItems WHERE lower(Id) = lower(@id) LIMIT 1";
+                    var p = cmd.CreateParameter();
+                    p.ParameterName = "@id";
+                    p.Value = id.ToString();
+                    cmd.Parameters.Add(p);
+                    await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+                    if (await reader.ReadAsync().ConfigureAwait(false))
+                    {
+                        Log.Warning("[BlobIndexDiag] HIT  {Id} → DavItem name={Name} type={Type}",
+                            id, reader.GetString(1), reader.GetValue(2));
+                    }
+                    else
+                    {
+                        Log.Warning("[BlobIndexDiag] MISS {Id} → not found in DavItems.Id", id);
+                    }
+                }
+
+                // Bulk overlap count: count how many of ALL indexed Ids exist in DavItems.
+                // Use a temp table for efficiency on 25k+ items.
+                await using (var ddl = connection.CreateCommand())
+                {
+                    ddl.CommandText = "CREATE TEMP TABLE IF NOT EXISTS _diag_indexed_ids(Id TEXT PRIMARY KEY)";
+                    await ddl.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    ddl.CommandText = "DELETE FROM _diag_indexed_ids";
+                    await ddl.ExecuteNonQueryAsync().ConfigureAwait(false);
+                }
+                await using (var tx = await connection.BeginTransactionAsync().ConfigureAwait(false))
+                {
+                    await using (var ins = connection.CreateCommand())
+                    {
+                        ins.Transaction = tx;
+                        ins.CommandText = "INSERT OR IGNORE INTO _diag_indexed_ids(Id) VALUES (@id)";
+                        var p = ins.CreateParameter();
+                        p.ParameterName = "@id";
+                        ins.Parameters.Add(p);
+                        foreach (var key in blobIndex.Keys)
+                        {
+                            p.Value = key.ToString();
+                            await ins.ExecuteNonQueryAsync().ConfigureAwait(false);
+                        }
+                    }
+                    await tx.CommitAsync().ConfigureAwait(false);
+                }
+                await using (var match = connection.CreateCommand())
+                {
+                    match.CommandText = "SELECT COUNT(*) FROM _diag_indexed_ids x WHERE EXISTS (SELECT 1 FROM DavItems d WHERE lower(d.Id)=lower(x.Id))";
+                    var n = await match.ExecuteScalarAsync().ConfigureAwait(false);
+                    matchCount = n is null or DBNull ? 0L : Convert.ToInt64(n);
+                    Log.Warning("[BlobIndexDiag] Of {IndexedTotal} indexed Ids, {Matched} match DavItems.Id",
+                        blobIndex.Count, matchCount);
+                }
+                await using (var matchCand = connection.CreateCommand())
+                {
+                    matchCand.CommandText = "SELECT COUNT(*) FROM _diag_indexed_ids x WHERE EXISTS (SELECT 1 FROM DavItems d WHERE lower(d.Id)=lower(x.Id) AND (d.IsCorrupted = 0 OR d.IsCorrupted IS NULL))";
+                    var n = await matchCand.ExecuteScalarAsync().ConfigureAwait(false);
+                    Log.Warning("[BlobIndexDiag] Of {IndexedTotal} indexed Ids, {Matched} match a non-corrupted DavItem",
+                        blobIndex.Count, n);
+                }
+            }
+            finally
+            {
+                if (shouldClose) await connection.CloseAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[BlobIndexDiag] Diagnostic failed (non-fatal).");
+        }
+        return matchCount;
     }
 
     private enum MigrationKind { Unknown, Nzb, Rar, Multipart }

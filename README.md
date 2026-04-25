@@ -117,6 +117,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-25)
+*   **Fix**: `/metrics` endpoint was returning 401 Unauthorized through the frontend proxy because `UseWebdavBasicAuthentication` + `UseNWebDav` middleware ran before the endpoint dispatcher and challenged the unauthenticated request. Switched from endpoint-based `app.MapMetrics("/metrics")` to middleware-based `app.UseMetricServer("/metrics")` placed *before* the auth middleware so the request short-circuits. The Live Metrics tab on the Stats page can now actually load data.
 *   **UI**: Reorganized Settings → WebDAV tab into four labelled sections (`Authentication` / `Streaming Connection Pool` / `Streaming Behavior` / `WebDAV Behavior`) and removed the duplicate `Stream Buffer Size` field that previously appeared on both the Usenet and WebDAV tabs.
 *   **UI**: Surfaced six previously-hidden streaming knobs on the WebDAV tab with React Bootstrap forms and per-field descriptions: `Connections Per Stream`, `Max Concurrent Buffered Streams`, `Streaming Reserve`, `Streaming Priority Odds`, `Use Buffered Streaming Pump`, `Shared Stream Buffer Size (MB)`, `Shared Stream Grace Period (seconds)`.
 *   **UI**: Refactored the Usenet tab's *Global Settings* form (stats, analysis, provider affinity, hide samples, operation timeout) from custom CSS-module form fields to React Bootstrap (`Form.Group` / `Form.Control` / `Form.Check` / `Form.Text`) to match the Repairs and WebDAV tabs.

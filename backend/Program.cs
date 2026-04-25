@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-25-SETTINGS-REORG");
-            Log.Warning("  FEATURE: Settings UI reorganization. Removed duplicate stream-buffer-size field. Grouped WebDAV settings into Authentication / Streaming Connection Pool / Streaming Behavior / WebDAV Behavior sections. Added 6 previously-hidden streaming knobs (connections-per-stream, max-concurrent-buffered-streams, streaming-reserve, streaming-priority, use-buffered-streaming, shared-stream-buffer-size, shared-stream-grace-period) with Bootstrap forms, field descriptions, and cross-field budget validation (total >= per-stream * max-streams + reserve). Refactored Usenet Global Settings to React Bootstrap.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-25-METRICS-AUTH-FIX");
+            Log.Warning("  FIX: /metrics endpoint was returning 401 because UseWebdavBasicAuthentication+UseNWebDav middleware ran before the endpoint dispatcher and challenged the request. Switched from endpoint-based app.MapMetrics() to middleware-based app.UseMetricServer() placed before auth so it short-circuits. Also: settings UI reorganization (grouped sections, 6 new streaming knobs, cross-field validation).");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -313,10 +313,14 @@ class Program
 
         // run
         app.UseMiddleware<ExceptionMiddleware>();
+        // Expose Prometheus /metrics as middleware BEFORE auth so it short-circuits before
+        // UseWebdavBasicAuthentication/UseNWebDav can challenge unauthenticated callers.
+        // Without this, NWebDav's auth middleware returns 401 for /metrics even though the
+        // endpoint itself has no [Authorize] requirement.
+        app.UseMetricServer("/metrics");
         // ReservedConnectionsMiddleware removed - using GlobalOperationLimiter instead
         app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
         app.MapHealthChecks("/health");
-        app.MapMetrics("/metrics");
         app.Map("/ws", websocketManager.HandleRoute);
         app.MapControllers();
         app.UseWebdavBasicAuthentication();

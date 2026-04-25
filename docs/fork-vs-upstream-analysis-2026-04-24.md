@@ -199,7 +199,7 @@ These were flagged in `docs/superpowers/plans/origin-main-delta-analysis-2026-04
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Debug marker `"!!! DEBUG: QueueItemProcessor STARTING ..."` | Still present unless removed in later commit (verify) |
+| 1 | Debug marker `"!!! DEBUG: QueueItemProcessor STARTING ..."` | **RESOLVED** — verified absent from source 2026-04-24; line 43 is a clean `Log.Information` |
 | 2 | `config/db.sqlite` in VCS history | Still present — local dev DB sneaks in via `.gitignore` policy |
 | 3 | Unbounded ffmpeg fan-out for previews | **MITIGATED** — `PreviewProcessLimiter` added |
 | 4 | Auth bypass via loopback + `X-Analysis-Mode` | Acceptable for internal tooling, low risk |

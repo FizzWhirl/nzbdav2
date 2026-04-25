@@ -23,6 +23,7 @@ using NzbWebDAV.WebDav;
 using NzbWebDAV.Streams;
 using NzbWebDAV.WebDav.Base;
 using NzbWebDAV.Websocket;
+using Prometheus;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
@@ -61,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-LOG-LEVELS");
-            Log.Warning("  FEATURE: Quieter logs for benign cancellation. ConnectionPool now logs caller-token cancellations at Debug (HTTP client disconnect, per-file probe deadline, etc.) and CancellationTokenContext nested-scope removals are Debug instead of Warning. True connection failures still log at Warning/Error and trip the circuit breaker as before.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-PROMETHEUS");
+            Log.Warning("  FEATURE: Prometheus metrics endpoint at /metrics. Exposes shared-stream hits/misses/active entries, per-pool live/idle/active connections + circuit breaker state, and a cold/warm/noop seek-latency histogram. Pool gauges refresh every 5s via PoolMetricsCollector hosted service.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -254,6 +255,7 @@ class Program
             .AddSingleton<StreamingConnectionLimiter>()
             .AddHostedService<DatabaseMaintenanceService>()
             .AddHostedService<HistoryCleanupService>()
+            .AddHostedService<NzbWebDAV.Metrics.PoolMetricsCollector>()
             .AddScoped<DavDatabaseContext>()
             .AddScoped<DavDatabaseClient>()
             .AddScoped<DatabaseStore>()
@@ -314,6 +316,7 @@ class Program
         // ReservedConnectionsMiddleware removed - using GlobalOperationLimiter instead
         app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
         app.MapHealthChecks("/health");
+        app.MapMetrics("/metrics");
         app.Map("/ws", websocketManager.HandleRoute);
         app.MapControllers();
         app.UseWebdavBasicAuthentication();

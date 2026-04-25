@@ -116,6 +116,13 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.Z (2026-04-25)
+*   **UI**: Reorganized Settings → WebDAV tab into four labelled sections (`Authentication` / `Streaming Connection Pool` / `Streaming Behavior` / `WebDAV Behavior`) and removed the duplicate `Stream Buffer Size` field that previously appeared on both the Usenet and WebDAV tabs.
+*   **UI**: Surfaced six previously-hidden streaming knobs on the WebDAV tab with React Bootstrap forms and per-field descriptions: `Connections Per Stream`, `Max Concurrent Buffered Streams`, `Streaming Reserve`, `Streaming Priority Odds`, `Use Buffered Streaming Pump`, `Shared Stream Buffer Size (MB)`, `Shared Stream Grace Period (seconds)`.
+*   **UI**: Refactored the Usenet tab's *Global Settings* form (stats, analysis, provider affinity, hide samples, operation timeout) from custom CSS-module form fields to React Bootstrap (`Form.Group` / `Form.Control` / `Form.Check` / `Form.Text`) to match the Repairs and WebDAV tabs.
+*   **UI**: Extended the WebDAV `ConnectionPoolTip` warning to also flag the streaming budget constraint `total-streaming-connections >= connections-per-stream * max-concurrent-buffered-streams + streaming-reserve`. The Save button is disabled with `Invalid WebDAV settings` until the user resolves the conflict.
+*   **UI**: Added an `Invalid Usenet settings` save-button state for cases where `analysis.max-concurrent` or `usenet.operation-timeout` are non-positive.
+
 ## v0.6.Z (2026-04-24)
 *   **UI**: New "Live Metrics" tab on the System Monitor (`/stats`) page. Polls `/metrics` every 3s and renders shared-stream hit ratio (cumulative + rolling chart, last 3 minutes), miss-reason breakdown, per-pool live/idle/active/max + free-slot counts with circuit-breaker badges, and seek-latency p50/p95/p99 per kind (`cold` / `warm` / `noop` / `fresh`). Frontend Express layer also proxies `/metrics` through to the backend so authenticated UI users can fetch it.
 *   **Observability**: Added Prometheus `/metrics` endpoint (via `prometheus-net.AspNetCore`). Exposes shared-stream `nzbdav_shared_stream_hits_total` / `_misses_total{reason}` / `_active_entries`, per-pool `nzbdav_pool_{live,idle,active,max,remaining_semaphore_slots}_connections{pool}` plus `nzbdav_pool_consecutive_connection_failures{pool}` and `nzbdav_pool_circuit_breaker_tripped{pool}`, and an `nzbdav_seek_latency_seconds{kind=cold|warm|noop|fresh}` histogram. Pool gauges refresh every 5s via `PoolMetricsCollector` hosted service. Existing log-level conventions and request flow are unchanged.

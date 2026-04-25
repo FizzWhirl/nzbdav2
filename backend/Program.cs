@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-24-PROMETHEUS");
-            Log.Warning("  FEATURE: Prometheus metrics endpoint at /metrics. Exposes shared-stream hits/misses/active entries, per-pool live/idle/active connections + circuit breaker state, and a cold/warm/noop seek-latency histogram. Pool gauges refresh every 5s via PoolMetricsCollector hosted service.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-25-SETTINGS-REORG");
+            Log.Warning("  FEATURE: Settings UI reorganization. Removed duplicate stream-buffer-size field. Grouped WebDAV settings into Authentication / Streaming Connection Pool / Streaming Behavior / WebDAV Behavior sections. Added 6 previously-hidden streaming knobs (connections-per-stream, max-concurrent-buffered-streams, streaming-reserve, streaming-priority, use-buffered-streaming, shared-stream-buffer-size, shared-stream-grace-period) with Bootstrap forms, field descriptions, and cross-field budget validation (total >= per-stream * max-streams + reserve). Refactored Usenet Global Settings to React Bootstrap.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

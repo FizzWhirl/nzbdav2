@@ -1,6 +1,6 @@
 import styles from "./usenet.module.css"
 import { type Dispatch, type SetStateAction, useState, useCallback, useEffect, useMemo } from "react";
-import { Button } from "react-bootstrap";
+import { Button, Form } from "react-bootstrap";
 import { receiveMessage } from "~/utils/websocket-util";
 import { useToast } from "~/context/ToastContext";
 import { FileDetailsModal } from "~/routes/health/components/file-details-modal/file-details-modal";
@@ -129,7 +129,6 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     const [maxConcurrentAnalyses, setMaxConcurrentAnalyses] = useState(config["analysis.max-concurrent"] || "3");
     const [providerAffinityEnabled, setProviderAffinityEnabled] = useState(config["provider-affinity.enable"] !== "false");
     const [hideSamples, setHideSamples] = useState(config["usenet.hide-samples"] === "true");
-    const [streamBufferSize, setStreamBufferSize] = useState(config["usenet.stream-buffer-size"] || "100");
     const [operationTimeout, setOperationTimeout] = useState(config["usenet.operation-timeout"] || "90");
     const [isRunningBenchmark, setIsRunningBenchmark] = useState(false);
     const [isSelectingFile, setIsSelectingFile] = useState(false);
@@ -177,13 +176,6 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     const handleHideSamplesChange = useCallback((checked: boolean) => {
         setHideSamples(checked);
         setNewConfig(prev => ({ ...prev, "usenet.hide-samples": checked.toString() }));
-    }, [setNewConfig]);
-
-    const handleStreamBufferSizeChange = useCallback((value: string) => {
-        setStreamBufferSize(value);
-        if (isPositiveInteger(value)) {
-            setNewConfig(prev => ({ ...prev, "usenet.stream-buffer-size": value }));
-        }
     }, [setNewConfig]);
 
     const handleOperationTimeoutChange = useCallback((value: string) => {
@@ -467,73 +459,61 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                 <div className={styles.sectionHeader}>
                     <div>Global Settings</div>
                 </div>
-                <div className={styles["form-group"]}>
-                    <div className={styles["form-checkbox-wrapper"]}>
-                        <input
-                            type="checkbox"
-                            id="stats-enable"
-                            className={styles["form-checkbox"]}
-                            checked={statsEnabled}
-                            onChange={(e) => handleStatsEnableChange(e.target.checked)}
-                        />
-                        <label htmlFor="stats-enable" className={styles["form-checkbox-label"]}>
-                            Enable Bandwidth Stats
-                        </label>
-                    </div>
-                </div>
-                <div className={styles["form-group"]}>
-                    <div className={styles["form-checkbox-wrapper"]}>
-                        <input
-                            type="checkbox"
-                            id="analysis-enable"
-                            className={styles["form-checkbox"]}
-                            checked={analysisEnabled}
-                            onChange={(e) => handleAnalysisEnableChange(e.target.checked)}
-                        />
-                        <label htmlFor="analysis-enable" className={styles["form-checkbox-label"]}>
-                            Enable Automatic File Analysis
-                        </label>
-                    </div>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--bs-secondary-color)', marginTop: '4px' }}>
-                        When enabled, NZB files are analyzed in the background to improve seeking performance.
-                        This may consume bandwidth.
-                    </div>
-                </div>
-                <div className={styles["form-group"]}>
-                    <label htmlFor="max-concurrent-analyses" className={styles["form-label"]}>
-                        Max Concurrent Analyses
-                    </label>
-                    <input
+                <Form.Group className="mb-3">
+                    <Form.Check
+                        type="checkbox"
+                        id="stats-enable"
+                        label="Enable Bandwidth Stats"
+                        checked={statsEnabled}
+                        onChange={(e) => handleStatsEnableChange(e.target.checked)}
+                    />
+                    <Form.Text muted>
+                        Track per-provider bandwidth and request counts. Powers the Stats page charts.
+                    </Form.Text>
+                </Form.Group>
+
+                <Form.Group className="mb-3">
+                    <Form.Check
+                        type="checkbox"
+                        id="analysis-enable"
+                        label="Enable Automatic File Analysis"
+                        checked={analysisEnabled}
+                        onChange={(e) => handleAnalysisEnableChange(e.target.checked)}
+                    />
+                    <Form.Text muted>
+                        When enabled, NZB files are analyzed in the background to improve seeking performance. This may consume bandwidth.
+                    </Form.Text>
+                </Form.Group>
+
+                <Form.Group className="mb-3">
+                    <Form.Label htmlFor="max-concurrent-analyses">Max Concurrent Analyses</Form.Label>
+                    <Form.Control
                         type="text"
                         id="max-concurrent-analyses"
-                        className={`${styles["form-input"]} ${!isPositiveInteger(maxConcurrentAnalyses) ? styles.error : ""}`}
                         placeholder="3"
                         value={maxConcurrentAnalyses}
+                        isInvalid={!isPositiveInteger(maxConcurrentAnalyses)}
+                        disabled={!analysisEnabled}
                         onChange={(e) => handleMaxConcurrentAnalysesChange(e.target.value)}
                         style={{ maxWidth: '200px' }}
-                        disabled={!analysisEnabled}
                     />
-                    <div>
+                    <Form.Text muted>
                         Maximum number of files to analyze simultaneously. Each analysis uses 10 connections. (Default: 3)
-                    </div>
-                </div>
-                <div className={styles["form-group"]}>
-                    <div className={styles["form-checkbox-wrapper"]}>
-                        <input
-                            type="checkbox"
-                            id="provider-affinity-enable"
-                            className={styles["form-checkbox"]}
-                            checked={providerAffinityEnabled}
-                            onChange={(e) => handleProviderAffinityEnableChange(e.target.checked)}
-                        />
-                        <label htmlFor="provider-affinity-enable" className={styles["form-checkbox-label"]}>
-                            Enable Provider Affinity (Smart Provider Selection)
-                        </label>
-                    </div>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--bs-secondary-color)', marginTop: '4px' }}>
+                    </Form.Text>
+                </Form.Group>
+
+                <Form.Group className="mb-3">
+                    <Form.Check
+                        type="checkbox"
+                        id="provider-affinity-enable"
+                        label="Enable Provider Affinity (Smart Provider Selection)"
+                        checked={providerAffinityEnabled}
+                        onChange={(e) => handleProviderAffinityEnableChange(e.target.checked)}
+                    />
+                    <Form.Text muted>
                         When enabled, the system learns which provider is fastest and most reliable for each NZB.
                         Future downloads from the same NZB will prefer the best-performing provider. Tracks success rates and download speeds.
-                    </div>
+                    </Form.Text>
                     {providerAffinityEnabled && (
                         <div style={{ marginTop: '12px' }}>
                             <Button
@@ -555,60 +535,41 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                             >
                                 Reset All Provider Statistics
                             </Button>
-                            <div style={{ fontSize: '0.8rem', color: 'var(--bs-secondary-color)', marginTop: '4px' }}>
+                            <Form.Text as="div" muted style={{ marginTop: '4px' }}>
                                 Clears all learned provider performance data. The system will relearn preferences as files are accessed.
-                            </div>
+                            </Form.Text>
                         </div>
                     )}
-                </div>
-                <div className={styles["form-group"]}>
-                    <div className={styles["form-checkbox-wrapper"]}>
-                        <input
-                            type="checkbox"
-                            id="hide-samples"
-                            className={styles["form-checkbox"]}
-                            checked={hideSamples}
-                            onChange={(e) => handleHideSamplesChange(e.target.checked)}
-                        />
-                        <label htmlFor="hide-samples" className={styles["form-checkbox-label"]}>
-                            Hide Sample Files (case-insensitive ".sample." in name)
-                        </label>
-                    </div>
-                </div>
-                <div className={styles["form-group"]}>
-                    <label htmlFor="stream-buffer-size" className={styles["form-label"]}>
-                        Stream Buffer Size (segments)
-                    </label>
-                    <input
-                        type="text"
-                        id="stream-buffer-size"
-                        className={`${styles["form-input"]} ${!isPositiveInteger(streamBufferSize) ? styles.error : ""}`}
-                        placeholder="100"
-                        value={streamBufferSize}
-                        onChange={(e) => handleStreamBufferSizeChange(e.target.value)}
-                        style={{ maxWidth: '200px' }}
+                </Form.Group>
+
+                <Form.Group className="mb-3">
+                    <Form.Check
+                        type="checkbox"
+                        id="hide-samples"
+                        label='Hide Sample Files (case-insensitive ".sample." in name)'
+                        checked={hideSamples}
+                        onChange={(e) => handleHideSamplesChange(e.target.checked)}
                     />
-                    <div>
-                        Higher values increase RAM usage but may improve streaming stability. (Default: 100)
-                    </div>
-                </div>
-                <div className={styles["form-group"]}>
-                    <label htmlFor="operation-timeout" className={styles["form-label"]}>
-                        Usenet Operation Timeout (seconds)
-                    </label>
-                    <input
+                    <Form.Text muted>
+                        Hides files commonly used as low-quality previews. Affects WebDAV listings only.
+                    </Form.Text>
+                </Form.Group>
+
+                <Form.Group className="mb-3">
+                    <Form.Label htmlFor="operation-timeout">Usenet Operation Timeout (seconds)</Form.Label>
+                    <Form.Control
                         type="text"
                         id="operation-timeout"
-                        className={`${styles["form-input"]} ${!isPositiveInteger(operationTimeout) ? styles.error : ""}`}
                         placeholder="90"
                         value={operationTimeout}
+                        isInvalid={!isPositiveInteger(operationTimeout)}
                         onChange={(e) => handleOperationTimeoutChange(e.target.value)}
                         style={{ maxWidth: '200px' }}
                     />
-                    <div>
+                    <Form.Text muted>
                         Maximum time to wait for a Usenet response (including connection acquisition). Increase if you see frequent timeouts. (Default: 90)
-                    </div>
-                </div>
+                    </Form.Text>
+                </Form.Group>
             </div>
 
             <div className={styles.section}>
@@ -1425,8 +1386,12 @@ export function isUsenetSettingsUpdated(config: Record<string, string>, newConfi
         || config["analysis.max-concurrent"] !== newConfig["analysis.max-concurrent"]
         || config["provider-affinity.enable"] !== newConfig["provider-affinity.enable"]
         || config["usenet.hide-samples"] !== newConfig["usenet.hide-samples"]
-        || config["usenet.stream-buffer-size"] !== newConfig["usenet.stream-buffer-size"]
         || config["usenet.operation-timeout"] !== newConfig["usenet.operation-timeout"];
+}
+
+export function isUsenetSettingsValid(newConfig: Record<string, string>) {
+    return isPositiveInteger(newConfig["analysis.max-concurrent"])
+        && isPositiveInteger(newConfig["usenet.operation-timeout"]);
 }
 
 export function isPositiveInteger(value: string) {

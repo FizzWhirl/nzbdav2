@@ -2,7 +2,7 @@ import type { Route } from "./+types/route";
 import styles from "./route.module.css"
 import { Tabs, Tab, Button, Form } from "react-bootstrap"
 import { backendClient } from "~/clients/backend-client.server";
-import { isUsenetSettingsUpdated, UsenetSettings } from "./usenet/usenet";
+import { isUsenetSettingsUpdated, isUsenetSettingsValid, UsenetSettings } from "./usenet/usenet";
 import React from "react";
 import { isSabnzbdSettingsUpdated, isSabnzbdSettingsValid, SabnzbdSettings } from "./sabnzbd/sabnzbd";
 import { isWebdavSettingsUpdated, isWebdavSettingsValid, WebdavSettings } from "./webdav/webdav";
@@ -37,6 +37,12 @@ const defaultConfig = {
     "usenet.providers": "",
     "usenet.connections-per-stream": "20",
     "usenet.total-streaming-connections": "20",
+    "usenet.max-concurrent-buffered-streams": "2",
+    "usenet.streaming-reserve": "5",
+    "usenet.streaming-priority": "80",
+    "usenet.use-buffered-streaming": "true",
+    "usenet.shared-stream-buffer-size": "32",
+    "usenet.shared-stream-grace-period": "10",
     "usenet.stream-buffer-size": "100",
     "usenet.hide-samples": "false",
     "usenet.operation-timeout": "90",
@@ -111,6 +117,7 @@ function Body(props: BodyProps) {
         : !isUpdated && !isSaved ? "There are no changes to save"
         : isSabnzbdUpdated && !isSabnzbdSettingsValid(newConfig) ? "Invalid SABnzbd settings"
         : isWebdavUpdated && !isWebdavSettingsValid(newConfig) ? "Invalid WebDAV settings"
+        : iseUsenetUpdated && !isUsenetSettingsValid(newConfig) ? "Invalid Usenet settings"
         : isArrsUpdated && !isArrsSettingsValid(newConfig) ? "Invalid Arrs settings"
         : isRepairsUpdated && !isRepairsSettingsValid(newConfig) ? "Invalid Repairs settings"
         : "Save";

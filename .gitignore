@@ -42,3 +42,9 @@ config/
 temp_config/
 backend/local_data/
 .worktrees/
+
+# Local scratch / build artifacts
+.fork-diff-stats.txt
+.fork-files-full.txt
+backend/build_output.log
+*.log

@@ -12,6 +12,7 @@ import { DeletedFilesTable } from "./components/DeletedFilesTable";
 import { MissingArticlesTable } from "./components/MissingArticlesTable";
 import { MappedFilesTable } from "./components/MappedFilesTable";
 import { LogsConsole } from "./components/LogsConsole";
+import { LiveMetrics } from "./components/LiveMetrics";
 import { isAuthenticated } from "~/auth/authentication.server";
 import { FileDetailsModal } from "~/routes/health/components/file-details-modal/file-details-modal";
 import type { FileDetails } from "~/types/backend";
@@ -406,6 +407,9 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                 </Tab>
                 <Tab eventKey="logs" title="System Logs">
                     {activeTab === 'logs' && <LogsConsole />}
+                </Tab>
+                <Tab eventKey="metrics" title="Live Metrics">
+                    {activeTab === 'metrics' && <LiveMetrics />}
                 </Tab>
             </Tabs>
             

@@ -61,9 +61,10 @@ public class BandwidthService
                     var now = DateTimeOffset.UtcNow;
 
                     var hasChanges = false;
+                    var pendingAcknowledgements = new List<(ProviderStats Stats, long Bytes)>();
                     foreach (var (index, stats) in _providerStats)
                     {
-                        var bytes = stats.GetAndResetPendingDbBytes();
+                        var bytes = stats.GetPendingDbBytesSnapshot();
                         if (bytes > 0)
                         {
                             dbContext.BandwidthSamples.Add(new BandwidthSample
@@ -72,6 +73,7 @@ public class BandwidthService
                                 Timestamp = now,
                                 Bytes = bytes
                             });
+                            pendingAcknowledgements.Add((stats, bytes));
                             hasChanges = true;
                         }
                     }
@@ -79,6 +81,10 @@ public class BandwidthService
                     if (hasChanges)
                     {
                         await dbContext.SaveChangesAsync().ConfigureAwait(false);
+                        foreach (var (stats, bytes) in pendingAcknowledgements)
+                        {
+                            stats.AcknowledgePendingDbBytes(bytes);
+                        }
                     }
                     break; // Success
                 }
@@ -190,13 +196,19 @@ public class BandwidthService
             }
         }
 
-        public long GetAndResetPendingDbBytes()
+        public long GetPendingDbBytesSnapshot()
         {
             lock (_lock)
             {
-                var bytes = _pendingDbBytes;
-                _pendingDbBytes = 0;
-                return bytes;
+                return _pendingDbBytes;
+            }
+        }
+
+        public void AcknowledgePendingDbBytes(long persistedBytes)
+        {
+            lock (_lock)
+            {
+                _pendingDbBytes = Math.Max(0, _pendingDbBytes - persistedBytes);
             }
         }
 

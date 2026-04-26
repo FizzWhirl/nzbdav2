@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-STALE-HISTORY-LINK-DIAGNOSTICS");
-            Log.Warning("  FIX: Stats API now surfaces stale history-linked DavItems that routine health checks intentionally skip.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-STATS-PERSIST-ACK");
+            Log.Warning("  FIX: Bandwidth and provider affinity counters are acknowledged only after successful database saves.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

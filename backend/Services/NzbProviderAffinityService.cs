@@ -398,12 +398,14 @@ public class NzbProviderAffinityService
 
                 var now = DateTimeOffset.UtcNow;
                 var hasChanges = false;
+                var persistedSnapshots = new List<(ProviderPerformance Performance, ProviderPerformanceSnapshot Snapshot)>();
 
                 foreach (var (jobName, jobStats) in _stats)
                 {
                     foreach (var (providerIndex, performance) in jobStats)
                     {
-                        if (!performance.IsDirty) continue;
+                        var snapshot = performance.GetPersistenceSnapshot();
+                        if (!snapshot.HasValue) continue;
 
                         var dbStats = await dbContext.NzbProviderStats
                             .FindAsync(jobName, providerIndex)
@@ -419,7 +421,8 @@ public class NzbProviderAffinityService
                             dbContext.NzbProviderStats.Add(dbStats);
                         }
 
-                        performance.SaveToDb(dbStats, now);
+                        performance.CopySnapshotToDb(dbStats, snapshot.Value, now);
+                        persistedSnapshots.Add((performance, snapshot.Value));
                         hasChanges = true;
                     }
                 }
@@ -427,6 +430,10 @@ public class NzbProviderAffinityService
                 if (hasChanges)
                 {
                     await SaveChangesWithRetryAsync(dbContext).ConfigureAwait(false);
+                    foreach (var (performance, snapshot) in persistedSnapshots)
+                    {
+                        performance.AcknowledgePersisted(snapshot);
+                    }
                 }
             }
             finally
@@ -475,6 +482,13 @@ public class NzbProviderAffinityService
                || text.Contains("SQLite Error 5", StringComparison.OrdinalIgnoreCase);
     }
 
+    private readonly record struct ProviderPerformanceSnapshot(
+        int SuccessfulSegments,
+        int FailedSegments,
+        long TotalBytes,
+        long TotalTimeMs,
+        long RecentAverageSpeedBps);
+
     private class ProviderPerformance
     {
         private readonly object _lock = new();
@@ -496,7 +510,16 @@ public class NzbProviderAffinityService
         public long TotalBytes => _totalBytes;
         public long TotalTimeMs => _totalTimeMs;
         public long RecentAverageSpeedBps => _recentAverageSpeedBps;
-        public bool IsDirty => _isDirty;
+        public bool IsDirty
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _isDirty;
+                }
+            }
+        }
 
         public double SuccessRate
         {
@@ -584,17 +607,43 @@ public class NzbProviderAffinityService
             }
         }
 
-        public void SaveToDb(NzbProviderStats dbStats, DateTimeOffset now)
+        public ProviderPerformanceSnapshot? GetPersistenceSnapshot()
         {
             lock (_lock)
             {
-                dbStats.SuccessfulSegments = _successfulSegments;
-                dbStats.FailedSegments = _failedSegments;
-                dbStats.TotalBytes = _totalBytes;
-                dbStats.TotalTimeMs = _totalTimeMs;
-                dbStats.RecentAverageSpeedBps = _recentAverageSpeedBps;
-                dbStats.LastUsed = now;
-                _isDirty = false;
+                if (!_isDirty) return null;
+
+                return new ProviderPerformanceSnapshot(
+                    _successfulSegments,
+                    _failedSegments,
+                    _totalBytes,
+                    _totalTimeMs,
+                    _recentAverageSpeedBps);
+            }
+        }
+
+        public void CopySnapshotToDb(NzbProviderStats dbStats, ProviderPerformanceSnapshot snapshot, DateTimeOffset now)
+        {
+            dbStats.SuccessfulSegments = snapshot.SuccessfulSegments;
+            dbStats.FailedSegments = snapshot.FailedSegments;
+            dbStats.TotalBytes = snapshot.TotalBytes;
+            dbStats.TotalTimeMs = snapshot.TotalTimeMs;
+            dbStats.RecentAverageSpeedBps = snapshot.RecentAverageSpeedBps;
+            dbStats.LastUsed = now;
+        }
+
+        public void AcknowledgePersisted(ProviderPerformanceSnapshot snapshot)
+        {
+            lock (_lock)
+            {
+                if (_successfulSegments == snapshot.SuccessfulSegments
+                    && _failedSegments == snapshot.FailedSegments
+                    && _totalBytes == snapshot.TotalBytes
+                    && _totalTimeMs == snapshot.TotalTimeMs
+                    && _recentAverageSpeedBps == snapshot.RecentAverageSpeedBps)
+                {
+                    _isDirty = false;
+                }
             }
         }
     }

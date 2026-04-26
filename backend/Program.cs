@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-TS7-CONFIG");
-            Log.Warning("  FIX: Frontend TypeScript config no longer uses deprecated baseUrl for path aliases.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-MIGRATION-METADATA");
+            Log.Warning("  FIX: Segment provider evidence migration now has EF metadata so it is discovered and applied.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

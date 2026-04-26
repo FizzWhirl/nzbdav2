@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-UNIFIED-ANALYSIS-THROTTLE");
-            Log.Warning("  FIX: RAR and multipart analysis requests now use queue-analysis context, low connection counts, and unbuffered streams.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-WEBSOCKET-RECONNECT-BACKOFF");
+            Log.Warning("  FIX: Frontend browser and server websocket reconnect loops now use exponential backoff with jitter.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

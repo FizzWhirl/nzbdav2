@@ -9,7 +9,7 @@ import { HistoryTable } from "./components/history-table/history-table";
 import { QueueTable } from "./components/queue-table/queue-table";
 import { ProviderStats } from "./components/provider-stats/provider-stats";
 import { useCallback, useEffect, useState } from "react";
-import { receiveMessage } from "~/utils/websocket-util";
+import { createWebsocketBackoff, getBrowserWebsocketUrl, receiveMessage } from "~/utils/websocket-util";
 import { isAuthenticated } from "~/auth/authentication.server";
 import { useToast } from "~/context/ToastContext";
 
@@ -238,13 +238,26 @@ export default function Queue(props: Route.ComponentProps) {
         if (disableLiveView) return;
         let ws: WebSocket;
         let disposed = false;
+        let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+        const backoff = createWebsocketBackoff();
+
+        function scheduleReconnect() {
+            if (disposed) return;
+            const delay = backoff.nextDelayMs();
+            reconnectTimer = setTimeout(() => connect(), delay);
+        }
+
         function connect() {
-            ws = new WebSocket(window.location.origin.replace(/^http/, 'ws'));
+            ws = new WebSocket(getBrowserWebsocketUrl());
             ws.onmessage = receiveMessage(onWebsocketMessage);
-            ws.onopen = () => { ws.send(JSON.stringify(topicSubscriptions)); }
-            ws.onclose = () => { !disposed && setTimeout(() => connect(), 1000); };
+            ws.onopen = () => { backoff.reset(); ws.send(JSON.stringify(topicSubscriptions)); }
+            ws.onclose = scheduleReconnect;
             ws.onerror = () => { ws.close() };
-            return () => { disposed = true; ws.close(); }
+            return () => {
+                disposed = true;
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                ws.close();
+            }
         }
 
         return connect();

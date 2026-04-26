@@ -27,6 +27,7 @@ public class StatsController(
     ProviderErrorService providerErrorService,
     HealthCheckService healthCheckService,
     ConfigManager configManager,
+    BackgroundTaskQueue backgroundTaskQueue,
     IServiceScopeFactory scopeFactory
 ) : ControllerBase
 {
@@ -430,20 +431,22 @@ public class StatsController(
             if (!hasFilePaths && !hasDavItemIds)
                 return BadRequest(new { error = "FilePaths or DavItemIds is required" });
 
-            // Queue all repairs in the background - fire and forget
-            _ = Task.Run(async () =>
+            // Queue all repairs in the supervised background worker so failures are logged
+            // and shutdown can drain or cancel the work deterministically.
+            var queued = backgroundTaskQueue.TryQueue($"Manual repair request for {(request.FilePaths?.Count ?? 0) + (request.DavItemIds?.Count ?? 0)} item(s)", async ct =>
             {
                 var pathsToRepair = new HashSet<string>(request.FilePaths ?? []);
 
                 // 1. Resolve IDs to Paths
+                using var scope = scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
+                var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
+
                 if (hasDavItemIds)
                 {
-                    using var scope = scopeFactory.CreateScope();
-                    var db = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
-                    
                     foreach (var id in request.DavItemIds!)
                     {
-                        var item = await db.Items.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+                        var item = await db.Items.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct).ConfigureAwait(false);
                         if (item != null)
                         {
                             pathsToRepair.Add(item.Path);
@@ -461,7 +464,7 @@ public class StatsController(
                 // 2. Trigger Repair for all Paths
                 foreach (var filePath in pathsToRepair)
                 {
-                    healthCheckService.TriggerManualRepairInBackground(filePath);
+                    await healthCheckService.TriggerManualRepairAsync(filePath, dbClient, ct).ConfigureAwait(false);
                     try
                     {
                         await providerErrorService.ClearErrorsForFile(filePath);
@@ -472,6 +475,11 @@ public class StatsController(
                     }
                 }
             });
+
+            if (!queued)
+            {
+                return StatusCode(503, new { error = "Background repair queue is full; try again shortly" });
+            }
 
             // Return immediately - don't wait for repairs to complete
             return Ok(new { message = $"Repair queued for {request.FilePaths?.Count + request.DavItemIds?.Count} item(s)" });

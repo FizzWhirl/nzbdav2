@@ -27,10 +27,12 @@ public class NzbAnalysisService(
     UsenetStreamingClient usenetClient,
     WebsocketManager websocketManager,
     ConfigManager configManager,
-    MediaAnalysisService mediaAnalysisService
+    MediaAnalysisService mediaAnalysisService,
+    BackgroundTaskQueue backgroundTaskQueue
 )
 {
     private static readonly ConcurrentDictionary<Guid, AnalysisInfo> _activeAnalyses = new();
+    private static readonly ConcurrentDictionary<Guid, byte> _queuedAnalyses = new();
     private static readonly ConcurrentDictionary<Guid, int> _ffprobeRetryAttempts = new();
     private static readonly ConcurrentDictionary<Guid, byte> _suppressedFileIds = new();
     private readonly SemaphoreSlim _concurrencyLimiter = new(configManager.GetMaxConcurrentAnalyses(), configManager.GetMaxConcurrentAnalyses());
@@ -53,19 +55,40 @@ public class NzbAnalysisService(
         if (!force && !configManager.IsAnalysisEnabled()) return;
         if (_activeAnalyses.ContainsKey(fileId)) return;
         if (_suppressedFileIds.ContainsKey(fileId)) return;
-        _ = Task.Run(async () => await PerformAnalysis(fileId, segmentIds, force).ConfigureAwait(false));
+        if (!_queuedAnalyses.TryAdd(fileId, 0)) return;
+
+        var queued = backgroundTaskQueue.TryQueue($"NZB analysis for {fileId}", async ct =>
+        {
+            try
+            {
+                await PerformAnalysis(fileId, segmentIds, force, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _queuedAnalyses.TryRemove(fileId, out _);
+            }
+        });
+
+        if (!queued)
+        {
+            _queuedAnalyses.TryRemove(fileId, out _);
+            Log.Warning("[NzbAnalysisService] Failed to queue background analysis for {Id}", fileId);
+            websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|error");
+        }
     }
 
-    private async Task PerformAnalysis(Guid fileId, string[]? segmentIds, bool force = false)
+    private async Task PerformAnalysis(Guid fileId, string[]? segmentIds, bool force, CancellationToken queueCancellationToken)
     {
         var info = new AnalysisInfo { Id = fileId, Name = "Queued" };
         if (!_activeAnalyses.TryAdd(fileId, info)) return;
-
-        // Wait for available analysis slot
-        await _concurrencyLimiter.WaitAsync().ConfigureAwait(false);
+        var acquiredAnalysisSlot = false;
 
         try
         {
+            // Wait for available analysis slot
+            await _concurrencyLimiter.WaitAsync(queueCancellationToken).ConfigureAwait(false);
+            acquiredAnalysisSlot = true;
+
             Log.Debug("[NzbAnalysisService] Starting background analysis for file {Id} (Force={Force})", fileId, force);
 
             using var scope = scopeFactory.CreateScope();
@@ -107,7 +130,7 @@ public class NzbAnalysisService(
             }
 
             // Create cancellation token with usage context so analysis operations show up in stats
-            using var cts = new CancellationTokenSource();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(queueCancellationToken);
             // Normalize AffinityKey from parent directory (matches WebDav file patterns)
             var rawAffinityKey = Path.GetFileName(Path.GetDirectoryName(davItem.Path));
             var normalizedAffinityKey = FilenameNormalizer.NormalizeName(rawAffinityKey);
@@ -157,15 +180,19 @@ public class NzbAnalysisService(
                     _ffprobeRetryAttempts[fileId] = retryCount + 1;
                     Log.Warning("[NzbAnalysisService] ffprobe timed out for {FileName}. Scheduling retry in 1 hour (attempt {Attempt}/1)", info.Name, retryCount + 1);
 
-                    // Schedule retry in 1 hour (fire-and-forget)
-                    var retryTask = Task.Run(async () =>
+                    var retryQueued = backgroundTaskQueue.TryQueueDelayed($"ffprobe retry for {fileId}", TimeSpan.FromHours(1), ct =>
                     {
-                        await Task.Delay(TimeSpan.FromHours(1)).ConfigureAwait(false);
                         Log.Information("[NzbAnalysisService] Executing scheduled ffprobe retry for {FileName} ({Id})", info.Name, fileId);
                         TriggerAnalysisInBackground(fileId, segmentIds, force: true);
+                        return Task.CompletedTask;
                     });
-                    // Suppress warning - intentional fire-and-forget
-                    GC.KeepAlive(retryTask);
+
+                    if (!retryQueued)
+                    {
+                        websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|error");
+                        await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed", "ffprobe timed out and retry could not be queued").ConfigureAwait(false);
+                        return;
+                    }
 
                     websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|90");
                     websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|pending");
@@ -192,6 +219,10 @@ public class NzbAnalysisService(
 
             await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Success", "Analysis completed successfully").ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (queueCancellationToken.IsCancellationRequested)
+        {
+            Log.Information("[NzbAnalysisService] Analysis cancelled during shutdown for file {Id}", fileId);
+        }
         catch (Exception ex)
         {
             Log.Error(ex, "[NzbAnalysisService] Failed to analyze file {Id}", fileId);
@@ -201,7 +232,10 @@ public class NzbAnalysisService(
         finally
         {
             _activeAnalyses.TryRemove(fileId, out _);
-            _concurrencyLimiter.Release();
+            if (acquiredAnalysisSlot)
+            {
+                _concurrencyLimiter.Release();
+            }
         }
     }
 

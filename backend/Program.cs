@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-STATS-PERSIST-ACK");
-            Log.Warning("  FIX: Bandwidth and provider affinity counters are acknowledged only after successful database saves.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-SUPERVISED-BACKGROUND-QUEUE");
+            Log.Warning("  FIX: Analysis, repair, startup, and missing-article follow-up work now runs through a bounded supervised queue.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -251,8 +251,10 @@ class Program
             .AddSingleton<HealthCheckService>()
             .AddSingleton<NzbAnalysisService>()
             .AddSingleton<MediaAnalysisService>()
+            .AddSingleton<BackgroundTaskQueue>()
             .AddSingleton<RcloneRcService>()
             .AddSingleton<StreamingConnectionLimiter>()
+            .AddHostedService<BackgroundTaskQueueService>()
             .AddHostedService<DatabaseMaintenanceService>()
             .AddHostedService<HistoryCleanupService>()
             .AddHostedService<NzbWebDAV.Metrics.PoolMetricsCollector>()
@@ -282,34 +284,35 @@ class Program
         app.Services.GetRequiredService<HealthCheckService>();
         app.Services.GetRequiredService<BandwidthService>();
 
-        // Backfill JobNames for missing article events (Background, delayed)
-        _ = Task.Run(async () =>
+        // Backfill JobNames for missing article events (supervised background, delayed)
+        var backgroundTaskQueue = app.Services.GetRequiredService<BackgroundTaskQueue>();
+        backgroundTaskQueue.TryQueue("Initial provider-error summary backfill", async ct =>
         {
             // Wait for 10 seconds to allow application to start
-            await Task.Delay(TimeSpan.FromSeconds(10), app.Lifetime.ApplicationStopping);
+            await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
             
             var providerErrorService = app.Services.GetRequiredService<ProviderErrorService>();
             
             // Critical for UI performance
             await providerErrorService
-                .BackfillSummariesAsync(app.Lifetime.ApplicationStopping);
+                .BackfillSummariesAsync(ct);
 
             await providerErrorService
-                .BackfillDavItemIdsAsync(app.Lifetime.ApplicationStopping);
+                .BackfillDavItemIdsAsync(ct);
 
             // Merge duplicate summaries (e.g., "Movie" and "Movie.mkv" -> single entry)
             await providerErrorService
-                .MergeDuplicateSummariesAsync(app.Lifetime.ApplicationStopping);
+                .MergeDuplicateSummariesAsync(ct);
 
             await providerErrorService
-                .CleanupOrphanedErrorsAsync(app.Lifetime.ApplicationStopping);
+                .CleanupOrphanedErrorsAsync(ct);
 
             // Start the OrganizedLinksUtil refresh service after initial setup
-            OrganizedLinksUtil.StartRefreshService(app.Services, app.Services.GetRequiredService<ConfigManager>(), app.Lifetime.ApplicationStopping);
+            OrganizedLinksUtil.StartRefreshService(app.Services, app.Services.GetRequiredService<ConfigManager>(), ct);
 
             // Initial call to InitializeAsync is part of the refresh service now,
             // so we don't need a separate call here. The refresh service will trigger it.
-        }, app.Lifetime.ApplicationStopping);
+        });
 
         // run
         app.UseMiddleware<ExceptionMiddleware>();

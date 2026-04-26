@@ -27,6 +27,7 @@ public class HealthCheckService
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ProviderErrorService _providerErrorService;
     private readonly NzbAnalysisService _nzbAnalysisService;
+    private readonly BackgroundTaskQueue _backgroundTaskQueue;
     private readonly CancellationToken _cancellationToken = SigtermUtil.GetCancellationToken();
 
     private readonly ConcurrentDictionary<string, byte> _missingSegmentIds = new();
@@ -41,7 +42,8 @@ public class HealthCheckService
         WebsocketManager websocketManager,
         IServiceScopeFactory serviceScopeFactory,
         ProviderErrorService providerErrorService,
-        NzbAnalysisService nzbAnalysisService
+        NzbAnalysisService nzbAnalysisService,
+        BackgroundTaskQueue backgroundTaskQueue
     )
     {
         _configManager = configManager;
@@ -50,6 +52,7 @@ public class HealthCheckService
         _serviceScopeFactory = serviceScopeFactory;
         _providerErrorService = providerErrorService;
         _nzbAnalysisService = nzbAnalysisService;
+        _backgroundTaskQueue = backgroundTaskQueue;
 
         _configManager.OnConfigChanged += (_, configEventArgs) =>
         {
@@ -564,20 +567,25 @@ public class HealthCheckService
 
     public void TriggerManualRepairInBackground(string filePath)
     {
-        _ = Task.Run(async () =>
+        var queued = _backgroundTaskQueue.TryQueue($"Manual repair for {filePath}", async ct =>
         {
             try
             {
                 using var scope = _serviceScopeFactory.CreateScope();
                 var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
                 
-                await TriggerManualRepairAsync(filePath, dbClient, CancellationToken.None).ConfigureAwait(false);
+                await TriggerManualRepairAsync(filePath, dbClient, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 Log.Error(ex, $"[ManualRepair] Failed to execute manual repair for file: {filePath}");
             }
         });
+
+        if (!queued)
+        {
+            Log.Warning("[ManualRepair] Failed to queue manual repair for file: {FilePath}", filePath);
+        }
     }
 
     public async Task TriggerManualRepairAsync(string filePath, DavDatabaseClient dbClient, CancellationToken ct)

@@ -5,6 +5,7 @@ using NWebDav.Server.Helpers;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
 using NzbWebDAV.Exceptions;
+using NzbWebDAV.Services;
 using NzbWebDAV.Utils;
 using Serilog;
 
@@ -46,11 +47,11 @@ public class ExceptionMiddleware(RequestDelegate next)
                 // Capture ServiceScopeFactory to create a new scope in the background task
                 // We cannot use context.RequestServices inside the task because the request might be finished (disposed) by then.
                 var scopeFactory = context.RequestServices.GetRequiredService<IServiceScopeFactory>();
+                var backgroundTaskQueue = context.RequestServices.GetRequiredService<BackgroundTaskQueue>();
                 var davItemId = davItem.Id;
                 var davItemName = davItem.Name;
 
-                // Queue health check in background - fire and forget to avoid blocking streaming
-                _ = Task.Run(async () =>
+                var queued = backgroundTaskQueue.TryQueue($"Health priority trigger for {davItemId}", async ct =>
                 {
                     const int maxRetries = 3;
                     for (int i = 0; i < maxRetries; i++)
@@ -60,16 +61,15 @@ public class ExceptionMiddleware(RequestDelegate next)
                             using var scope = scopeFactory.CreateScope();
                             var dbContext = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
 
-                            // Optimization: Combine delete + update into single operation
-                            // Delete old results asynchronously (fire and forget)
-                            _ = dbContext.HealthCheckResults
+                            await dbContext.HealthCheckResults
                                 .Where(h => h.DavItemId == davItemId && h.RepairStatus == HealthCheckResult.RepairAction.ActionNeeded)
-                                .ExecuteDeleteAsync();
+                                .ExecuteDeleteAsync(ct)
+                                .ConfigureAwait(false);
 
                             // Set priority to immediate health check
                             var rows = await dbContext.Items
                                 .Where(x => x.Id == davItemId && x.NextHealthCheck != DateTimeOffset.MinValue)
-                                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.NextHealthCheck, DateTimeOffset.MinValue))
+                                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.NextHealthCheck, DateTimeOffset.MinValue), ct)
                                 .ConfigureAwait(false);
 
                             if (rows > 0)
@@ -81,7 +81,7 @@ public class ExceptionMiddleware(RequestDelegate next)
                         catch (Exception ex) when (i < maxRetries - 1 && ex.Message.Contains("database is locked"))
                         {
                             Log.Warning($"[HealthCheckTrigger] Database locked on attempt {i + 1}/{maxRetries}, retrying...");
-                            await Task.Delay(100 * (i + 1)); // Exponential backoff: 100ms, 200ms, 300ms
+                            await Task.Delay(100 * (i + 1), ct).ConfigureAwait(false); // Exponential backoff: 100ms, 200ms, 300ms
                         }
                         catch (Exception ex)
                         {
@@ -90,6 +90,11 @@ public class ExceptionMiddleware(RequestDelegate next)
                         }
                     }
                 });
+
+                if (!queued)
+                {
+                    Log.Warning("[HealthCheckTrigger] Failed to queue health check trigger for `{DavItemName}` ({DavItemId}).", davItemName, davItemId);
+                }
             }
             else
             {

@@ -542,12 +542,13 @@ public class QueueItemProcessor(
             // Remove DMCA'd files from the database — they're confirmed dead
             if (dmcaNameSet.Count > 0)
             {
-                var dmcaItemIds = allItems.Where(i => dmcaNameSet.Contains(i.Name)).Select(i => i.Id).ToList();
-                if (dmcaItemIds.Count > 0)
+                var dmcaItems = allItems.Where(i => dmcaNameSet.Contains(i.Name)).ToList();
+                if (dmcaItems.Count > 0)
                 {
                     var dmcaDeleted = await dbContext.Items
-                        .Where(i => dmcaItemIds.Contains(i.Id))
+                        .Where(i => dmcaItems.Select(x => x.Id).Contains(i.Id))
                         .ExecuteDeleteAsync().ConfigureAwait(false);
+                    TriggerVfsForgetForStep5DeletedItems(mountFolder, dmcaItems.Select(x => x.Name));
                     Log.Information("[QueueItemProcessor] Step 5: Removed {Deleted} DMCA/takedown files from {JobName}",
                         dmcaDeleted, queueItem.JobName);
                 }
@@ -556,12 +557,13 @@ public class QueueItemProcessor(
             // Remove probe-failed files (missing articles) directly — no need for ffprobe
             if (failedProbeSet.Count > 0)
             {
-                var failedItemIds = mediaFiles.Where(i => failedProbeSet.Contains(i.Name)).Select(i => i.Id).ToList();
-                if (failedItemIds.Count > 0)
+                var failedItems = mediaFiles.Where(i => failedProbeSet.Contains(i.Name)).ToList();
+                if (failedItems.Count > 0)
                 {
                     var probeFailedDeleted = await dbContext.Items
-                        .Where(i => failedItemIds.Contains(i.Id))
+                        .Where(i => failedItems.Select(x => x.Id).Contains(i.Id))
                         .ExecuteDeleteAsync().ConfigureAwait(false);
+                    TriggerVfsForgetForStep5DeletedItems(mountFolder, failedItems.Select(x => x.Name));
                     Log.Information("[QueueItemProcessor] Step 5: Removed {Deleted} probe-failed files (missing articles) from {JobName}",
                         probeFailedDeleted, queueItem.JobName);
                 }
@@ -649,9 +651,11 @@ public class QueueItemProcessor(
                 if (!corruptIds.IsEmpty)
                 {
                     var corruptIdList = corruptIds.ToList();
+                    var corruptNames = filesToCheck.Where(i => corruptIdList.Contains(i.Id)).Select(i => i.Name).ToList();
                     var deleted = await dbContext.Items
                         .Where(i => corruptIdList.Contains(i.Id))
                         .ExecuteDeleteAsync().ConfigureAwait(false);
+                    TriggerVfsForgetForStep5DeletedItems(mountFolder, corruptNames);
                     Log.Information("[QueueItemProcessor] Step 5 complete: Removed {Deleted} corrupt files from {JobName}. {Healthy}/{Total} media files remain.",
                         deleted, queueItem.JobName, filesToCheck.Count - corruptIdList.Count, filesToCheck.Count);
                 }
@@ -931,6 +935,32 @@ public class QueueItemProcessor(
         return dbClient.Ctx.Items
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == _createdMountFolderId.Value);
+    }
+
+    private static void TriggerVfsForgetForStep5DeletedItems(DavItem? mountFolder, IEnumerable<string> fileNames)
+    {
+        if (mountFolder == null) return;
+
+        var dirsToForget = new HashSet<string>();
+        if (!string.IsNullOrWhiteSpace(mountFolder.Path))
+        {
+            dirsToForget.Add(mountFolder.Path);
+            if (mountFolder.Path.StartsWith("/content/", StringComparison.Ordinal))
+                dirsToForget.Add("/completed-symlinks" + mountFolder.Path["/content".Length..]);
+        }
+
+        foreach (var fileName in fileNames)
+        {
+            var relativeDir = Path.GetDirectoryName(fileName)?.Replace('\\', '/');
+            if (string.IsNullOrWhiteSpace(relativeDir)) continue;
+
+            var dirPath = $"{mountFolder.Path.TrimEnd('/')}/{relativeDir}";
+            dirsToForget.Add(dirPath);
+            if (dirPath.StartsWith("/content/", StringComparison.Ordinal))
+                dirsToForget.Add("/completed-symlinks" + dirPath["/content".Length..]);
+        }
+
+        DavDatabaseContext.TriggerVfsForget(dirsToForget.ToArray());
     }
 
     private async Task MarkQueueItemCompleted

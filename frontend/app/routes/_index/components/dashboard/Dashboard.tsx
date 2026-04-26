@@ -54,7 +54,9 @@ export function Dashboard({ initialData, initialConnections }: Props) {
 
                 const parts = message.split('|');
                 if (parts.length >= 9) {
-                    const providerIndex = parseInt(parts[1]);
+                    const providerIndex = parseInt(parts[0], 10);
+                    if (!Number.isInteger(providerIndex) || providerIndex < 0) return;
+
                     const connsJson = parts[8];
                     try {
                         const rawConns = JSON.parse(connsJson) as any[];

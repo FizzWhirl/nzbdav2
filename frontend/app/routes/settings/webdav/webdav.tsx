@@ -151,7 +151,7 @@ export function WebdavSettings({ config, setNewConfig }: SabnzbdSettingsProps) {
             <Form.Group>
                 <Form.Label htmlFor="total-streaming-connections-input">Total Streaming Connections</Form.Label>
                 <Form.Control
-                    {...className([styles.input, !isValidConnectionsPerStream(config["usenet.total-streaming-connections"]) && styles.error])}
+                    {...className([styles.input, !isValidPositiveInt(config["usenet.total-streaming-connections"]) && styles.error])}
                     type="text"
                     id="total-streaming-connections-input"
                     aria-describedby="total-streaming-connections-help"
@@ -159,24 +159,9 @@ export function WebdavSettings({ config, setNewConfig }: SabnzbdSettingsProps) {
                     value={config["usenet.total-streaming-connections"]}
                     onChange={e => setNewConfig({ ...config, "usenet.total-streaming-connections": e.target.value })} />
                 <Form.Text id="total-streaming-connections-help" muted>
-                    Total connections shared across all active streams. With 1 stream, it uses all connections; with 2 streams, each uses half, etc.
+                    Global streaming connection budget shared by all active buffered streams. A single stream can use spare capacity; multiple streams contend for permits as segment fetches complete.
                 </Form.Text>
                 <ConnectionPoolTip config={config} />
-            </Form.Group>
-            <hr />
-            <Form.Group>
-                <Form.Label htmlFor="connections-per-stream-input">Connections Per Stream</Form.Label>
-                <Form.Control
-                    {...className([styles.input, !isValidPositiveInt(config["usenet.connections-per-stream"]) && styles.error])}
-                    type="text"
-                    id="connections-per-stream-input"
-                    aria-describedby="connections-per-stream-help"
-                    placeholder="20"
-                    value={config["usenet.connections-per-stream"] || ""}
-                    onChange={e => setNewConfig({ ...config, "usenet.connections-per-stream": e.target.value })} />
-                <Form.Text id="connections-per-stream-help" muted>
-                    Per-stream connection budget &mdash; the cap on concurrent NNTP connections used by any single playback stream. (Default: 20)
-                </Form.Text>
             </Form.Group>
             <hr />
             <Form.Group>
@@ -190,8 +175,7 @@ export function WebdavSettings({ config, setNewConfig }: SabnzbdSettingsProps) {
                     value={config["usenet.max-concurrent-buffered-streams"] || ""}
                     onChange={e => setNewConfig({ ...config, "usenet.max-concurrent-buffered-streams": e.target.value })} />
                 <Form.Text id="max-concurrent-streams-help" muted>
-                    Maximum number of simultaneously active buffered playback streams. Sets an upper bound on
-                    <code> connections-per-stream &times; this </code> connections taken by streaming. (Default: 2)
+                    Maximum number of simultaneously active buffered playback pumps. Each pump draws from the shared streaming pool as demand and permits allow. Higher values can improve multi-client playback but increase memory pressure. (Default: 2)
                 </Form.Text>
             </Form.Group>
             <hr />
@@ -206,7 +190,7 @@ export function WebdavSettings({ config, setNewConfig }: SabnzbdSettingsProps) {
                     value={config["usenet.streaming-reserve"] || ""}
                     onChange={e => setNewConfig({ ...config, "usenet.streaming-reserve": e.target.value })} />
                 <Form.Text id="streaming-reserve-help" muted>
-                    Slots reserved for higher-priority callers (Queue, Health Check). Streaming will wait if the number of free connections is less than or equal to this. (Default: 5)
+                    Slots protected from lower-priority queue, repair, and analysis work so playback can acquire connections promptly during background activity. Must be lower than Total Streaming Connections. (Default: 5)
                 </Form.Text>
             </Form.Group>
             <hr />
@@ -446,7 +430,6 @@ export function isWebdavSettingsUpdated(config: Record<string, string>, newConfi
     return config["webdav.user"] !== newConfig["webdav.user"]
         || config["webdav.pass"] !== newConfig["webdav.pass"]
         || config["usenet.total-streaming-connections"] !== newConfig["usenet.total-streaming-connections"]
-        || config["usenet.connections-per-stream"] !== newConfig["usenet.connections-per-stream"]
         || config["usenet.max-concurrent-buffered-streams"] !== newConfig["usenet.max-concurrent-buffered-streams"]
         || config["usenet.streaming-reserve"] !== newConfig["usenet.streaming-reserve"]
         || config["usenet.streaming-priority"] !== newConfig["usenet.streaming-priority"]
@@ -462,30 +445,22 @@ export function isWebdavSettingsUpdated(config: Record<string, string>, newConfi
 
 export function isWebdavSettingsValid(newConfig: Record<string, string>) {
     if (!isValidUser(newConfig["webdav.user"])) return false;
-    if (!isValidConnectionsPerStream(newConfig["usenet.total-streaming-connections"])) return false;
-    if (!isValidPositiveInt(newConfig["usenet.connections-per-stream"])) return false;
+    if (!isValidPositiveInt(newConfig["usenet.total-streaming-connections"])) return false;
     if (!isValidPositiveInt(newConfig["usenet.max-concurrent-buffered-streams"])) return false;
     if (!isValidNonNegativeInt(newConfig["usenet.streaming-reserve"])) return false;
     if (!isValidPriority(newConfig["usenet.streaming-priority"])) return false;
     if (!isValidPositiveInt(newConfig["usenet.shared-stream-buffer-size"])) return false;
     if (!isValidNonNegativeInt(newConfig["usenet.shared-stream-grace-period"])) return false;
     if (!isValidStreamBufferSize(newConfig["usenet.stream-buffer-size"])) return false;
-    // Cross-field: total >= connections-per-stream * max-concurrent-buffered-streams + streaming-reserve
     const total = parseInt(newConfig["usenet.total-streaming-connections"]);
-    const cps = parseInt(newConfig["usenet.connections-per-stream"]);
-    const maxStreams = parseInt(newConfig["usenet.max-concurrent-buffered-streams"]);
     const reserve = parseInt(newConfig["usenet.streaming-reserve"]);
-    if (total < cps * maxStreams + reserve) return false;
+    if (reserve >= total) return false;
     return true;
 }
 
 function isValidUser(user: string): boolean {
     const regex = /^[A-Za-z0-9_-]+$/;
     return regex.test(user);
-}
-
-function isValidConnectionsPerStream(value: string): boolean {
-    return isPositiveInteger(value);
 }
 
 function isValidStreamBufferSize(value: string): boolean {
@@ -524,29 +499,20 @@ function ConnectionPoolTip({ config }: { config: Record<string, string> }) {
             }
         } catch { /* ignore parse errors */ }
 
-        const queueConnections = parseInt(config["api.max-queue-connections"] || "1") || 1;
-        const repairConnections = parseInt(config["repair.connections"] || "1") || 1;
         const streamingConnections = parseInt(config["usenet.total-streaming-connections"] || "20") || 20;
-        const connectionsPerStream = parseInt(config["usenet.connections-per-stream"] || "20") || 20;
         const maxStreams = parseInt(config["usenet.max-concurrent-buffered-streams"] || "2") || 2;
         const streamingReserve = parseInt(config["usenet.streaming-reserve"] || "5") || 5;
 
-        const reservedConnections = queueConnections + repairConnections;
-        const availableForStreaming = Math.max(0, totalProviderConnections - reservedConnections);
-        const requiredForStreams = connectionsPerStream * maxStreams + streamingReserve;
+        const effectiveStreamingCap = Math.min(totalProviderConnections, streamingConnections);
 
         return {
             totalProviderConnections,
-            queueConnections,
-            repairConnections,
             streamingConnections,
-            connectionsPerStream,
             maxStreams,
             streamingReserve,
-            availableForStreaming,
-            requiredForStreams,
-            isOverAllocated: streamingConnections > availableForStreaming && totalProviderConnections > 0,
-            isStreamBudgetTooSmall: streamingConnections < requiredForStreams,
+            effectiveStreamingCap,
+            isOverAllocated: streamingConnections > totalProviderConnections && totalProviderConnections > 0,
+            isReserveTooLarge: streamingReserve >= streamingConnections,
         };
     }, [config]);
 
@@ -554,24 +520,22 @@ function ConnectionPoolTip({ config }: { config: Record<string, string> }) {
         return null; // No providers configured yet
     }
 
-    const variant = (stats.isOverAllocated || stats.isStreamBudgetTooSmall) ? "warning" : "info";
+    const variant = (stats.isOverAllocated || stats.isReserveTooLarge) ? "warning" : "info";
 
     return (
         <Alert variant={variant} className="mt-2 py-2 px-3" style={{ fontSize: '0.85em' }}>
             <strong>Connection Pool:</strong>{' '}
-            {stats.totalProviderConnections} total &minus; {stats.queueConnections} queue &minus; {stats.repairConnections} repair = {' '}
-            <strong>{stats.availableForStreaming}</strong> available for streaming
+            {stats.totalProviderConnections} pooled provider connections; streaming cap is{' '}
+            <strong>{stats.effectiveStreamingCap}</strong> of {stats.streamingConnections} configured permits across up to {stats.maxStreams} buffered streams.
             {stats.isOverAllocated && (
                 <div className="mt-1 text-warning-emphasis">
-                    Warning: Total Streaming Connections ({stats.streamingConnections}) exceeds available ({stats.availableForStreaming}).
-                    This may cause connection contention.
+                    Warning: Total Streaming Connections ({stats.streamingConnections}) exceeds pooled provider capacity ({stats.totalProviderConnections}).
+                    The effective streaming cap will be limited by provider connections.
                 </div>
             )}
-            {stats.isStreamBudgetTooSmall && (
+            {stats.isReserveTooLarge && (
                 <div className="mt-1 text-warning-emphasis">
-                    Warning: Total Streaming Connections ({stats.streamingConnections}) is less than the streaming budget
-                    ({stats.connectionsPerStream} per-stream &times; {stats.maxStreams} streams + {stats.streamingReserve} reserve = {stats.requiredForStreams}).
-                    Increase Total Streaming Connections to at least {stats.requiredForStreams}, or lower per-stream/max-streams/reserve.
+                    Warning: Streaming Reserve ({stats.streamingReserve}) must be lower than Total Streaming Connections ({stats.streamingConnections}).
                 </div>
             )}
         </Alert>

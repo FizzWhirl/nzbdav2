@@ -116,6 +116,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.Z (2026-04-27)
+*   **UI**: Removed the misleading `Connections Per Stream` control from Settings → WebDAV because normal playback currently draws elastically from the shared `Total Streaming Connections` pool rather than enforcing a hard per-stream cap.
+*   **UI**: Simplified WebDAV streaming validation and connection-pool guidance to focus on pooled provider capacity, total streaming permits, max buffered stream pumps, and streaming reserve.
+
 ## v0.6.Z (2026-04-26)
 *   **Docs**: Added a comprehensive codebase streaming reliability, speed, and health review covering backend streaming, queue processing, health/repair, database consistency, frontend proxy/WebSocket behavior, and operational tooling, with a prioritized remediation plan.
 *   **Fix**: Provider connection-pool reset/force-release now releases semaphore capacity when doomed active connections are returned, preventing silent pool shrinkage after active connection resets.

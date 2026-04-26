@@ -35,7 +35,6 @@ const defaultConfig = {
     "api.completed-downloads-dir": "",
     "api.history-retention-hours": "",
     "usenet.providers": "",
-    "usenet.connections-per-stream": "20",
     "usenet.total-streaming-connections": "20",
     "usenet.max-concurrent-buffered-streams": "2",
     "usenet.streaming-reserve": "5",

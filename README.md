@@ -118,6 +118,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## v0.6.Z (2026-04-26)
 *   **Docs**: Added a comprehensive codebase streaming reliability, speed, and health review covering backend streaming, queue processing, health/repair, database consistency, frontend proxy/WebSocket behavior, and operational tooling, with a prioritized remediation plan.
+*   **Fix**: Provider connection-pool reset/force-release now releases semaphore capacity when doomed active connections are returned, preventing silent pool shrinkage after active connection resets.
 
 ## v0.6.Z (2026-04-25)
 *   **Fix**: `/metrics` endpoint was returning 401 Unauthorized through the frontend proxy because `UseWebdavBasicAuthentication` + `UseNWebDav` middleware ran before the endpoint dispatcher and challenged the unauthenticated request. Switched from endpoint-based `app.MapMetrics("/metrics")` to middleware-based `app.UseMetricServer("/metrics")` placed *before* the auth middleware so the request short-circuits. The Live Metrics tab on the Stats page can now actually load data.

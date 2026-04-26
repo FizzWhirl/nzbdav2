@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-25-METRICS-AUTH-FIX");
-            Log.Warning("  FIX: /metrics endpoint was returning 401 because UseWebdavBasicAuthentication+UseNWebDav middleware ran before the endpoint dispatcher and challenged the request. Switched from endpoint-based app.MapMetrics() to middleware-based app.UseMetricServer() placed before auth so it short-circuits. Also: settings UI reorganization (grouped sections, 6 new streaming knobs, cross-field validation).");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-POOL-GATE-RELEASE");
+            Log.Warning("  FIX: Provider connection-pool reset/force-release now returns semaphore capacity when doomed active connections are returned, preventing silent pool shrinkage.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

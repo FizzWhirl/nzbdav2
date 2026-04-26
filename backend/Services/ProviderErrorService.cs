@@ -12,6 +12,7 @@ namespace NzbWebDAV.Services;
 
 public class ProviderErrorService : IDisposable
 {
+    private const int MaxSegmentEvidenceEntries = 512;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ConcurrentQueue<MissingArticleEvent> _buffer = new();
     private readonly CancellationTokenSource _cts = new();
@@ -112,6 +113,7 @@ public class ProviderErrorService : IDisposable
                             LastSeen = DateTimeOffset.UtcNow,
                             TotalEvents = 0,
                             ProviderCountsJson = "{}",
+                            SegmentProviderEvidenceJson = "{}",
                             HasBlockingMissingArticles = false,
                             IsImported = group.Any(x => x.IsImported)
                         };
@@ -133,9 +135,11 @@ public class ProviderErrorService : IDisposable
                     // Update provider counts
                     var providerCountsJson = !string.IsNullOrWhiteSpace(summary.ProviderCountsJson) ? summary.ProviderCountsJson : "{}";
                     var operationCountsJson = !string.IsNullOrWhiteSpace(summary.OperationCountsJson) ? summary.OperationCountsJson : "{}";
+                    var segmentEvidenceJson = !string.IsNullOrWhiteSpace(summary.SegmentProviderEvidenceJson) ? summary.SegmentProviderEvidenceJson : "{}";
 
                     var providerCounts = JsonSerializer.Deserialize<Dictionary<int, int>>(providerCountsJson) ?? new();
                     var operationCounts = JsonSerializer.Deserialize<Dictionary<string, int>>(operationCountsJson) ?? new();
+                    var segmentEvidence = JsonSerializer.Deserialize<Dictionary<string, int>>(segmentEvidenceJson) ?? new();
                     
                     foreach (var evt in group)
                     {
@@ -145,34 +149,35 @@ public class ProviderErrorService : IDisposable
                         var op = evt.Operation ?? "UNKNOWN";
                         if (!operationCounts.ContainsKey(op)) operationCounts[op] = 0;
                         operationCounts[op]++;
+
+                        if (!string.IsNullOrWhiteSpace(evt.SegmentId) && evt.ProviderIndex >= 0 && evt.ProviderIndex < 31)
+                        {
+                            segmentEvidence.TryGetValue(evt.SegmentId, out var mask);
+                            segmentEvidence[evt.SegmentId] = mask | (1 << evt.ProviderIndex);
+                        }
                     }
+
+                    TrimSegmentEvidence(segmentEvidence);
                     summary.ProviderCountsJson = JsonSerializer.Serialize(providerCounts);
                     summary.OperationCountsJson = JsonSerializer.Serialize(operationCounts);
+                    summary.SegmentProviderEvidenceJson = JsonSerializer.Serialize(segmentEvidence);
 
                     // Update stats
                     summary.TotalEvents += group.Count();
                     if (group.Any(x => x.IsImported)) summary.IsImported = true;
 
-                    // Check for blocking (simple check based on current batch + existing state)
+                    // Check for blocking based on persisted compact per-segment provider bitsets.
                     if (!summary.HasBlockingMissingArticles)
                     {
-                         // Optimization: Check for blocking within the current batch only.
-                         // Since we are not persisting granular events anymore to save space, 
-                         // we cannot query the DB for historical provider failures per segment.
-                         // We will mark as blocking only if we see failures from ALL providers for a single segment *within this batch* 
-                         // or if the summary already says so.
-                         
-                         var segmentsInBatch = group.GroupBy(x => x.SegmentId);
-                         foreach (var segGroup in segmentsInBatch)
-                         {
-                             var distinctProvidersInBatch = segGroup.Select(x => x.ProviderIndex).Distinct().Count();
-                             if (distinctProvidersInBatch >= totalProviders)
-                             {
-                                 summary.HasBlockingMissingArticles = true;
-                                 Log.Information($"[MissingArticles] File '{normalizedFilename}' (DavItemId: {summary.DavItemId}) is now blocking (missing across all providers in current batch).");
-                                 break;
-                             }
-                         }
+                        var requiredMask = totalProviders >= 31
+                            ? int.MaxValue
+                            : (1 << totalProviders) - 1;
+                        if (requiredMask != 0 && segmentEvidence.Any(x => (x.Value & requiredMask) == requiredMask))
+                        {
+                            summary.HasBlockingMissingArticles = true;
+                            Log.Information("[MissingArticles] File '{Filename}' (DavItemId: {DavItemId}) is now blocking (missing across all providers, evidence persisted across batches).",
+                                normalizedFilename, summary.DavItemId);
+                        }
                     }
                 }
 
@@ -223,6 +228,19 @@ public class ProviderErrorService : IDisposable
         name = name.TrimEnd('.', ' ');
 
         return directory + name;
+    }
+
+    private static void TrimSegmentEvidence(Dictionary<string, int> segmentEvidence)
+    {
+        if (segmentEvidence.Count <= MaxSegmentEvidenceEntries) return;
+
+        foreach (var key in segmentEvidence.Keys
+                     .OrderBy(x => x, StringComparer.Ordinal)
+                     .Take(segmentEvidence.Count - MaxSegmentEvidenceEntries)
+                     .ToList())
+        {
+            segmentEvidence.Remove(key);
+        }
     }
 
     private string ExtractJobName(string filename)
@@ -316,6 +334,7 @@ public class ProviderErrorService : IDisposable
                     TotalEvents = events.Count,
                     ProviderCountsJson = JsonSerializer.Serialize(providerCounts),
                     OperationCountsJson = JsonSerializer.Serialize(operationCounts),
+                    SegmentProviderEvidenceJson = "{}",
                     HasBlockingMissingArticles = hasBlocking,
                     IsImported = events.Any(x => x.IsImported)
                 };
@@ -416,6 +435,21 @@ public class ProviderErrorService : IDisposable
                         primaryOpCounts[kvp.Key] += kvp.Value;
                     }
                     primary.OperationCountsJson = JsonSerializer.Serialize(primaryOpCounts);
+
+                    var primarySegmentEvidence = !string.IsNullOrWhiteSpace(primary.SegmentProviderEvidenceJson)
+                        ? JsonSerializer.Deserialize<Dictionary<string, int>>(primary.SegmentProviderEvidenceJson) ?? new()
+                        : new Dictionary<string, int>();
+                    var dupSegmentEvidence = !string.IsNullOrWhiteSpace(dup.SegmentProviderEvidenceJson)
+                        ? JsonSerializer.Deserialize<Dictionary<string, int>>(dup.SegmentProviderEvidenceJson) ?? new()
+                        : new Dictionary<string, int>();
+
+                    foreach (var kvp in dupSegmentEvidence)
+                    {
+                        primarySegmentEvidence.TryGetValue(kvp.Key, out var mask);
+                        primarySegmentEvidence[kvp.Key] = mask | kvp.Value;
+                    }
+                    TrimSegmentEvidence(primarySegmentEvidence);
+                    primary.SegmentProviderEvidenceJson = JsonSerializer.Serialize(primarySegmentEvidence);
                 }
 
                 // Update primary to use normalized filename
@@ -588,6 +622,9 @@ public class ProviderErrorService : IDisposable
                     OperationCounts = !string.IsNullOrWhiteSpace(x.s.OperationCountsJson) 
                         ? (JsonSerializer.Deserialize<Dictionary<string, int>>(x.s.OperationCountsJson) ?? new()) 
                         : new(),
+                    EvidenceSegmentCount = !string.IsNullOrWhiteSpace(x.s.SegmentProviderEvidenceJson)
+                        ? (JsonSerializer.Deserialize<Dictionary<string, int>>(x.s.SegmentProviderEvidenceJson) ?? new()).Count
+                        : 0,
                     HasBlockingMissingArticles = x.s.HasBlockingMissingArticles,
                     IsImported = x.IsImported // Use dynamic value
                 };
@@ -707,6 +744,15 @@ public class ProviderErrorService : IDisposable
     public void Dispose()
     {
         _cts.Cancel();
+        try
+        {
+            _persistenceTask.Wait(TimeSpan.FromSeconds(5));
+            PersistEvents().GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warning(ex, "Failed to flush provider error buffer during shutdown");
+        }
         _cts.Dispose();
         GC.SuppressFinalize(this);
     }

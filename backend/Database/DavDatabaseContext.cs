@@ -618,6 +618,9 @@ public sealed class DavDatabaseContext() : DbContext(Options.Value)
                     x => x.ToUnixTimeSeconds(),
                     x => DateTimeOffset.FromUnixTimeSeconds(x)
                 );
+            e.Property(i => i.SegmentProviderEvidenceJson)
+                .HasColumnType("TEXT")
+                .HasDefaultValue("{}");
             e.HasIndex(i => i.LastSeen);
         });
 

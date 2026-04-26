@@ -27,6 +27,8 @@ public class MissingArticleSummary
 
     public string OperationCountsJson { get; set; } = "{}";
 
+    public string SegmentProviderEvidenceJson { get; set; } = "{}";
+
     public bool HasBlockingMissingArticles { get; set; }
     
     public bool IsImported { get; set; }

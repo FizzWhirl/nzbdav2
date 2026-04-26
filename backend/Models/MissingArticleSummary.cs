@@ -10,6 +10,7 @@ public class MissingArticleItem
     public int TotalEvents { get; set; }
     public Dictionary<int, int> ProviderCounts { get; set; } = new();
     public Dictionary<string, int> OperationCounts { get; set; } = new();
+    public int EvidenceSegmentCount { get; set; }
     public bool HasBlockingMissingArticles { get; set; }
     public bool IsImported { get; set; }
 }

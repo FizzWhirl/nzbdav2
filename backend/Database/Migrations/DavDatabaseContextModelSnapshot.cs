@@ -493,6 +493,12 @@ namespace NzbWebDAV.Database.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SegmentProviderEvidenceJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("{}");
+
                     b.Property<int>("TotalEvents")
                         .HasColumnType("INTEGER");
 

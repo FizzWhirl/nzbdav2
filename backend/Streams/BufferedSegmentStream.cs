@@ -1056,7 +1056,7 @@ public class BufferedSegmentStream : Stream
 
         // Track providers that failed for this segment to exclude on retries
         var excludedProviders = new HashSet<int>();
-        var baseDetails = _usageContext?.DetailsObject;
+        var operationDetails = ct.GetContext<ConnectionUsageContext>().DetailsObject;
         // Track whether any transient (non-permanent) failure occurred during retries.
         // If so, we cannot trust a subsequent UsenetArticleNotFoundException as truly permanent
         // because the provider that HAS the article may have been unreachable (OOM, timeout, etc.).
@@ -1074,9 +1074,9 @@ public class BufferedSegmentStream : Stream
             }
 
             // Set excluded providers before each attempt (including first attempt for straggler re-retries)
-            if (baseDetails != null)
+            if (operationDetails != null)
             {
-                baseDetails.ExcludedProviderIndices = excludedProviders.Count > 0 ? excludedProviders : null;
+                operationDetails.ExcludedProviderIndices = excludedProviders.Count > 0 ? excludedProviders : null;
             }
 
             // Respect global memory-pressure cooldown so we don't pile new allocations
@@ -1207,9 +1207,9 @@ public class BufferedSegmentStream : Stream
                     }
 
                     // Clean up provider exclusions before returning
-                    if (baseDetails != null)
+                    if (operationDetails != null)
                     {
-                        baseDetails.ExcludedProviderIndices = null;
+                        operationDetails.ExcludedProviderIndices = null;
                     }
 
                     return new PooledSegmentData(segmentId, buffer, totalRead, pooled: true);
@@ -1228,7 +1228,7 @@ public class BufferedSegmentStream : Stream
                 lastException = ex;
 
                 // Track which provider failed so we exclude it on retry
-                var failedProviderIndex = baseDetails?.CurrentProviderIndex;
+                var failedProviderIndex = operationDetails?.CurrentProviderIndex;
                 if (failedProviderIndex.HasValue)
                 {
                     excludedProviders.Add(failedProviderIndex.Value);
@@ -1274,7 +1274,7 @@ public class BufferedSegmentStream : Stream
                 }
 
                 // Exclude this provider so retry uses a different one
-                var failedProviderIndex = baseDetails?.CurrentProviderIndex;
+                var failedProviderIndex = operationDetails?.CurrentProviderIndex;
                 if (failedProviderIndex.HasValue)
                 {
                     excludedProviders.Add(failedProviderIndex.Value);
@@ -1327,7 +1327,7 @@ public class BufferedSegmentStream : Stream
                 hadTransientFailure = true; // OOM, timeout, connection failure — transient infrastructure issue
 
                 // Track which provider failed so we exclude it on retry
-                var failedProviderIndex = baseDetails?.CurrentProviderIndex;
+                var failedProviderIndex = operationDetails?.CurrentProviderIndex;
                 if (failedProviderIndex.HasValue)
                 {
                     excludedProviders.Add(failedProviderIndex.Value);
@@ -1350,9 +1350,9 @@ public class BufferedSegmentStream : Stream
         if (disableGracefulDegradation)
         {
             // Clean up provider exclusions before throwing
-            if (baseDetails != null)
+            if (operationDetails != null)
             {
-                baseDetails.ExcludedProviderIndices = null;
+                operationDetails.ExcludedProviderIndices = null;
             }
 
             throw new PermanentSegmentFailureException(index, segmentId, lastException?.Message ?? "Unknown error after all retries");
@@ -1434,9 +1434,9 @@ public class BufferedSegmentStream : Stream
         Array.Clear(zeroBuffer, 0, zeroBufferSize);
 
         // Clean up provider exclusions before returning
-        if (baseDetails != null)
+        if (operationDetails != null)
         {
-            baseDetails.ExcludedProviderIndices = null;
+            operationDetails.ExcludedProviderIndices = null;
         }
 
         return new PooledSegmentData(segmentId, zeroBuffer, zeroBufferSize);

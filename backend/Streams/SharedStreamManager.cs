@@ -13,6 +13,8 @@ public static class SharedStreamManager
 {
     private static readonly ConcurrentDictionary<Guid, SharedStreamEntry> s_entries = new();
 
+    public readonly record struct SharedStreamFactoryResult(BufferedSegmentStream Stream, IDisposable? ContextScope = null);
+
     /// <summary>
     /// Try to attach to an existing shared stream for this file.
     /// Returns a handle if the entry exists and the position is within range, null otherwise.
@@ -50,14 +52,15 @@ public static class SharedStreamManager
     /// <param name="gracePeriodSeconds">Grace period before disposing after last reader detaches</param>
     /// <param name="factory">Creates a BufferedSegmentStream using the entry-scoped CancellationToken.
     /// Only called if creating a new entry. Must NOT call SetAcquiredSlot — the entry manages the semaphore slot.
-    /// Must use the provided CancellationToken (not a request-scoped one) so the pump outlives individual requests.</param>
+    /// Must use the provided CancellationToken (not a request-scoped one) so the pump outlives individual requests.
+    /// If a CancellationToken context is attached to the entry token, return its scope so the entry owns that lifetime.</param>
     public static SharedStreamHandle? GetOrCreate(
         Guid davItemId,
         long startPosition,
         long streamLength,
         int ringBufferSize,
         int gracePeriodSeconds,
-        Func<CancellationToken, BufferedSegmentStream> factory)
+        Func<CancellationToken, SharedStreamFactoryResult> factory)
     {
         // Fast path: entry already exists
         if (s_entries.TryGetValue(davItemId, out var existing))
@@ -91,7 +94,8 @@ public static class SharedStreamManager
             // Create an entry-scoped CTS so the pump's inner stream survives
             // individual request cancellations — only cancelled when the entry itself is disposed
             var entryCts = new CancellationTokenSource();
-            var innerStream = factory(entryCts.Token);
+            var factoryResult = factory(entryCts.Token);
+            var innerStream = factoryResult.Stream;
 
             var entry = new SharedStreamEntry(
                 innerStream,
@@ -102,7 +106,8 @@ public static class SharedStreamManager
                 ringBufferSize,
                 gracePeriodSeconds,
                 Evict,
-                entryCts
+                entryCts,
+                factoryResult.ContextScope
             );
 
             // Try to add — if another thread raced us, clean up our entry and attach to theirs

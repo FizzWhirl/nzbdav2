@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-PROVIDER-CONTEXT-ISOLATION");
-            Log.Warning("  FIX: Per-segment provider usage details are cloned so concurrent workers no longer overwrite provider attribution/exclusion state.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-SHARED-STREAM-CONTEXT-LIFETIME");
+            Log.Warning("  FIX: Shared stream entry token context is now owned by SharedStreamEntry lifetime instead of the first request stream.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

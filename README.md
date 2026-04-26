@@ -121,6 +121,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **UI**: Simplified WebDAV streaming validation and connection-pool guidance to focus on pooled provider capacity, total streaming permits, max buffered stream pumps, and streaming reserve.
 *   **Fix**: Dashboard active-streaming WebSocket updates now read the provider index from the correct message field, preventing live connection counts from being displayed as fake providers such as `Provider 45`.
 *   **Fix**: Provider benchmark completion toasts now process only the active run ID and suppress duplicate completion messages, so returning to Settings no longer repeatedly announces an already-finished benchmark.
+*   **UI**: Provider benchmark result tables now sort consistently by provider index with the load-balanced aggregate last, keeping live updates and historical runs in a stable order.
 
 ## v0.6.Z (2026-04-26)
 *   **Docs**: Added a comprehensive codebase streaming reliability, speed, and health review covering backend streaming, queue processing, health/repair, database consistency, frontend proxy/WebSocket behavior, and operational tooling, with a prioritized remediation plan.

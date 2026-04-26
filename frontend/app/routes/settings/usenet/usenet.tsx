@@ -95,6 +95,18 @@ type ProviderListResponse = {
     providers: ProviderInfoDto[];
 }
 
+function sortBenchmarkResults(results: BenchmarkResult[]): BenchmarkResult[] {
+    return [...results].sort((a, b) => {
+        if (a.isLoadBalanced !== b.isLoadBalanced) return a.isLoadBalanced ? 1 : -1;
+
+        const aIndex = Number.isFinite(a.providerIndex) && a.providerIndex >= 0 ? a.providerIndex : Number.MAX_SAFE_INTEGER;
+        const bIndex = Number.isFinite(b.providerIndex) && b.providerIndex >= 0 ? b.providerIndex : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+
+        return a.providerHost.localeCompare(b.providerHost, undefined, { sensitivity: "base" });
+    });
+}
+
 const PROVIDER_TYPE_LABELS: Record<ProviderType, string> = {
     [ProviderType.Disabled]: "Disabled",
     [ProviderType.Pooled]: "Pool Connections",
@@ -879,6 +891,7 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                         }
 
                         if (!displayRun) return null;
+                        const sortedResults = sortBenchmarkResults(displayRun.results);
 
                         return (
                             <div>
@@ -965,8 +978,8 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {displayRun.results.map((result, idx) => (
-                                                <tr key={idx} className={result.isLoadBalanced ? styles["benchmark-highlight"] : ""}>
+                                            {sortedResults.map((result) => (
+                                                <tr key={`${result.isLoadBalanced ? "lb" : "provider"}-${result.providerIndex}-${result.providerHost}`} className={result.isLoadBalanced ? styles["benchmark-highlight"] : ""}>
                                                     <td>
                                                         {result.isLoadBalanced ? (
                                                             <strong>{result.providerHost}</strong>

@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-WEBSOCKET-RECONNECT-BACKOFF");
-            Log.Warning("  FIX: Frontend browser and server websocket reconnect loops now use exponential backoff with jitter.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-BACKEND-PROXY-FAILURES");
+            Log.Warning("  FIX: Frontend proxy routes now return non-200 backend errors while the dashboard keeps cached data visible.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

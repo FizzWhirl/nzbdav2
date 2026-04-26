@@ -7,15 +7,13 @@ export async function loader({}: Route.LoaderArgs) {
         return Response.json(stats);
     } catch (error) {
         console.error('Failed to fetch provider stats:', error);
+        const message = error instanceof Error ? error.message : String(error);
         return Response.json(
             {
-                providers: [],
-                totalOperations: 0,
-                calculatedAt: new Date().toISOString(),
-                timeWindow: 'cumulative',
-                timeWindowHours: 0
+                error: 'Failed to fetch provider stats from backend',
+                details: message
             },
-            { status: 200 }
+            { status: 502 }
         );
     }
 }

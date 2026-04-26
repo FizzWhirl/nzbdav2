@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ButtonGroup, Button, Row, Col } from 'react-bootstrap';
+import { Alert, ButtonGroup, Button, Row, Col } from 'react-bootstrap';
 import type { DashboardData } from '~/types/dashboard';
 import { TIME_WINDOW_OPTIONS } from '~/types/dashboard';
 import type { ConnectionUsageContext } from '~/types/connections';
@@ -20,6 +20,7 @@ export function Dashboard({ initialData, initialConnections }: Props) {
     const [connections, setConnections] = useState(initialConnections);
     const [selectedHours, setSelectedHours] = useState(initialData.timeWindowHours);
     const [isLoading, setIsLoading] = useState(false);
+    const [backendError, setBackendError] = useState<string | null>(null);
 
     // Build provider name lookup
     const providerNames = data.providerHealth.reduce((acc, p) => {
@@ -102,18 +103,27 @@ export function Dashboard({ initialData, initialConnections }: Props) {
     useEffect(() => {
         if (selectedHours === initialData.timeWindowHours) {
             setData(initialData);
+            setBackendError(null);
             return;
         }
 
         setIsLoading(true);
+        setBackendError(null);
         fetch(`/dashboard-proxy?hours=${selectedHours}`)
-            .then(res => res.json())
+            .then(async res => {
+                const body = await res.json();
+                if (!res.ok) {
+                    throw new Error(body.details || body.error || `Backend returned ${res.status}`);
+                }
+                return body;
+            })
             .then(newData => {
                 setData(newData);
                 setIsLoading(false);
             })
             .catch(err => {
                 console.error('Failed to fetch dashboard data:', err);
+                setBackendError(err instanceof Error ? err.message : String(err));
                 setIsLoading(false);
             });
     }, [selectedHours, initialData]);
@@ -138,6 +148,12 @@ export function Dashboard({ initialData, initialConnections }: Props) {
                     ))}
                 </ButtonGroup>
             </div>
+
+            {backendError &&
+                <Alert variant="warning">
+                    Dashboard data could not be refreshed from the backend. Showing the last loaded data. {backendError}
+                </Alert>
+            }
 
             {/* Active Streaming - Full Width */}
             <ActiveStreaming connections={connections} providerNames={providerNames} />

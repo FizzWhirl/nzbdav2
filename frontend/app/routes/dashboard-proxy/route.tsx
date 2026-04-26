@@ -10,18 +10,14 @@ export async function loader({ request }: Route.LoaderArgs) {
         return Response.json(data);
     } catch (error) {
         console.error('Failed to fetch dashboard data:', error);
+        const message = error instanceof Error ? error.message : String(error);
         return Response.json(
             {
-                timeWindowHours: hours,
-                totalDownloaded: {
-                    periodBytes: 0,
-                    allTimeBytes: 0
-                },
-                providerHealth: [],
-                providerUsage: [],
-                recentCompletions: []
+                error: 'Failed to fetch dashboard data from backend',
+                details: message,
+                timeWindowHours: hours
             },
-            { status: 200 }
+            { status: 502 }
         );
     }
 }

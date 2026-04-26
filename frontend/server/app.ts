@@ -22,8 +22,8 @@ const forwardToBackend = createProxyMiddleware({
 });
 
 const setApiKeyForAuthenticatedRequests = async (req: express.Request) => {
-  // if the path is not /api, do nothing
-  if (!req.path.startsWith("/api")) return;
+  // if the path is not an API/metrics backend proxy request, do nothing
+  if (!req.path.startsWith("/api") && req.path !== "/metrics") return;
   var apikey = req.query.apikey || req.query.apiKey || req.headers["x-api-key"];
   var hasApiKey = apikey && typeof apikey === "string";
 
@@ -49,7 +49,6 @@ app.use(async (req, res, next) => {
     || path.startsWith("/nzbs")
     || path.startsWith("/content")
     || path.startsWith("/completed-symlinks")
-    || path === "/metrics"
   ) {
     await setApiKeyForAuthenticatedRequests(req);
     return forwardToBackend(req, res, next);
@@ -75,6 +74,18 @@ app.use((req, res, next) => {
 
 // Require authentication for all React Router routes
 app.use(authMiddleware);
+
+// Forward /metrics only after frontend authentication. Authenticated UI users get
+// the backend API key injected automatically; unauthenticated browser or public
+// internet requests are redirected to login instead of exposing Prometheus data.
+app.use(async (req, res, next) => {
+  const path = decodeURIComponent(req.path);
+  if (path === "/metrics") {
+    await setApiKeyForAuthenticatedRequests(req);
+    return forwardToBackend(req, res, next);
+  }
+  next();
+});
 
 // Let frontend handle all other requests
 app.use(

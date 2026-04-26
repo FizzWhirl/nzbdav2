@@ -137,6 +137,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Performance**: RAR and multipart media-analysis requests now use the same lightweight queue-analysis footprint as plain NZB files: four worker connections, unbuffered part streams, and background-priority usage attribution.
 *   **Reliability**: Frontend browser tabs and the frontend server now reconnect WebSockets with exponential backoff plus jitter, reducing reconnect storms and log spam during backend restarts, migrations, or outages.
 *   **Reliability**: Dashboard and provider-stats proxy routes now return non-200 backend failure responses instead of successful empty data, while the dashboard keeps the last loaded data visible with a warning when refreshes fail.
+*   **Security**: The frontend `/metrics` proxy is now behind normal session authentication, and direct backend `/metrics` scrapes can require the internal API key by setting `METRICS_REQUIRE_API_KEY=true`.
 
 ## v0.6.Z (2026-04-25)
 *   **Fix**: `/metrics` endpoint was returning 401 Unauthorized through the frontend proxy because `UseWebdavBasicAuthentication` + `UseNWebDav` middleware ran before the endpoint dispatcher and challenged the unauthenticated request. Switched from endpoint-based `app.MapMetrics("/metrics")` to middleware-based `app.UseMetricServer("/metrics")` placed *before* the auth middleware so the request short-circuits. The Live Metrics tab on the Stats page can now actually load data.

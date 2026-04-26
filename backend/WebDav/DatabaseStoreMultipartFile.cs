@@ -40,8 +40,9 @@ public class DatabaseStoreMultipartFile(
 
         // Extract analysis context early so it can flow down through the stream chain
         var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
+        var concurrentConnections = isAnalysisMode ? 4 : configManager.GetTotalStreamingConnections();
         var usageContext = new ConnectionUsageContext(
-            ConnectionUsageType.Streaming,
+            isAnalysisMode ? ConnectionUsageType.QueueAnalysis : ConnectionUsageType.Streaming,
             new ConnectionUsageDetails
             {
                 Text = davMultipartFile.Path,
@@ -52,6 +53,12 @@ public class DatabaseStoreMultipartFile(
                 FileSize = davMultipartFile.FileSize  // Total file size for UI display
             }
         );
+
+        if (isAnalysisMode)
+        {
+            Serilog.Log.Debug("[DatabaseStoreMultipartFile] Analysis mode: Opening lightweight multipart stream for {FileName} ({Id}) (workers={Workers})",
+                Name, davMultipartFile.Id, concurrentConnections);
+        }
 
         // return the stream
         var id = davMultipartFile.Id;
@@ -75,7 +82,7 @@ public class DatabaseStoreMultipartFile(
         var packedStream = new DavMultipartFileStream(
             multipartFile.Metadata.FileParts,
             usenetClient,
-            configManager.GetTotalStreamingConnections(),
+            concurrentConnections,
             usageContext,
             useBufferedStreaming: !isAnalysisMode,
             requestedEndByte: requestedEndByte

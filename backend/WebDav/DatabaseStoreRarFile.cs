@@ -38,8 +38,10 @@ public class DatabaseStoreRarFile(
         Serilog.Log.Debug("[DatabaseStoreRarFile] AffinityKey: Raw='{Raw}' Normalized='{Normalized}' for file '{File}'",
             rawAffinityKey, normalizedAffinityKey, davRarFile.Name);
 
+        var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
+        var concurrentConnections = isAnalysisMode ? 4 : configManager.GetTotalStreamingConnections();
         var usageContext = new ConnectionUsageContext(
-            ConnectionUsageType.Streaming,
+            isAnalysisMode ? ConnectionUsageType.QueueAnalysis : ConnectionUsageType.Streaming,
             new ConnectionUsageDetails
             {
                 Text = davRarFile.Path,
@@ -51,6 +53,12 @@ public class DatabaseStoreRarFile(
             }
         );
 
+        if (isAnalysisMode)
+        {
+            Serilog.Log.Debug("[DatabaseStoreRarFile] Analysis mode: Opening lightweight RAR stream for {FileName} ({Id}) (workers={Workers})",
+                Name, davRarFile.Id, concurrentConnections);
+        }
+
         // return the stream
         var id = davRarFile.Id;
         var rarFile = await dbClient.Ctx.RarFiles.Where(x => x.Id == id).FirstOrDefaultAsync(ct).ConfigureAwait(false);
@@ -59,7 +67,6 @@ public class DatabaseStoreRarFile(
                 $"No RAR segment metadata for item {id} (path: {davRarFile.Path}). " +
                 "This usually means the v1→v2 migration could not recover the upstream blob " +
                 "file (mounted at {CONFIG_PATH}/blobs). Re-download via Sonarr/Radarr to recover.");
-        var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
         var isPreviewMode = httpContext.Items.ContainsKey("PreviewMode");
         var isPreviewHlsMode = httpContext.Items.ContainsKey("PreviewHlsMode");
         long? requestedEndByte = null;
@@ -74,8 +81,9 @@ public class DatabaseStoreRarFile(
         (
             rarFile.ToDavMultipartFileMeta().FileParts,
             usenetClient,
-            configManager.GetTotalStreamingConnections(),
+            concurrentConnections,
             usageContext,
+            useBufferedStreaming: !isAnalysisMode,
             requestedEndByte: requestedEndByte
         );
         return new RarDeobfuscationStream(stream, rarFile.ObfuscationKey);

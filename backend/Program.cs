@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-POOL-GATE-RELEASE");
-            Log.Warning("  FIX: Provider connection-pool reset/force-release now returns semaphore capacity when doomed active connections are returned, preventing silent pool shrinkage.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-STREAMING-LIMITER-LEASES");
+            Log.Warning("  FIX: Streaming connection permits now use tracked leases and safe deferred resize handling to prevent double-release and accounting drift.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

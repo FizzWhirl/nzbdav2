@@ -140,6 +140,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Security**: The frontend `/metrics` proxy is now behind normal session authentication, and direct backend `/metrics` scrapes can require the internal API key by setting `METRICS_REQUIRE_API_KEY=true`.
 *   **Reliability**: When `SESSION_KEY` is unset, the frontend now persists a generated cookie signing key under `/config/data-protection/frontend-session.key` so authenticated sessions survive container restarts. Set `SESSION_KEY_FILE` to override the persisted key path.
 *   **Tooling**: Updated standalone Dockerfiles to match the .NET 10 backend target, added standalone backend architecture-aware musl publish RIDs, and switched frontend Docker installs to `npm ci` for lockfile-reproducible builds.
+*   **Tooling**: Removed deprecated TypeScript `baseUrl` usage from the frontend Vite tsconfig while keeping the `~/*` path alias intact for TypeScript 7 readiness.
 
 ## v0.6.Z (2026-04-25)
 *   **Fix**: `/metrics` endpoint was returning 401 Unauthorized through the frontend proxy because `UseWebdavBasicAuthentication` + `UseNWebDav` middleware ran before the endpoint dispatcher and challenged the unauthenticated request. Switched from endpoint-based `app.MapMetrics("/metrics")` to middleware-based `app.UseMetricServer("/metrics")` placed *before* the auth middleware so the request short-circuits. The Live Metrics tab on the Stats page can now actually load data.

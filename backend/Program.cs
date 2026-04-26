@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-DOCKER-TOOLING");
-            Log.Warning("  FIX: Standalone Dockerfiles now track .NET 10 and frontend Docker installs use npm ci.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-TS7-CONFIG");
+            Log.Warning("  FIX: Frontend TypeScript config no longer uses deprecated baseUrl for path aliases.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

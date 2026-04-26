@@ -38,6 +38,8 @@ public class QueueItemProcessor(
     CancellationToken ct
 )
 {
+    private Guid? _createdMountFolderId;
+
     public async Task ProcessAsync()
     {
         Log.Information("[QueueItemProcessor] Starting processing for {JobName} ({Id})", queueItem.JobName, queueItem.Id);
@@ -64,7 +66,12 @@ public class QueueItemProcessor(
                 using var scope = scopeFactory.CreateScope();
                 var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
                 Log.Debug("[QueueItemProcessor] Marking cancelled item {JobName} as completed in history", queueItem.JobName);
-                await MarkQueueItemCompleted(dbClient, startTime, error: "Processing was cancelled (timeout or manual cancellation)", failureReason: GetFailureReason(e)).ConfigureAwait(false);
+                await MarkQueueItemCompleted(
+                    dbClient,
+                    startTime,
+                    error: "Processing was cancelled (timeout or manual cancellation)",
+                    failureReason: GetFailureReason(e),
+                    databaseOperations: () => GetCreatedMountFolderAsync(dbClient)).ConfigureAwait(false);
                 Log.Information("[QueueItemProcessor] Successfully moved cancelled item {JobName} to history", queueItem.JobName);
             }
             catch (Exception ex)
@@ -125,7 +132,12 @@ public class QueueItemProcessor(
                 using var scope = scopeFactory.CreateScope();
                 var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
                 Log.Debug("[QueueItemProcessor] Marking failed item {JobName} as completed in history", queueItem.JobName);
-                await MarkQueueItemCompleted(dbClient, startTime, error: e.Message, failureReason: GetFailureReason(e)).ConfigureAwait(false);
+                await MarkQueueItemCompleted(
+                    dbClient,
+                    startTime,
+                    error: e.Message,
+                    failureReason: GetFailureReason(e),
+                    databaseOperations: () => GetCreatedMountFolderAsync(dbClient)).ConfigureAwait(false);
                 Log.Information("[QueueItemProcessor] Successfully moved failed item {JobName} to history", queueItem.JobName);
             }
             catch (Exception ex)
@@ -467,6 +479,7 @@ public class QueueItemProcessor(
             var categoryFolder = await GetOrCreateCategoryFolder(dbClient).ConfigureAwait(false);
             mountFolder = await CreateMountFolder(dbClient, categoryFolder, existingMountFolder, duplicateNzbBehavior).ConfigureAwait(false);
             mountFolderId = mountFolder.Id;
+            _createdMountFolderId = mountFolder.Id;
 
             Log.Debug("[QueueItemProcessor] Step 4b: Running aggregators for {JobName}...", queueItem.JobName);
             new RarAggregator(dbClient, mountFolder, checkedFullHealth).UpdateDatabase(fileProcessingResults);
@@ -908,6 +921,16 @@ public class QueueItemProcessor(
             NoVideoFilesFoundException => "No Video Files",
             _ => "Unknown Error"
         };
+    }
+
+    private Task<DavItem?> GetCreatedMountFolderAsync(DavDatabaseClient dbClient)
+    {
+        if (!_createdMountFolderId.HasValue)
+            return Task.FromResult<DavItem?>(null);
+
+        return dbClient.Ctx.Items
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == _createdMountFolderId.Value);
     }
 
     private async Task MarkQueueItemCompleted

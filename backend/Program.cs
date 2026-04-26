@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-ARCHIVE-RANGE-BOUNDS");
-            Log.Warning("  FIX: Closed HTTP range ends now flow through RAR/multipart streams to bound archive-backed prefetch.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-QUEUE-FAILURE-MOUNT-LINK");
+            Log.Warning("  FIX: Queue failures after mount creation now preserve DownloadDirId so partial mounts can be cleaned reliably.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

@@ -1,12 +1,20 @@
+# syntax=docker/dockerfile:1.4
+
 # Build the project
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build-env
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
 WORKDIR /nzb-webdav
+ARG TARGETARCH
 COPY ./ ./
 RUN dotnet restore
-RUN dotnet publish -c Release -r linux-musl-x64 -o ./publish
+RUN case "${TARGETARCH:-amd64}" in \
+			amd64) DOTNET_ARCH=x64 ;; \
+			arm64) DOTNET_ARCH=arm64 ;; \
+			*) echo "Unsupported TARGETARCH: $TARGETARCH" && exit 1 ;; \
+		esac && \
+		dotnet publish -c Release -r linux-musl-$DOTNET_ARCH -o ./publish
 
 # Build the production image
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine
 EXPOSE 8080
 WORKDIR /nzb-webdav
 RUN mkdir /config

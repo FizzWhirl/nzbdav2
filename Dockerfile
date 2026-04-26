@@ -6,7 +6,7 @@ FROM --platform=$BUILDPLATFORM node:alpine AS frontend-build
 WORKDIR /frontend
 COPY ./frontend ./
 
-RUN npm install
+RUN npm ci
 RUN npm run build
 RUN npm run build:server
 RUN npm prune --omit=dev

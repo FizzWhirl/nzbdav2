@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-METRICS-PROTECTION");
-            Log.Warning("  FIX: Frontend /metrics is session-authenticated and backend metrics can require the API key via METRICS_REQUIRE_API_KEY=true.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-PERSISTED-SESSION-KEY");
+            Log.Warning("  FIX: Frontend sessions now persist a generated cookie signing key when SESSION_KEY is unset.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

@@ -39,6 +39,7 @@ public class MultipartMkvProcessor : BaseProcessor
                 SegmentIdByteRange = LongRange.FromStartAndSize(0, partSize),
                 FilePartByteRange = LongRange.FromStartAndSize(0, partSize),
                 SegmentFallbacks = fb,
+                SegmentSizes = fileInfo.SegmentSizes,
             });
         }
 

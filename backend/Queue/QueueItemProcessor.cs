@@ -369,7 +369,8 @@ public class QueueItemProcessor(
 
                             try
                             {
-                                await usenetClient.AnalyzeNzbAsync(file.SegmentIds, concurrency, null, fileCts.Token, useSmartAnalysis: true).ConfigureAwait(false);
+                                var segmentSizes = await usenetClient.AnalyzeNzbAsync(file.SegmentIds, concurrency, null, fileCts.Token, useSmartAnalysis: true).ConfigureAwait(false);
+                                file.ApplySegmentSizes(segmentSizes);
                                 probePassedNames.Add(file.FileName);
                                 break; // Success — exit retry loop
                             }
@@ -1068,14 +1069,31 @@ public class QueueItemProcessor(
         }
     }
 
-    private static (string[] SegmentIds, string FileName) GetResultSegmentIdsAndName(BaseProcessor.Result result) => result switch
+    private sealed class SegmentProbeTarget(string[] segmentIds, string fileName, Action<long[]> applySegmentSizes)
     {
-        FileProcessor.Result fp => (fp.NzbFile.GetSegmentIds(), fp.FileName),
-        RarProcessor.Result rp => (rp.StoredFileSegments.SelectMany(s => s.NzbFile.GetSegmentIds()).ToArray(),
-            rp.StoredFileSegments.FirstOrDefault()?.ArchiveName ?? "unknown.rar"),
-        SevenZipProcessor.Result sz => (sz.SevenZipFiles.SelectMany(f => f.DavMultipartFileMeta.FileParts.SelectMany(p => p.SegmentIds)).ToArray(),
-            sz.SevenZipFiles.FirstOrDefault()?.PathWithinArchive ?? "unknown.7z"),
-        MultipartMkvProcessor.Result mkv => (mkv.Parts.SelectMany(p => p.SegmentIds).ToArray(), mkv.Filename),
-        _ => ([], "unknown")
+        public string[] SegmentIds { get; } = segmentIds;
+        public string FileName { get; } = fileName;
+        public void ApplySegmentSizes(long[] segmentSizes) => applySegmentSizes(segmentSizes);
+    }
+
+    private static SegmentProbeTarget GetResultSegmentIdsAndName(BaseProcessor.Result result) => result switch
+    {
+        FileProcessor.Result fp => new SegmentProbeTarget(
+            fp.NzbFile.GetSegmentIds(),
+            fp.FileName,
+            sizes => fp.SegmentSizes = sizes),
+        RarProcessor.Result rp => new SegmentProbeTarget(
+            rp.StoredFileSegments.SelectMany(s => s.NzbFile.GetSegmentIds()).ToArray(),
+            rp.StoredFileSegments.FirstOrDefault()?.ArchiveName ?? "unknown.rar",
+            _ => { }),
+        SevenZipProcessor.Result sz => new SegmentProbeTarget(
+            sz.SevenZipFiles.SelectMany(f => f.DavMultipartFileMeta.FileParts.SelectMany(p => p.SegmentIds)).ToArray(),
+            sz.SevenZipFiles.FirstOrDefault()?.PathWithinArchive ?? "unknown.7z",
+            _ => { }),
+        MultipartMkvProcessor.Result mkv => new SegmentProbeTarget(
+            mkv.Parts.SelectMany(p => p.SegmentIds).ToArray(),
+            mkv.Filename,
+            _ => { }),
+        _ => new SegmentProbeTarget([], "unknown", _ => { })
     };
 }

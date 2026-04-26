@@ -29,6 +29,7 @@ public class FileProcessor(
                 FileName = fileInfo.FileName,
                 FileSize = fileInfo.FileSize ?? await usenet.GetFileSizeAsync(fileInfo.NzbFile, ct).ConfigureAwait(false),
                 ReleaseDate = fileInfo.ReleaseDate,
+                SegmentSizes = fileInfo.SegmentSizes,
             };
         }
 
@@ -45,5 +46,6 @@ public class FileProcessor(
         public required string FileName { get; init; }
         public required long FileSize { get; init; }
         public required DateTimeOffset ReleaseDate { get; init; }
+        public long[]? SegmentSizes { get; set; }
     }
 }

@@ -155,6 +155,7 @@ public class RarProcessor(
                 AesParams = x.GetAesParams(password),
                 ObfuscationKey = obfuscationKey,
                 ReleaseDate = fileInfo.ReleaseDate,
+                SegmentSizes = fileInfo.SegmentSizes,
             });
         }
 
@@ -289,5 +290,6 @@ public class RarProcessor(
         public required LongRange ByteRangeWithinPart { get; init; }
         public required AesParams? AesParams { get; init; }
         public byte[]? ObfuscationKey { get; init; }
+        public long[]? SegmentSizes { get; init; }
     }
 }

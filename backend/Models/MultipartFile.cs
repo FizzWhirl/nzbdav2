@@ -11,6 +11,7 @@ public class MultipartFile
     {
         public required NzbFile NzbFile { get; init; }
         public required LongRange ByteRange { get; init; }
+        public long[]? SegmentSizes { get; init; }
         public long PartSize => ByteRange.Count;
     }
 }

@@ -17,6 +17,7 @@ public class DavRarFile
         public long Offset { get; set; }
         public long ByteCount { get; set; }
         public byte[]? ObfuscationKey { get; set; }
+        public long[]? SegmentSizes { get; set; }
     }
 
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
@@ -32,6 +33,7 @@ public class DavRarFile
                 SegmentIds = x.SegmentIds,
                 SegmentIdByteRange = LongRange.FromStartAndSize(0, x.PartSize),
                 FilePartByteRange = LongRange.FromStartAndSize(x.Offset, x.ByteCount),
+                SegmentSizes = x.SegmentSizes,
             }).ToArray()
         };
     }

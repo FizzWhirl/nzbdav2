@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-BOUNDED-URGENT-SEGMENT-RACES");
-            Log.Warning("  FIX: Buffered streams now bound and coalesce urgent straggler race jobs while tracking active attempts independently.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-PERSIST-SEGMENT-SIZES");
+            Log.Warning("  FIX: Queue smart probe segment sizes now persist to DavNzbFiles and known multipart part metadata for faster bounded streaming.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

@@ -34,5 +34,10 @@ public class DavMultipartFile
         /// Key = index in SegmentIds array, Value = alternative message-IDs.
         /// </summary>
         public Dictionary<int, string[]>? SegmentFallbacks { get; set; }
+
+        /// <summary>
+        /// Exact yEnc decoded byte sizes for <see cref="SegmentIds"/> when already known.
+        /// </summary>
+        public long[]? SegmentSizes { get; set; }
     }
 }

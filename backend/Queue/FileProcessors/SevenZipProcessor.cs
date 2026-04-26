@@ -110,6 +110,7 @@ public class SevenZipProcessor : BaseProcessor
             {
                 NzbFile = fileInfo.NzbFile,
                 ByteRange = new LongRange(startInclusive, endExclusive),
+                SegmentSizes = fileInfo.SegmentSizes,
             });
             startInclusive = endExclusive;
         }
@@ -167,6 +168,7 @@ public class SevenZipProcessor : BaseProcessor
                     SegmentIds = multipartFile.FileParts[index].NzbFile.GetSegmentIds(),
                     SegmentIdByteRange = LongRange.FromStartAndSize(0, multipartFile.FileParts[index].PartSize),
                     FilePartByteRange = LongRange.FromStartAndSize(partStartInclusive, partByteCount),
+                    SegmentSizes = multipartFile.FileParts[index].SegmentSizes,
                 };
             })
             .ToArray();

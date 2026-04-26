@@ -107,6 +107,7 @@ public class DavMultipartFileStream(
                         concurrentConnections,
                         partContext,
                         useBufferedStreaming: useBufferedStreaming,
+                        segmentSizes: capturedPart.SegmentSizes,
                         segmentFallbacks: capturedPart.SegmentFallbacks,
                         requestedEndByte: capturedRequestedEndByte
                     );

@@ -46,6 +46,11 @@ public class FileAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, 
                 SegmentFallbacks = fallbacks,
             };
 
+            if (result.SegmentSizes is { Length: > 0 } segmentSizes && segmentSizes.Length == primaryIds.Length)
+            {
+                davNzbFile.SetSegmentSizes(segmentSizes);
+            }
+
             dbClient.Ctx.Items.Add(davItem);
             dbClient.Ctx.NzbFiles.Add(davNzbFile);
         }

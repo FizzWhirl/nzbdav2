@@ -21,13 +21,29 @@ type Sample = {
 };
 
 /**
- * Time-series point for the hit-ratio chart.
+ * Time-series point for the connection/throughput chart.
  */
-type RatioPoint = {
+type TrendPoint = {
     t: string;
+    active: number;
+    live: number;
+    max: number;
+    speedMBps: number;
+    freeSlots: number;
+};
+
+type SharedStreamDelta = {
     hits: number;
     misses: number;
-    ratioPct: number;
+    ratioPct: number | null;
+};
+
+type ProviderBandwidthSnapshot = {
+    providerIndex: number;
+    totalBytes: number;
+    currentSpeed: number;
+    averageLatency: number;
+    host?: string;
 };
 
 const POLL_MS = 3000;
@@ -131,10 +147,29 @@ function fmtSeconds(s: number | null): string {
     return `${(s / 60).toFixed(1)} min`;
 }
 
+function fmtSpeed(bytesPerSecond: number): string {
+    if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "0 B/s";
+    const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+    let value = bytesPerSecond;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+        value /= 1024;
+        idx++;
+    }
+    const precision = idx <= 1 ? 0 : 1;
+    return `${value.toFixed(precision)} ${units[idx]}`;
+}
+
+function sumMetric(samples: Sample[], name: string): number {
+    return findAll(samples, name).reduce((acc, sample) => acc + sample.value, 0);
+}
+
 export function LiveMetrics() {
     const [samples, setSamples] = useState<Sample[]>([]);
+    const [bandwidth, setBandwidth] = useState<ProviderBandwidthSnapshot[]>([]);
     const [error, setError] = useState<string | null>(null);
-    const [history, setHistory] = useState<RatioPoint[]>([]);
+    const [history, setHistory] = useState<TrendPoint[]>([]);
+    const [sharedDelta, setSharedDelta] = useState<SharedStreamDelta | null>(null);
     const lastHits = useRef<number>(0);
     const lastMisses = useRef<number>(0);
     const lastTs = useRef<number>(0);
@@ -149,12 +184,22 @@ export function LiveMetrics() {
                     return;
                 }
                 const txt = await res.text();
+                let bandwidthSnapshot: ProviderBandwidthSnapshot[] = [];
+                try {
+                    const bwRes = await fetch("/api/stats/bandwidth/current", { headers: { Accept: "application/json" } });
+                    if (bwRes.ok) {
+                        bandwidthSnapshot = await bwRes.json() as ProviderBandwidthSnapshot[];
+                    }
+                } catch {
+                    // Keep metrics usable even if the bandwidth endpoint is temporarily unavailable.
+                }
                 if (cancelled) return;
                 const parsed = parsePrometheus(txt);
                 setSamples(parsed);
+                setBandwidth(bandwidthSnapshot);
                 setError(null);
 
-                // Update hit-ratio history (delta-based, so we react to in-window activity)
+                // Track shared stream reuse deltas for explanatory cards.
                 const hits = findOne(parsed, "nzbdav_shared_stream_hits_total")?.value ?? 0;
                 const missTotal = findAll(parsed, "nzbdav_shared_stream_misses_total")
                     .reduce((acc, s) => acc + s.value, 0);
@@ -163,15 +208,24 @@ export function LiveMetrics() {
                     const dHits = Math.max(0, hits - lastHits.current);
                     const dMiss = Math.max(0, missTotal - lastMisses.current);
                     const total = dHits + dMiss;
-                    const ratioPct = total > 0 ? (dHits / total) * 100 : 0;
+                    const ratioPct = total > 0 ? (dHits / total) * 100 : null;
+                    setSharedDelta({
+                        hits: dHits,
+                        misses: dMiss,
+                        ratioPct: ratioPct == null ? null : Number(ratioPct.toFixed(1)),
+                    });
+
+                    const speedBytesPerSecond = bandwidthSnapshot.reduce((acc, provider) => acc + (provider.currentSpeed || 0), 0);
                     setHistory((prev) => {
                         const next = [
                             ...prev,
                             {
                                 t: new Date(now).toLocaleTimeString(),
-                                hits: dHits,
-                                misses: dMiss,
-                                ratioPct: Number(ratioPct.toFixed(1)),
+                                active: sumMetric(parsed, "nzbdav_pool_active_connections"),
+                                live: sumMetric(parsed, "nzbdav_pool_live_connections"),
+                                max: sumMetric(parsed, "nzbdav_pool_max_connections"),
+                                speedMBps: Number((speedBytesPerSecond / 1024 / 1024).toFixed(2)),
+                                freeSlots: sumMetric(parsed, "nzbdav_pool_remaining_semaphore_slots"),
                             },
                         ];
                         return next.slice(-HISTORY_LEN);
@@ -210,6 +264,7 @@ export function LiveMetrics() {
     const sharedTotal = sharedHits + sharedMissesTotal;
     const overallRatioPct = sharedTotal > 0 ? (sharedHits / sharedTotal) * 100 : null;
     const activeEntries = findOne(samples, "nzbdav_shared_stream_active_entries")?.value ?? 0;
+    const activeReaders = findOne(samples, "nzbdav_shared_stream_active_readers")?.value ?? 0;
 
     // Pool stats — group by `pool` label
     const poolNames = useMemo(() => {
@@ -237,6 +292,55 @@ export function LiveMetrics() {
             }),
         [samples, poolNames],
     );
+
+    const totalActiveConnections = pools.reduce((acc, pool) => acc + pool.active, 0);
+    const totalLiveConnections = pools.reduce((acc, pool) => acc + pool.live, 0);
+    const totalMaxConnections = pools.reduce((acc, pool) => acc + pool.max, 0);
+    const totalFreeSlots = pools.reduce((acc, pool) => acc + pool.remaining, 0);
+    const totalSpeed = bandwidth.reduce((acc, provider) => acc + (provider.currentSpeed || 0), 0);
+    const poolUtilizationPct = totalMaxConnections > 0 ? (totalActiveConnections / totalMaxConnections) * 100 : null;
+    const busiestProvider = [...bandwidth]
+        .sort((a, b) => (b.currentSpeed || 0) - (a.currentSpeed || 0))[0];
+
+    const insights = useMemo(() => {
+        const items: Array<{ variant: "success" | "info" | "warning" | "danger"; text: string }> = [];
+
+        const trippedPools = pools.filter((pool) => pool.tripped);
+        if (trippedPools.length > 0) {
+            items.push({
+                variant: "danger",
+                text: `${trippedPools.length} connection pool${trippedPools.length === 1 ? " is" : "s are"} circuit-breaker tripped: ${trippedPools.map((p) => p.pool).join(", ")}.`,
+            });
+        }
+
+        const failingPools = pools.filter((pool) => pool.failures > 0 && !pool.tripped);
+        if (failingPools.length > 0) {
+            items.push({
+                variant: "warning",
+                text: `${failingPools.length} pool${failingPools.length === 1 ? " has" : "s have"} recent connection failures. Check provider health if this grows.`,
+            });
+        }
+
+        if (totalMaxConnections === 0) {
+            items.push({ variant: "info", text: "No connection-pool metrics yet. Start a stream or queue task to populate this view." });
+        } else if (totalActiveConnections === 0) {
+            items.push({ variant: "info", text: "No active NNTP reads right now; pools are idle." });
+        } else if (poolUtilizationPct != null && poolUtilizationPct >= 85) {
+            items.push({ variant: "warning", text: `Connection usage is high (${poolUtilizationPct.toFixed(0)}%). Playback may wait for permits if another stream starts.` });
+        } else {
+            items.push({ variant: "success", text: `Connection usage is healthy (${poolUtilizationPct?.toFixed(0) ?? "0"}% active, ${Math.round(totalFreeSlots)} free slots).` });
+        }
+
+        if (totalSpeed > 0) {
+            items.push({ variant: "info", text: `Current measured provider throughput is ${fmtSpeed(totalSpeed)}${busiestProvider ? `; busiest provider is ${busiestProvider.host || `Provider ${busiestProvider.providerIndex}`} at ${fmtSpeed(busiestProvider.currentSpeed)}.` : "."}` });
+        }
+
+        if (sharedDelta && sharedDelta.hits + sharedDelta.misses > 0) {
+            items.push({ variant: "info", text: `Shared-stream reuse in the last sample: ${sharedDelta.hits} hit${sharedDelta.hits === 1 ? "" : "s"}, ${sharedDelta.misses} new stream${sharedDelta.misses === 1 ? "" : "s"}.` });
+        }
+
+        return items.slice(0, 5);
+    }, [pools, totalMaxConnections, totalActiveConnections, poolUtilizationPct, totalFreeSlots, totalSpeed, busiestProvider, sharedDelta]);
 
     // Seek latency quantiles per kind
     const seekKinds = useMemo(() => {
@@ -270,27 +374,43 @@ export function LiveMetrics() {
                 </div>
             )}
 
-            {/* ------------- Shared streams ------------- */}
+            {/* ------------- Overview / Insights ------------- */}
             <div className="p-4 rounded-lg bg-black bg-opacity-20 mb-4">
                 <div className="d-flex justify-content-between align-items-center mb-3">
-                    <h4 className="m-0">Shared Streams</h4>
+                    <h4 className="m-0">Live Streaming Insights</h4>
                     <Badge bg="secondary">refresh: {POLL_MS / 1000}s</Badge>
                 </div>
                 <div className="row g-3 mb-3">
-                    <StatCard label="Active entries" value={Math.round(activeEntries).toLocaleString()} />
                     <StatCard
-                        label="Hit ratio (cumulative)"
-                        value={overallRatioPct == null ? "—" : `${overallRatioPct.toFixed(1)} %`}
-                        sub={`${sharedHits.toLocaleString()} hits / ${sharedMissesTotal.toLocaleString()} misses`}
+                        label="Current provider speed"
+                        value={fmtSpeed(totalSpeed)}
+                        sub={busiestProvider ? `Top: ${busiestProvider.host || `Provider ${busiestProvider.providerIndex}`} (${fmtSpeed(busiestProvider.currentSpeed)})` : "No bandwidth samples yet"}
                     />
                     <StatCard
-                        label="Hit ratio (live, last sample)"
-                        value={
-                            history.length === 0
-                                ? "—"
-                                : `${history[history.length - 1].ratioPct.toFixed(1)} %`
-                        }
+                        label="Active / live connections"
+                        value={`${Math.round(totalActiveConnections)} / ${Math.round(totalLiveConnections)}`}
+                        sub={totalMaxConnections > 0 ? `${poolUtilizationPct?.toFixed(0) ?? "0"}% of ${Math.round(totalMaxConnections)} max active` : "No pools registered"}
                     />
+                    <StatCard
+                        label="Free connection slots"
+                        value={Math.round(totalFreeSlots).toLocaleString()}
+                        sub="Before new NNTP operations queue for permits"
+                    />
+                </div>
+
+                {insights.length > 0 && (
+                    <div className="d-flex flex-column gap-2 mb-3">
+                        {insights.map((insight, index) => (
+                            <div key={`${insight.variant}-${index}`} className={`border-start border-4 border-${insight.variant} ps-3 py-1 bg-black bg-opacity-25 rounded-end`}>
+                                {insight.text}
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                <h6 className="text-secondary mb-2">Connections and provider speed over time</h6>
+                <div className="text-secondary mb-2" style={{ fontSize: "0.85rem" }}>
+                    Active/live connections come from pool gauges. Speed comes from the provider bandwidth sampler and is summed across providers.
                 </div>
 
                 <div style={{ height: 220 }}>
@@ -298,19 +418,60 @@ export function LiveMetrics() {
                         <AreaChart data={history} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#444" />
                             <XAxis dataKey="t" stroke="#aaa" tick={{ fontSize: 11 }} />
-                            <YAxis stroke="#aaa" tick={{ fontSize: 11 }} domain={[0, 100]} />
+                            <YAxis yAxisId="connections" stroke="#aaa" tick={{ fontSize: 11 }} allowDecimals={false} />
+                            <YAxis yAxisId="speed" orientation="right" stroke="#aaa" tick={{ fontSize: 11 }} tickFormatter={(v) => `${v} MB/s`} />
                             <Tooltip contentStyle={{ background: "#222", border: "1px solid #444" }} />
                             <Legend />
                             <Area
+                                yAxisId="connections"
                                 type="monotone"
-                                dataKey="ratioPct"
-                                name="Hit ratio %"
+                                dataKey="active"
+                                name="Active connections"
                                 stroke="#82ca9d"
                                 fill="#82ca9d"
                                 fillOpacity={0.3}
                             />
+                            <Area
+                                yAxisId="connections"
+                                type="monotone"
+                                dataKey="live"
+                                name="Live connections"
+                                stroke="#8884d8"
+                                fill="#8884d8"
+                                fillOpacity={0.18}
+                            />
+                            <Area
+                                yAxisId="speed"
+                                type="monotone"
+                                dataKey="speedMBps"
+                                name="Speed MB/s"
+                                stroke="#ffc658"
+                                fill="#ffc658"
+                                fillOpacity={0.22}
+                            />
                         </AreaChart>
                     </ResponsiveContainer>
+                </div>
+            </div>
+
+            {/* ------------- Shared stream reuse ------------- */}
+            <div className="p-4 rounded-lg bg-black bg-opacity-20 mb-4">
+                <h4 className="m-0 mb-2">Streaming Reuse</h4>
+                <div className="text-secondary mb-3" style={{ fontSize: "0.9rem" }}>
+                    Shared streams are reusable buffered pumps for the same WebDAV item. They are mainly useful when a client reconnects, seeks near the current buffer, or overlaps direct-play/transcode readers. It is normal for this section to stay quiet during simple single-client playback.
+                </div>
+                <div className="row g-3 mb-3">
+                    <StatCard label="Active shared streams" value={Math.round(activeEntries).toLocaleString()} sub={`${Math.round(activeReaders).toLocaleString()} attached reader${Math.round(activeReaders) === 1 ? "" : "s"}`} />
+                    <StatCard
+                        label="Reuse ratio (cumulative)"
+                        value={overallRatioPct == null ? "—" : `${overallRatioPct.toFixed(1)} %`}
+                        sub={`${sharedHits.toLocaleString()} reused / ${sharedMissesTotal.toLocaleString()} new`}
+                    />
+                    <StatCard
+                        label="Reuse in last sample"
+                        value={sharedDelta?.ratioPct == null ? "No events" : `${sharedDelta.ratioPct.toFixed(1)} %`}
+                        sub={sharedDelta ? `${sharedDelta.hits} reused / ${sharedDelta.misses} new` : "Waiting for the next sample"}
+                    />
                 </div>
 
                 {sharedMissesByReason.length > 0 && (

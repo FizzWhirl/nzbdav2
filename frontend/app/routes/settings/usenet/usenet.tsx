@@ -1,5 +1,5 @@
 import styles from "./usenet.module.css"
-import { type Dispatch, type SetStateAction, useState, useCallback, useEffect, useMemo } from "react";
+import { type Dispatch, type SetStateAction, useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Button, Form } from "react-bootstrap";
 import { createWebsocketBackoff, getBrowserWebsocketUrl, receiveMessage } from "~/utils/websocket-util";
 import { useToast } from "~/context/ToastContext";
@@ -144,6 +144,7 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     const [lastBenchmarkFileId, setLastBenchmarkFileId] = useState<string | null>(null);
     const [lastBenchmarkFileName, setLastBenchmarkFileName] = useState<string | null>(null);
     const [reuseSameFile, setReuseSameFile] = useState(false);
+    const completedBenchmarkRunIdsRef = useRef<Set<string>>(new Set());
 
     // File details modal state
     const [showFileDetailsModal, setShowFileDetailsModal] = useState(false);
@@ -267,10 +268,11 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     const handleBenchmarkMessage = useCallback((message: string) => {
         try {
             const data: BenchmarkResponse = JSON.parse(message);
+            const runId = data.runId;
 
             // Only process messages for the current benchmark run
-            // This prevents stale "complete" messages from previous runs from triggering toasts
-            if (currentBenchmarkRunId && data.runId !== currentBenchmarkRunId) {
+            // This prevents replayed/stale "complete" messages from previous runs from triggering toasts
+            if (!currentBenchmarkRunId || !runId || runId !== currentBenchmarkRunId) {
                 return;
             }
 
@@ -280,6 +282,8 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
 
                 // Check if benchmark is complete
                 if (data.isComplete) {
+                    if (completedBenchmarkRunIdsRef.current.has(runId)) return;
+                    completedBenchmarkRunIdsRef.current.add(runId);
                     setIsRunningBenchmark(false);
                     setCurrentBenchmarkRunId(null);
                     fetchBenchmarkHistory();
@@ -287,6 +291,8 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                 }
             } else if (data.isComplete && !data.status) {
                 // Benchmark completed with error
+                if (completedBenchmarkRunIdsRef.current.has(runId)) return;
+                completedBenchmarkRunIdsRef.current.add(runId);
                 setIsRunningBenchmark(false);
                 setCurrentBenchmarkRunId(null);
                 addToast(data.error || "Benchmark failed", "danger", "Benchmark Error");
@@ -360,6 +366,7 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
 
                 // Track this run's ID so we only process WebSocket messages for it
                 if (data.runId) {
+                    completedBenchmarkRunIdsRef.current.delete(data.runId);
                     setCurrentBenchmarkRunId(data.runId);
                 }
 
@@ -373,6 +380,7 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
 
                 // If already complete (shouldn't happen normally), handle it
                 if (data.isComplete) {
+                    if (data.runId) completedBenchmarkRunIdsRef.current.add(data.runId);
                     setIsRunningBenchmark(false);
                     setCurrentBenchmarkRunId(null);
                     fetchBenchmarkHistory();

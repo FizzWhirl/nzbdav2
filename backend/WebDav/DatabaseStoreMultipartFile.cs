@@ -61,12 +61,24 @@ public class DatabaseStoreMultipartFile(
                 $"No multipart segment metadata for item {id} (path: {davMultipartFile.Path}). " +
                 "This usually means the v1→v2 migration could not recover the upstream blob " +
                 "file (mounted at {CONFIG_PATH}/blobs). Re-download via Sonarr/Radarr to recover.");
+
+        var isPreviewMode = httpContext.Items.ContainsKey("PreviewMode");
+        var isPreviewHlsMode = httpContext.Items.ContainsKey("PreviewHlsMode");
+        long? requestedEndByte = null;
+        if (!isAnalysisMode && !isPreviewMode && !isPreviewHlsMode && multipartFile.Metadata.AesParams == null &&
+            httpContext.Items.TryGetValue("RequestedRangeEnd", out var endObj) &&
+            endObj is long endByte)
+        {
+            requestedEndByte = endByte;
+        }
+
         var packedStream = new DavMultipartFileStream(
             multipartFile.Metadata.FileParts,
             usenetClient,
             configManager.GetTotalStreamingConnections(),
             usageContext,
-            useBufferedStreaming: !isAnalysisMode
+            useBufferedStreaming: !isAnalysisMode,
+            requestedEndByte: requestedEndByte
         );
         Stream finalStream = multipartFile.Metadata.AesParams != null
             ? new AesDecoderStream(packedStream, multipartFile.Metadata.AesParams)

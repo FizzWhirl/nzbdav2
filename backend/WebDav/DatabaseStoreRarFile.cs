@@ -59,12 +59,24 @@ public class DatabaseStoreRarFile(
                 $"No RAR segment metadata for item {id} (path: {davRarFile.Path}). " +
                 "This usually means the v1→v2 migration could not recover the upstream blob " +
                 "file (mounted at {CONFIG_PATH}/blobs). Re-download via Sonarr/Radarr to recover.");
+        var isAnalysisMode = httpContext.Request.Headers.ContainsKey("X-Analysis-Mode");
+        var isPreviewMode = httpContext.Items.ContainsKey("PreviewMode");
+        var isPreviewHlsMode = httpContext.Items.ContainsKey("PreviewHlsMode");
+        long? requestedEndByte = null;
+        if (!isAnalysisMode && !isPreviewMode && !isPreviewHlsMode &&
+            httpContext.Items.TryGetValue("RequestedRangeEnd", out var endObj) &&
+            endObj is long endByte)
+        {
+            requestedEndByte = endByte;
+        }
+
         var stream = new DavMultipartFileStream
         (
             rarFile.ToDavMultipartFileMeta().FileParts,
             usenetClient,
             configManager.GetTotalStreamingConnections(),
-            usageContext
+            usageContext,
+            requestedEndByte: requestedEndByte
         );
         return new RarDeobfuscationStream(stream, rarFile.ObfuscationKey);
     }

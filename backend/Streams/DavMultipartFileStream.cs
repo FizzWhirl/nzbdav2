@@ -11,7 +11,8 @@ public class DavMultipartFileStream(
     UsenetStreamingClient usenet,
     int concurrentConnections,
     ConnectionUsageContext? usageContext = null,
-    bool useBufferedStreaming = true
+    bool useBufferedStreaming = true,
+    long? requestedEndByte = null
 ) : Stream
 {
     private CombinedStream? _innerStream;
@@ -78,6 +79,7 @@ public class DavMultipartFileStream(
         {
             var capturedPart = filePart; // Capture for closure
             var capturedOffset = cumulativeByteOffset; // Capture current offset for this part
+            var capturedRequestedEndByte = GetPartRequestedEndByte(capturedPart, capturedOffset);
 
             // Create a usage context with the correct cumulative base offset for this part
             var partContext = new ConnectionUsageContext(
@@ -105,7 +107,8 @@ public class DavMultipartFileStream(
                         concurrentConnections,
                         partContext,
                         useBufferedStreaming: useBufferedStreaming,
-                        segmentFallbacks: capturedPart.SegmentFallbacks
+                        segmentFallbacks: capturedPart.SegmentFallbacks,
+                        requestedEndByte: capturedRequestedEndByte
                     );
                     // Seek to the start of this part within the RAR file
                     stream.Seek(capturedPart.FilePartByteRange.StartInclusive, SeekOrigin.Begin);
@@ -119,6 +122,23 @@ public class DavMultipartFileStream(
         }
 
         return new CombinedStream(parts, maxCachedStreams: 0);
+    }
+
+    private long? GetPartRequestedEndByte(DavMultipartFile.FilePart part, long virtualPartStart)
+    {
+        if (!requestedEndByte.HasValue) return null;
+
+        var virtualPartEndExclusive = virtualPartStart + part.FilePartByteRange.Count;
+        if (requestedEndByte.Value < virtualPartStart)
+        {
+            // The requested range ends before this part. CombinedStream should not
+            // normally open this part for that range, but keep any accidental open
+            // bounded to the first byte rather than allowing EOF prefetch.
+            return part.FilePartByteRange.StartInclusive;
+        }
+
+        var virtualEndWithinPart = Math.Min(requestedEndByte.Value, virtualPartEndExclusive - 1) - virtualPartStart;
+        return part.FilePartByteRange.StartInclusive + virtualEndWithinPart;
     }
 
     protected override void Dispose(bool disposing)

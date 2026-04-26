@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-SHARED-STREAM-CONTEXT-LIFETIME");
-            Log.Warning("  FIX: Shared stream entry token context is now owned by SharedStreamEntry lifetime instead of the first request stream.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-ARCHIVE-RANGE-BOUNDS");
+            Log.Warning("  FIX: Closed HTTP range ends now flow through RAR/multipart streams to bound archive-backed prefetch.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

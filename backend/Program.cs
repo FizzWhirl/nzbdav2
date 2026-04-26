@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-STREAMING-LIMITER-LEASES");
-            Log.Warning("  FIX: Streaming connection permits now use tracked leases and safe deferred resize handling to prevent double-release and accounting drift.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-STREAM-PERMIT-LIFETIME");
+            Log.Warning("  FIX: Global operation permits for segment streams now remain held until the returned stream is disposed, preserving queue/health/streaming fairness.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

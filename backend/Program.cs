@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-PROVIDER-ERROR-EVIDENCE-FLUSH");
-            Log.Warning("  FIX: Missing-article summaries now persist compact segment/provider evidence and flush buffered provider errors on shutdown.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-ATOMIC-HEALTH-FAILURE-UPDATES");
+            Log.Warning("  FIX: Health-check timeout/error failure paths now save item state and HealthCheckResult rows atomically.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

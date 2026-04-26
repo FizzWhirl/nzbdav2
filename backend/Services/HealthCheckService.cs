@@ -199,30 +199,15 @@ public class HealthCheckService
 
             try
             {
-                // Mark as failed in DB to prevent infinite loops and allow filtering
-                await using var errorContext = new DavDatabaseContext();
                 var utcNow = DateTimeOffset.UtcNow;
-
-                await errorContext.Items
-                    .Where(x => x.Id == itemInfo.Id)
-                    .ExecuteUpdateAsync(setters => setters
-                        .SetProperty(p => p.NextHealthCheck, utcNow.AddDays(1)) // Retry in 24h
-                        .SetProperty(p => p.LastHealthCheck, utcNow)
-                        .SetProperty(p => p.IsCorrupted, true)
-                        .SetProperty(p => p.CorruptionReason, e.Message))
-                    .ConfigureAwait(false);
-
-                errorContext.HealthCheckResults.Add(SendStatus(new HealthCheckResult()
-                {
-                    Id = Guid.NewGuid(),
-                    DavItemId = itemInfo.Id,
-                    Path = itemInfo.Path,
-                    CreatedAt = utcNow,
-                    Result = HealthCheckResult.HealthResult.Unhealthy,
-                    RepairStatus = HealthCheckResult.RepairAction.ActionNeeded,
-                    Message = $"Unexpected error: {e.Message}"
-                }));
-                await errorContext.SaveChangesAsync().ConfigureAwait(false);
+                await SaveFailureStateWithResultAsync(
+                    itemInfo.Id,
+                    itemInfo.Path,
+                    utcNow,
+                    utcNow.AddDays(1),
+                    true,
+                    e.Message,
+                    $"Unexpected error: {e.Message}").ConfigureAwait(false);
             }
             catch (Exception dbEx)
             {
@@ -250,29 +235,17 @@ public class HealthCheckService
 
             try
             {
-                await using var dbContext = new DavDatabaseContext();
-
-                // Update the item to prevent immediate retry loop
                 var utcNow = DateTimeOffset.UtcNow;
                 var nextCheck = utcNow.AddDays(1);
-                await dbContext.Items
-                    .Where(x => x.Id == itemId)
-                    .ExecuteUpdateAsync(setters => setters
-                        .SetProperty(p => p.NextHealthCheck, nextCheck)
-                        .SetProperty(p => p.LastHealthCheck, utcNow))
-                    .ConfigureAwait(false);
-
-                dbContext.HealthCheckResults.Add(SendStatus(new HealthCheckResult()
-                {
-                    Id = Guid.NewGuid(),
-                    DavItemId = itemId,
-                    Path = path,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    Result = HealthCheckResult.HealthResult.Unhealthy,
-                    RepairStatus = HealthCheckResult.RepairAction.ActionNeeded,
-                    Message = "Health check timed out repeatedly (likely due to slow download or hanging)."
-                }));
-                await dbContext.SaveChangesAsync().ConfigureAwait(false);
+                const string message = "Health check timed out repeatedly (likely due to slow download or hanging).";
+                await SaveFailureStateWithResultAsync(
+                    itemId,
+                    path,
+                    utcNow,
+                    nextCheck,
+                    true,
+                    message,
+                    message).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -304,6 +277,43 @@ public class HealthCheckService
                 Log.Warning($"[HealthCheck] Item `{name}` timed out during Urgent check. Keeping priority high for immediate retry.");
             }
         }
+    }
+
+    private async Task SaveFailureStateWithResultAsync(
+        Guid itemId,
+        string path,
+        DateTimeOffset utcNow,
+        DateTimeOffset nextHealthCheck,
+        bool isCorrupted,
+        string? corruptionReason,
+        string resultMessage,
+        CancellationToken ct = default)
+    {
+        await using var dbContext = new DavDatabaseContext();
+
+        var davItem = await dbContext.Items
+            .FirstOrDefaultAsync(x => x.Id == itemId, ct)
+            .ConfigureAwait(false);
+        if (davItem != null)
+        {
+            davItem.NextHealthCheck = nextHealthCheck;
+            davItem.LastHealthCheck = utcNow;
+            davItem.IsCorrupted = isCorrupted;
+            davItem.CorruptionReason = corruptionReason;
+        }
+
+        dbContext.HealthCheckResults.Add(SendStatus(new HealthCheckResult()
+        {
+            Id = Guid.NewGuid(),
+            DavItemId = itemId,
+            Path = path,
+            CreatedAt = utcNow,
+            Result = HealthCheckResult.HealthResult.Unhealthy,
+            RepairStatus = HealthCheckResult.RepairAction.ActionNeeded,
+            Message = resultMessage
+        }));
+
+        await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     public static IOrderedQueryable<DavItem> GetHealthCheckQueueItems(DavDatabaseClient dbClient, List<string>? categories = null)

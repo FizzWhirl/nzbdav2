@@ -62,8 +62,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-QUEUE-BULK-DELETE-VFS-FORGET");
-            Log.Warning("  FIX: Queue Step 5 bulk DavItem deletes now trigger WebDAV VFS cache invalidation for affected mount directories.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-BOUNDED-URGENT-SEGMENT-RACES");
+            Log.Warning("  FIX: Buffered streams now bound and coalesce urgent straggler race jobs while tracking active attempts independently.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

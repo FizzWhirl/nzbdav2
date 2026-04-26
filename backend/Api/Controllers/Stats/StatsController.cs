@@ -326,6 +326,99 @@ public class StatsController(
         });
     }
 
+    [HttpGet("stale-history-links")]
+    public Task<IActionResult> GetStaleHistoryLinks(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        [FromQuery] int graceHours = 24,
+        [FromQuery] string? search = null)
+    {
+        return ExecuteSafely(async () =>
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 200);
+            graceHours = Math.Clamp(graceHours, 1, 24 * 30);
+
+            var cutoff = DateTime.UtcNow.AddHours(-graceHours);
+            var now = DateTime.UtcNow;
+
+            var query = from item in dbContext.Items.AsNoTracking()
+                        join history in dbContext.HistoryItems.AsNoTracking()
+                            on item.HistoryItemId equals history.Id into historyJoin
+                        from history in historyJoin.DefaultIfEmpty()
+                        where item.HistoryItemId != null
+                              && (item.Type == DavItem.ItemType.NzbFile
+                                  || item.Type == DavItem.ItemType.RarFile
+                                  || item.Type == DavItem.ItemType.MultipartFile)
+                              && (history == null
+                                  || history.DownloadStatus == HistoryItem.DownloadStatusOption.Failed
+                                  || (history.DownloadStatus == HistoryItem.DownloadStatusOption.Completed
+                                      && !history.IsImported
+                                      && !history.IsArchived
+                                      && history.CompletedAt < cutoff))
+                        select new { item, history };
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                query = query.Where(x =>
+                    x.item.Name.Contains(search) ||
+                    x.item.Path.Contains(search) ||
+                    (x.history != null && x.history.JobName.Contains(search)));
+            }
+
+            var totalCount = await query.CountAsync().ConfigureAwait(false);
+            var rows = await query
+                .OrderBy(x => x.history == null ? DateTime.MinValue : x.history.CompletedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(x => new
+                {
+                    DavItemId = x.item.Id,
+                    x.item.Name,
+                    x.item.Path,
+                    x.item.Type,
+                    x.item.CreatedAt,
+                    x.item.HistoryItemId,
+                    HistoryExists = x.history != null,
+                    HistoryJobName = x.history == null ? null : x.history.JobName,
+                    HistoryCategory = x.history == null ? null : x.history.Category,
+                    CompletedAt = x.history == null ? (DateTime?)null : x.history.CompletedAt,
+                    DownloadStatus = x.history == null ? (HistoryItem.DownloadStatusOption?)null : x.history.DownloadStatus,
+                    IsImported = x.history != null && x.history.IsImported,
+                    IsArchived = x.history != null && x.history.IsArchived,
+                    DownloadDirId = x.history == null ? null : x.history.DownloadDirId
+                })
+                .ToListAsync()
+                .ConfigureAwait(false);
+
+            var items = rows.Select(x => new
+            {
+                x.DavItemId,
+                x.Name,
+                x.Path,
+                Type = x.Type.ToString(),
+                x.CreatedAt,
+                x.HistoryItemId,
+                x.HistoryExists,
+                x.HistoryJobName,
+                x.HistoryCategory,
+                x.CompletedAt,
+                x.DownloadStatus,
+                x.IsImported,
+                x.IsArchived,
+                x.DownloadDirId,
+                AgeHours = x.CompletedAt.HasValue ? Math.Round((now - x.CompletedAt.Value).TotalHours, 1) : (double?)null,
+                Reason = x.HistoryExists
+                    ? x.DownloadStatus == HistoryItem.DownloadStatusOption.Failed
+                        ? "failed-history-still-linked"
+                        : "completed-history-not-imported-after-grace"
+                    : "missing-history-row"
+            });
+
+            return Ok(new { items, totalCount, graceHours });
+        });
+    }
+
     [HttpPost("repair")]
     public Task<IActionResult> TriggerRepair([FromBody] RepairRequest request)
     {

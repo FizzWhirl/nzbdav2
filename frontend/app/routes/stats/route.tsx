@@ -12,7 +12,6 @@ import { DeletedFilesTable } from "./components/DeletedFilesTable";
 import { MissingArticlesTable } from "./components/MissingArticlesTable";
 import { MappedFilesTable } from "./components/MappedFilesTable";
 import { LogsConsole } from "./components/LogsConsole";
-import { LiveMetrics } from "./components/LiveMetrics";
 import { isAuthenticated } from "~/auth/authentication.server";
 import { FileDetailsModal } from "~/routes/health/components/file-details-modal/file-details-modal";
 import type { FileDetails } from "~/types/backend";
@@ -32,7 +31,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 
     const url = new URL(request.url);
     const range = url.searchParams.get("range") || "1h";
-    const tab = url.searchParams.get("tab") || "stats";
+    const requestedTab = url.searchParams.get("tab") || "stats";
+    const tab = requestedTab === "metrics" ? "stats" : requestedTab;
     const page = parseInt(url.searchParams.get("page") || "1");
     const pageSize = parseInt(url.searchParams.get("pageSize") || "10");
     const search = url.searchParams.get("search") || "";
@@ -118,7 +118,8 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
     const { addToast } = useToast();
     const { confirm } = useConfirm();
 
-    const activeTab = searchParams.get("tab") || "stats";
+    const requestedTab = searchParams.get("tab") || "stats";
+    const activeTab = requestedTab === "metrics" ? "stats" : requestedTab;
 
     const onWebsocketMessage = useCallback((topic: string, message: string) => {
         if (topic === 'cxs') {
@@ -419,9 +420,6 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                 </Tab>
                 <Tab eventKey="logs" title="System Logs">
                     {activeTab === 'logs' && <LogsConsole />}
-                </Tab>
-                <Tab eventKey="metrics" title="Live Metrics">
-                    {activeTab === 'metrics' && <LiveMetrics />}
                 </Tab>
             </Tabs>
             

@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-POOL-SHARED-PUMP");
-            Log.Warning("  PERF: SharedStreamEntry pump buffer is rented from ArrayPool to remove the per-entry 256KB unpooled allocation.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-QUEUE-PAGINATION");
+            Log.Warning("  FIX: In-progress queue item is pinned to page 1 only; subsequent pages return natural order.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

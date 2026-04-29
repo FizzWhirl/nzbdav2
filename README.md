@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Fix**: Queue pagination on the dashboard / queue page no longer pins the currently-downloading item to the top of every page — it is now shown only on page 1 and subsequent pages return their natural order. New NZBs arriving via WebSocket also no longer get appended to the bottom of whichever page is being viewed; the current page is refreshed from the server instead so pagination and total count stay accurate.
+
+## v0.6.Z (2026-04-28)
 *   **Performance**: `SharedStreamEntry.PumpLoop` now rents its 256KB pump buffer from `ArrayPool<byte>.Shared` and returns it on exit, removing the per-entry unpooled long-lived allocation that previously persisted for the duration of every shared playback stream.
 
 ## v0.6.Z (2026-04-28)

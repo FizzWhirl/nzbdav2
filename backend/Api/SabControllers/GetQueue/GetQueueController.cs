@@ -22,20 +22,28 @@ public class GetQueueController(
         var ct = request.CancellationToken;
         var totalCount = await dbClient.GetQueueItemsCount(request.Category, request.Search, ct).ConfigureAwait(false);
 
+        // The in-progress item is pinned to the top of page 1 only. On subsequent
+        // pages we return items in their natural order and do not re-inject the
+        // in-progress row, otherwise it would appear at the top of every page.
+        var isFirstPage = request.Start <= 0;
+
         // get queued items
-        var queueItems = (await dbClient.GetQueueItems(request.Category, request.Start, request.Limit, request.Search, ct).ConfigureAwait(false))
-            .Where(x => x.Id != inProgressQueueItem?.Id)
-            .ToArray();
+        var queueItemsQuery = await dbClient.GetQueueItems(request.Category, request.Start, request.Limit, request.Search, ct).ConfigureAwait(false);
+        var queueItems = isFirstPage
+            ? queueItemsQuery.Where(x => x.Id != inProgressQueueItem?.Id).ToArray()
+            : queueItemsQuery.ToArray();
 
         // get slots
-        var slots = queueItems
-            .Prepend(inProgressQueueItem)
-            .Where(queueItem => queueItem != null)
+        var orderedItems = isFirstPage && inProgressQueueItem != null
+            ? queueItems.Prepend(inProgressQueueItem)
+            : queueItems.AsEnumerable();
+
+        var slots = orderedItems
             .Select((queueItem, index) =>
             {
                 var percentage = (queueItem == inProgressQueueItem ? progressPercentage : 0)!.Value;
                 var status = queueItem == inProgressQueueItem ? "Downloading" : "Queued";
-                return GetQueueResponse.QueueSlot.FromQueueItem(queueItem!, index, percentage, status);
+                return GetQueueResponse.QueueSlot.FromQueueItem(queueItem, index, percentage, status);
             })
             .ToList();
 

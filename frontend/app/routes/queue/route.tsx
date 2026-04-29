@@ -129,9 +129,13 @@ export default function Queue(props: Route.ComponentProps) {
     }, [showHidden, historyCurrentPage, historySearchQuery, failureReason, statusFilter]);
 
     // queue events
-    const onAddQueueSlot = useCallback((queueSlot: QueueSlot) => {
-        setQueueSlots(slots => [...slots, queueSlot]);
-    }, [setQueueSlots]);
+    const onAddQueueSlot = useCallback((_queueSlot: QueueSlot) => {
+        // Don't optimistically append — that would put the new item at the bottom
+        // of whatever page the user is currently viewing (often page 1) regardless
+        // of whether it actually belongs there. Refresh from the server instead so
+        // pagination + total count stay accurate.
+        void refreshQueue();
+    }, [refreshQueue]);
 
     const onSelectQueueSlots = useCallback((ids: Set<string>, isSelected: boolean) => {
         setQueueSlots(slots => slots.map(x => ids.has(x.nzo_id) ? { ...x, isSelected } : x));

@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Performance**: WebDAV GET/HEAD copy buffer in `GetAndHeadHandlerPatch` is now rented from `ArrayPool<byte>.Shared` instead of allocating a fresh 256KB array per request, removing per-request large-object-heap churn under concurrent ranged reads.
+
+## v0.6.Z (2026-04-28)
 *   **Performance**: Removed the post-import ffmpeg decode-integrity sampling at 10% and 90% in `MediaAnalysisService` (and the now-unused `MediaAnalysisResult.TransientError` enum value and its dead switch case in `QueueItemProcessor`). Media analysis now stops after the ffprobe metadata probe, eliminating two extra ffmpeg seeks (and their associated WebDAV reads, segment fetches, and false-positive transient failures) per imported file. ffprobe metadata remains the corruption signal.
 
 ## v0.6.Z (2026-04-28)

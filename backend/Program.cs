@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-REMOVE-DECODE-CHECK");
-            Log.Warning("  CHANGE: Removed ffmpeg decode-integrity checks at 10%/90%; ffprobe metadata is the only post-import check.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-POOL-WEBDAV-COPY");
+            Log.Warning("  PERF: WebDAV GET/HEAD copy buffer is rented from ArrayPool to remove per-request 256KB LOH allocation.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

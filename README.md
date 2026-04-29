@@ -116,6 +116,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.Z (2026-04-28)
+*   **Docs**: Added an integrated, code-validated v2 of the memory usage improvement report (`docs/memory-usage-improvement-report-v2-2026-04-28.md`) and removed the superseded v1 draft.
+
 ## v0.6.Z (2026-04-27)
 *   **UI**: Removed the misleading `Connections Per Stream` control from Settings → WebDAV because normal playback currently draws elastically from the shared `Total Streaming Connections` pool rather than enforcing a hard per-stream cap.
 *   **UI**: Simplified WebDAV streaming validation and connection-pool guidance to focus on pooled provider capacity, total streaming permits, max buffered stream pumps, and streaming reserve.

@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-26-MIGRATION-METADATA");
-            Log.Warning("  FIX: Segment provider evidence migration now has EF metadata so it is discovered and applied.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-REMOVE-DECODE-CHECK");
+            Log.Warning("  CHANGE: Removed ffmpeg decode-integrity checks at 10%/90%; ffprobe metadata is the only post-import check.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
@@ -12,8 +11,7 @@ public enum MediaAnalysisResult
 {
     Success,
     Failed,
-    Timeout,
-    TransientError
+    Timeout
 }
 
 public class MediaAnalysisService(
@@ -70,42 +68,13 @@ public class MediaAnalysisService(
         else
         {
              item.MediaInfo = result;
-
-             // Metadata probe passed — now run decode checks at 75% and 90% to verify integrity
-             var integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, analysisRunId, 1, ct).ConfigureAwait(false);
-
-             // Retry decode check once on failure — transient provider issues can cause false positives
-             if (integrityErrors != null)
-             {
-                 Log.Warning("[MediaAnalysis] Decode check failed for {Name}: {Errors} — retrying in 3s", item.Name, integrityErrors);
-                 await Task.Delay(3000, ct).ConfigureAwait(false);
-                 integrityErrors = await RunDecodeCheckAsync(webDavUrl, result, item.Name, analysisRunId, 2, ct).ConfigureAwait(false);
-             }
-
-             if (integrityErrors != null)
-             {
-                 Log.Warning("[MediaAnalysis] Decode check failed on retry for {Name}: {Errors}", item.Name, integrityErrors);
-                 if (IsTransientDecodeError(integrityErrors))
-                 {
-                     Log.Warning("[MediaAnalysis] Decode failure is transient (provider/timeout) for {Name} — keeping file", item.Name);
-                     analysisResult = MediaAnalysisResult.TransientError;
-                 }
-                 else
-                 {
-                     item.IsCorrupted = true;
-                     item.CorruptionReason = $"Decode integrity check failed: {integrityErrors}";
-                     analysisResult = MediaAnalysisResult.Failed;
-                 }
-             }
-             else
-             {
-                 item.IsCorrupted = false;
-                 item.CorruptionReason = null;
-                 analysisResult = MediaAnalysisResult.Success;
-             }
+             // Decode-integrity sampling at 10%/90% has been removed — ffprobe metadata is the only check.
+             item.IsCorrupted = false;
+             item.CorruptionReason = null;
+             analysisResult = MediaAnalysisResult.Success;
         }
 
-        if (analysisResult != MediaAnalysisResult.Timeout && analysisResult != MediaAnalysisResult.TransientError)
+        if (analysisResult != MediaAnalysisResult.Timeout)
         {
             await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
         }
@@ -203,123 +172,6 @@ public class MediaAnalysisService(
         }
     }
 
-    /// <summary>
-    /// Decodes 5s at 75% and 90% of the file to verify data integrity.
-    /// Two check points near the end catch truncated files where data is only partially available.
-    /// </summary>
-    private async Task<string?> RunDecodeCheckAsync(string url, string ffprobeJson, string fileName, string analysisRunId, int attempt, CancellationToken ct)
-    {
-        double duration;
-        try
-        {
-            using var doc = JsonDocument.Parse(ffprobeJson);
-            var durationStr = doc.RootElement
-                .GetProperty("format")
-                .GetProperty("duration")
-                .GetString();
-            if (!double.TryParse(durationStr, System.Globalization.CultureInfo.InvariantCulture, out duration) || duration < 30)
-            {
-                Log.Debug("[MediaAnalysis] Skipping decode check — duration too short or unknown ({Duration}s)", durationStr);
-                return null;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Debug(ex, "[MediaAnalysis] Could not parse duration from ffprobe output — skipping decode check");
-            return null;
-        }
-
-        // Check at 10% and 90% — 10% catches corrupt/incomplete starts, 90% catches truncated files
-        double[] checkPoints = [0.10, 0.90];
-        foreach (var pct in checkPoints)
-        {
-            var seekPosition = (duration * pct).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-            var label = $"{(int)(pct * 100)}%";
-            var passId = $"ffmpeg-decode-{label}-attempt{attempt}";
-            Log.Information("[MediaAnalysis] Decode check ({Label}): -ss {SeekPos} -t 2 for {Name} (RunId={RunId}, Pass={Pass})", label, seekPosition, fileName, analysisRunId, passId);
-
-            var result = await RunSingleDecodeAsync(url, seekPosition, label, fileName, analysisRunId, passId, ct).ConfigureAwait(false);
-            if (result != null)
-                return result;
-        }
-
-        return null;
-    }
-
-    private async Task<string?> RunSingleDecodeAsync(string url, string seekPosition, string label, string fileName, string analysisRunId, string analysisPass, CancellationToken ct)
-    {
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            var headers = BuildAnalysisHeaders(analysisRunId, analysisPass);
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = ResolveExecutablePath("FFMPEG_PATH", "ffmpeg"),
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-
-            process.StartInfo.ArgumentList.Add("-headers");
-            process.StartInfo.ArgumentList.Add(headers);
-            process.StartInfo.ArgumentList.Add("-ss");
-            process.StartInfo.ArgumentList.Add(seekPosition);
-            process.StartInfo.ArgumentList.Add("-i");
-            process.StartInfo.ArgumentList.Add(url);
-            process.StartInfo.ArgumentList.Add("-t");
-            process.StartInfo.ArgumentList.Add("2");
-            process.StartInfo.ArgumentList.Add("-v");
-            process.StartInfo.ArgumentList.Add("error");
-            process.StartInfo.ArgumentList.Add("-f");
-            process.StartInfo.ArgumentList.Add("null");
-            process.StartInfo.ArgumentList.Add("-");
-
-            process.Start();
-
-            var errorTask = process.StandardError.ReadToEndAsync(ct);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(90));
-
-            try
-            {
-                await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                try { process.Kill(); } catch { /* already exited */ }
-                sw.Stop();
-                Log.Warning("[MediaAnalysis] Decode check ({Label}) timed out (90s, {Elapsed}ms) for {Name}", label, sw.ElapsedMilliseconds, fileName);
-                return $"[timeout] decode timed out at {label} (90s)";
-            }
-
-            var error = await errorTask.ConfigureAwait(false);
-            sw.Stop();
-
-            // Check both exit code AND stderr — ffmpeg can exit 0 while reporting real errors
-            // (e.g., "Stream ends prematurely", "partial file") for truncated files
-            if (process.ExitCode == 0 && string.IsNullOrWhiteSpace(error))
-            {
-                Log.Information("[MediaAnalysis] Decode check ({Label}) passed ({Elapsed}ms) for {Name}", label, sw.ElapsedMilliseconds, fileName);
-                return null;
-            }
-
-            var errorDetail = string.IsNullOrWhiteSpace(error) ? $"ffmpeg exit code {process.ExitCode}" : error.Trim();
-            if (errorDetail.Length > 200) errorDetail = errorDetail[..200];
-            Log.Warning("[MediaAnalysis] Decode check ({Label}) failed for {Name}: {Error}", label, fileName, errorDetail);
-            return errorDetail;
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            return $"[error] {ex.Message}";
-        }
-    }
-
     private static string BuildAnalysisHeaders(string analysisRunId, string analysisPass)
     {
         var token = EnvironmentUtil.GetVariable("FRONTEND_BACKEND_API_KEY");
@@ -330,36 +182,5 @@ public class MediaAnalysisService(
     {
         var configured = Environment.GetEnvironmentVariable(envName);
         return string.IsNullOrWhiteSpace(configured) ? defaultCommand : configured;
-    }
-
-    /// <summary>
-    /// Returns true if the decode error string represents a transient provider or network issue
-    /// rather than genuine file corruption. Transient errors should not mark a file as corrupt.
-    /// </summary>
-    private static bool IsTransientDecodeError(string error)
-    {
-        // Timeout during decode seek — not corruption, just slow provider/stream
-        if (error.StartsWith("[timeout]", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        // [error] prefix from our exception handler — network/IO exception, not corruption
-        if (error.StartsWith("[error]", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        // Provider-level HTTP/NNTP errors surfaced by ffmpeg/ffprobe
-        if (error.Contains("5XX Server Error", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (error.Contains("Server returned", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (error.Contains("Invalid NNTP Response", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        // Premature EOF — usually means provider didn't serve all segments (transient), not corrupt data
-        if (error.Contains("File ended prematurely", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (error.Contains("ends prematurely", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        return false;
     }
 }

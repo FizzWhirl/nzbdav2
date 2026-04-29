@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using Serilog;
 
@@ -244,7 +245,10 @@ public class SharedStreamEntry : IDisposable
 
     private async Task PumpLoop()
     {
-        var buffer = new byte[256 * 1024]; // 256KB chunks
+        // 256KB pump chunks, rented from ArrayPool to avoid a long-lived per-entry
+        // unpooled allocation while the shared stream is active.
+        const int pumpBufferSize = 256 * 1024;
+        var buffer = ArrayPool<byte>.Shared.Rent(pumpBufferSize);
 
         try
         {
@@ -259,7 +263,7 @@ public class SharedStreamEntry : IDisposable
                 int bytesRead;
                 try
                 {
-                    bytesRead = await _innerStream.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
+                    bytesRead = await _innerStream.ReadAsync(buffer, 0, pumpBufferSize).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -323,6 +327,10 @@ public class SharedStreamEntry : IDisposable
         {
             Log.Error(ex, "[SharedStreamEntry] Pump loop unexpected error. DavItemId={DavItemId}", _davItemId);
             TransitionToFailed(ex);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
         }
     }
 

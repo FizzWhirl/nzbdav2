@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Performance**: `SharedStreamEntry.PumpLoop` now rents its 256KB pump buffer from `ArrayPool<byte>.Shared` and returns it on exit, removing the per-entry unpooled long-lived allocation that previously persisted for the duration of every shared playback stream.
+
+## v0.6.Z (2026-04-28)
 *   **Performance**: WebDAV GET/HEAD copy buffer in `GetAndHeadHandlerPatch` is now rented from `ArrayPool<byte>.Shared` instead of allocating a fresh 256KB array per request, removing per-request large-object-heap churn under concurrent ranged reads.
 
 ## v0.6.Z (2026-04-28)

@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-POOL-WEBDAV-COPY");
-            Log.Warning("  PERF: WebDAV GET/HEAD copy buffer is rented from ArrayPool to remove per-request 256KB LOH allocation.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-POOL-SHARED-PUMP");
+            Log.Warning("  PERF: SharedStreamEntry pump buffer is rented from ArrayPool to remove the per-entry 256KB unpooled allocation.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

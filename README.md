@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Revert**: Roll back the two ArrayPool buffer-pooling changes — [`SharedStreamEntry.PumpLoop`](backend/Streams/SharedStreamEntry.cs) and [`GetAndHeadHandlerPatch.CopyToAsync`](backend/WebDav/Base/GetAndHeadHandlerPatch.cs) — and restore the original per-call buffer allocations.
+
+## v0.6.Z (2026-04-28)
 *   **Logging**: `MultiProviderNntpClient` now emits a single `Warning` when every configured provider returns `ArticleNotFound` for the same segment, including the segment id, file name, operation and the wall-clock duration of the provider walk. Previously this surfaced only as many `Debug`-level "Trying another provider" lines, which made it hard to see why a streaming worker had stalled.
 
 ## v0.6.Z (2026-04-28)

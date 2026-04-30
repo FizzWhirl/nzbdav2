@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using NWebDav.Server;
 using NWebDav.Server.Handlers;
 using NWebDav.Server.Helpers;
@@ -187,34 +186,25 @@ public class GetAndHeadHandlerPatch : IRequestHandler
         // Determine the number of bytes to read
         var bytesToRead = end - start + 1 ?? long.MaxValue;
 
-        // Read in 256KB blocks for optimal throughput. Buffer is rented from the
-        // shared ArrayPool so the per-request 256KB allocation is reused across
-        // concurrent WebDAV GET/HEAD calls instead of churning the LOH.
-        const int copyBufferSize = 256 * 1024;
-        var buffer = ArrayPool<byte>.Shared.Rent(copyBufferSize);
-        try
+        // Read in 256KB blocks for optimal throughput
+        var buffer = new byte[256 * 1024];
+
+        // Copy, until we don't get any data anymore
+        while (bytesToRead > 0)
         {
-            // Copy, until we don't get any data anymore
-            while (bytesToRead > 0)
-            {
-                // Read the requested bytes into memory
-                var requestedBytes = (int)Math.Min(bytesToRead, copyBufferSize);
-                var bytesRead = await src.ReadAsync(buffer, 0, requestedBytes, cancellationToken).ConfigureAwait(false);
+            // Read the requested bytes into memory
+            var requestedBytes = (int)Math.Min(bytesToRead, buffer.Length);
+            var bytesRead = await src.ReadAsync(buffer, 0, requestedBytes, cancellationToken).ConfigureAwait(false);
 
-                // We're done, if we cannot read any data anymore
-                if (bytesRead == 0)
-                    return;
+            // We're done, if we cannot read any data anymore
+            if (bytesRead == 0)
+                return;
 
-                // Write the data to the destination stream
-                await dest.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
+            // Write the data to the destination stream
+            await dest.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
 
-                // Decrement the number of bytes left to read
-                bytesToRead -= bytesRead;
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
+            // Decrement the number of bytes left to read
+            bytesToRead -= bytesRead;
         }
     }
 }

@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-LOG-PROVIDER-WALK");
-            Log.Warning("  LOG: Warn when a segment exhausts every provider with ArticleNotFound (makes streaming stalls obvious).");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-REVERT-POOL-BUFFERS");
+            Log.Warning("  REVERT: WebDAV GET copy buffer and SharedStreamEntry pump buffer back to per-call allocations.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

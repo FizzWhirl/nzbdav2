@@ -193,6 +193,8 @@ public class MultiProviderNntpClient : INntpClient
         var lastSuccessfulProvider = lastSuccessfulProviderContext?.Provider;
         T? result = default;
         int attempts = 0;
+        var walkStopwatch = Stopwatch.StartNew();
+        int notFoundCount = 0;
 
         foreach (var provider in orderedProviders)
         {
@@ -268,6 +270,7 @@ public class MultiProviderNntpClient : INntpClient
             catch (UsenetArticleNotFoundException e)
             {
                 stopwatch.Stop();
+                notFoundCount++;
 
                 // Explicitly caught to record it
                 RecordMissingArticle(provider.ProviderIndex, e.SegmentId, cancellationToken, operationName);
@@ -330,6 +333,23 @@ public class MultiProviderNntpClient : INntpClient
 
         if (result is UsenetStatResponse)
             return result;
+
+        // If every provider in the walk returned ArticleNotFound, emit a single
+        // clear warning so that stalls caused by missing-on-all-providers
+        // segments are obvious in the logs (otherwise this surfaces only as
+        // many Debug-level "Trying another provider" lines).
+        if (notFoundCount > 0 && notFoundCount == attempts && lastException?.SourceException is UsenetArticleNotFoundException missing)
+        {
+            var ctx = cancellationToken.GetContext<ConnectionUsageContext>();
+            var filename = ctx.DetailsObject?.Text ?? ctx.Details ?? "Unknown";
+            Log.Warning(
+                "[MultiProvider] Segment '{SegmentId}' missing across all {ProviderCount} providers (operation={Op}, file='{Filename}', walk took {Elapsed:F2}s). This causes the streaming worker to stall while it walks every provider for the segment.",
+                missing.SegmentId,
+                attempts,
+                operationName,
+                filename,
+                walkStopwatch.Elapsed.TotalSeconds);
+        }
 
         lastException?.Throw();
         throw new Exception("There are no usenet providers configured.");

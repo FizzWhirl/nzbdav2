@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Logging**: `MultiProviderNntpClient` now emits a single `Warning` when every configured provider returns `ArticleNotFound` for the same segment, including the segment id, file name, operation and the wall-clock duration of the provider walk. Previously this surfaced only as many `Debug`-level "Trying another provider" lines, which made it hard to see why a streaming worker had stalled.
+
+## v0.6.Z (2026-04-28)
 *   **Fix**: Queue pagination on the dashboard / queue page no longer pins the currently-downloading item to the top of every page — it is now shown only on page 1 and subsequent pages return their natural order. New NZBs arriving via WebSocket also no longer get appended to the bottom of whichever page is being viewed; the current page is refreshed from the server instead so pagination and total count stay accurate.
 
 ## v0.6.Z (2026-04-28)

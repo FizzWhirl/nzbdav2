@@ -14,6 +14,14 @@ interface Props {
     blocking?: boolean; // Added blocking filter prop
     orphaned?: boolean;
     isImported?: boolean;
+    /**
+     * Optional click handler invoked when a row is clicked. When provided the
+     * row becomes clickable and opens the shared FileDetailsModal (the same
+     * modal used on the Mapped Files tab and on the Health page). Action-cell
+     * controls stop propagation so clicking Repair / Delete buttons does not
+     * also open the modal.
+     */
+    onFileClick?: (davItemId: string) => void;
 }
 
 function ExpandableCell({ children, maxWidth, className = "" }: { children: React.ReactNode, maxWidth: string, className?: string }) {
@@ -35,7 +43,7 @@ function ExpandableCell({ children, maxWidth, className = "" }: { children: Reac
     );
 }
 
-export function MissingArticlesTable({ items, providers, totalCount, page, search, blocking, orphaned, isImported }: Props) {
+export function MissingArticlesTable({ items, providers, totalCount, page, search, blocking, orphaned, isImported, onFileClick }: Props) {
     const [searchParams, setSearchParams] = useSearchParams();
     const [searchValue, setSearchValue] = useState(search);
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -288,10 +296,23 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
                                 const isCritical = item.hasBlockingMissingArticles;
                                 const displayFilename = item.filename.split('/').pop() || item.filename;
                                 const key = `${item.jobName}-${item.filename}`; // Use filename as key instead of davItemId
+                                const canOpenDetails = !!onFileClick && !!item.davItemId;
+                                const handleRowClick = canOpenDetails
+                                    ? () => onFileClick!(item.davItemId!)
+                                    : undefined;
 
                                 return (
-                                    <tr key={key} style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }} className="border-bottom">
-                                        <td>
+                                    <tr
+                                        key={key}
+                                        style={{
+                                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                            cursor: canOpenDetails ? 'pointer' : undefined,
+                                        }}
+                                        className="border-bottom"
+                                        onClick={handleRowClick}
+                                        title={canOpenDetails ? 'Click for file details' : undefined}
+                                    >
+                                        <td onClick={(e) => e.stopPropagation()}>
                                             <BootstrapForm.Check 
                                                 type="checkbox" 
                                                 checked={selectedItems.has(item.filename)}
@@ -344,7 +365,7 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
                                                 {item.totalEvents}
                                             </span>
                                         </td>
-                                        <td>
+                                        <td onClick={(e) => e.stopPropagation()}>
                                             <div className="d-flex gap-1">
                                                 <Form method="post" className="d-inline" onSubmit={() => addToast("Repair triggered", "info", "Action Triggered")}>
                                                     <input type="hidden" name="action" value="trigger-repair" />

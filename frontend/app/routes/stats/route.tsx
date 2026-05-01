@@ -400,7 +400,8 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                             page={page}
                             search={search}
                             blocking={blocking}
-                            providers={currentBandwidth} 
+                            providers={currentBandwidth}
+                            onFileClick={onFileClick}
                         />
                     )}
                 </Tab>

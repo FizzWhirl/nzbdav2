@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-NFC-NORMALIZE");
-            Log.Warning("  FIX: Apply Unicode NFC normalization to MissingArticles filenames so NFC and NFD variants group together.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-MISSING-DETAILS-MODAL");
+            Log.Warning("  UI: File-details modal is now reachable from the missing-articles tab (frontend-only change).");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

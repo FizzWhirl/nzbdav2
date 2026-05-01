@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Reliability**: Cap zero-fill graceful degradation at N segments per stream (default `3`, configurable via DB key `usenet.max-graceful-degradation-segments` or env `MAX_GRACEFUL_DEGRADATION_SEGMENTS`). When the cap is exceeded, [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) throws `PermanentSegmentFailureException` instead of continuing to inject zeros — players see a clean EOF and stop playback gracefully instead of stalling on garbage decoded from the zero-filled bytes. The DavItem is also flipped to `IsCorrupted=true` immediately (regardless of the transient/permanent classification) so the next health-check cycle can repair or remove the file. Set the value to `int.MaxValue` to restore legacy "always zero-fill" behaviour, or `0` to truncate on the very first failure.
+
+## v0.6.Z (2026-04-28)
 *   **UI**: Rows in the [Missing Articles](frontend/app/routes/stats/components/MissingArticlesTable.tsx) tab are now clickable and open the shared file-details modal (the same one used on the Mapped Files tab and the Health page) when a `davItemId` is available. Action-cell controls (Repair, Delete, the row checkbox) stop propagation so they continue to work without opening the modal.
 
 ## v0.6.Z (2026-04-28)

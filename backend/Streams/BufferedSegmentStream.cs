@@ -28,6 +28,23 @@ public class BufferedSegmentStream : Stream
         s_concurrentStreamSlots = new SemaphoreSlim(max, max);
     }
 
+    /// <summary>
+    /// Per-stream cap on how many segments may be served via zero-fill graceful
+    /// degradation before the stream is forcibly terminated and the file is
+    /// permanently flagged corrupted. See ConfigManager.GetMaxGracefulDegradationSegments
+    /// for the full rationale. Default 3.
+    /// </summary>
+    private static volatile int s_maxGracefulDegradationSegments = 3;
+
+    public static void SetMaxGracefulDegradationSegments(int max)
+    {
+        // Negative values are treated as 0 (always truncate). No upper bound — operators
+        // who want the legacy "always zero-fill" behaviour can pass int.MaxValue.
+        s_maxGracefulDegradationSegments = Math.Max(0, max);
+    }
+
+    public static int GetMaxGracefulDegradationSegments() => s_maxGracefulDegradationSegments;
+
     // Memory-pressure throttle: when an OOM is observed in the fetch path, force GC and
     // briefly suppress new fetches across all streams to let the heap recover. This avoids
     // the cascading OOM storms that were observed under sustained streaming load.
@@ -1435,6 +1452,54 @@ public class BufferedSegmentStream : Stream
 
         // Track this segment as corrupted
         _corruptedSegments.Add((index, segmentId));
+
+        // Threshold check: once we have zero-filled too many segments in a single stream,
+        // continuing to substitute zeros is actively harmful — the player has almost certainly
+        // lost the codec sync point and will either hang or play garbage. Truncating the stream
+        // here produces a clean EOF on the WebDAV response, which players handle gracefully
+        // ("playback ended early") instead of stalling indefinitely.
+        //
+        // We also flip IsCorrupted=true unconditionally at this point: when 3+ segments in the
+        // same playback session have failed every retry on every provider, the file is
+        // unplayable regardless of whether the failures were "transient" or "permanent". The
+        // operator can override the threshold via usenet.max-graceful-degradation-segments
+        // (env: MAX_GRACEFUL_DEGRADATION_SEGMENTS) — set to int.MaxValue for the legacy
+        // "always zero-fill" behaviour, or 0 to truncate on the first failure.
+        var gdLimit = s_maxGracefulDegradationSegments;
+        if (_corruptedSegments.Count > gdLimit)
+        {
+            Log.Error("[BufferedStream] GRACEFUL DEGRADATION LIMIT EXCEEDED: Job={Job}, corrupted-segment count {Count} > limit {Limit}. Terminating stream and marking item as corrupted to give the player a clean EOF.",
+                jobName, _corruptedSegments.Count, gdLimit);
+
+            if (_usageContext?.DetailsObject?.DavItemId != null)
+            {
+                var davItemId = _usageContext.Value.DetailsObject.DavItemId.Value;
+                var reason = $"Stream truncated: {_corruptedSegments.Count} segments failed all retries (limit {gdLimit}). Last error: {lastException?.Message ?? "Unknown"}";
+                _ = Task.Run(async () => {
+                    try {
+                        using var db = new DavDatabaseContext();
+                        var item = await db.Items.FindAsync(davItemId);
+                        if (item != null) {
+                            item.IsCorrupted = true;
+                            item.CorruptionReason = reason;
+                            item.NextHealthCheck = DateTimeOffset.MinValue;
+                            await db.SaveChangesAsync();
+                            Log.Information("[BufferedStream] Marked item {ItemId} as corrupted (graceful-degradation limit exceeded): {Reason}", davItemId, reason);
+                        }
+                    } catch (Exception dbEx) {
+                        Log.Error(dbEx, "[BufferedStream] Failed to update item corruption status after graceful-degradation limit.");
+                    }
+                });
+            }
+
+            if (operationDetails != null)
+            {
+                operationDetails.ExcludedProviderIndices = null;
+            }
+
+            throw new PermanentSegmentFailureException(index, segmentId,
+                $"Graceful-degradation limit ({gdLimit}) exceeded with {_corruptedSegments.Count} corrupted segments. Last error: {lastException?.Message ?? "Unknown"}");
+        }
 
         // Report corruption back to database if we have a DavItemId
         // Only mark as permanently corrupted for genuine article/data failures.

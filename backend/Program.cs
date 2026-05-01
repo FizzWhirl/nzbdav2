@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-MISSING-DETAILS-MODAL");
-            Log.Warning("  UI: File-details modal is now reachable from the missing-articles tab (frontend-only change).");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-GD-LIMIT");
+            Log.Warning("  RELIABILITY: Cap zero-fill graceful degradation at N segments per stream (default 3); past the cap, truncate the stream and mark IsCorrupted so playback gets a clean EOF and the auto-repair pipeline can act.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -218,6 +218,7 @@ class Program
 
         // Set initial concurrent buffered stream cap
         BufferedSegmentStream.SetMaxConcurrentStreams(configManager.GetMaxConcurrentBufferedStreams());
+        BufferedSegmentStream.SetMaxGracefulDegradationSegments(configManager.GetMaxGracefulDegradationSegments());
 
         // Update on config change
         configManager.OnConfigChanged += (_, eventArgs) =>
@@ -225,6 +226,10 @@ class Program
             if (eventArgs.NewConfig.ContainsKey("usenet.max-concurrent-buffered-streams"))
             {
                 BufferedSegmentStream.SetMaxConcurrentStreams(configManager.GetMaxConcurrentBufferedStreams());
+            }
+            if (eventArgs.NewConfig.ContainsKey("usenet.max-graceful-degradation-segments"))
+            {
+                BufferedSegmentStream.SetMaxGracefulDegradationSegments(configManager.GetMaxGracefulDegradationSegments());
             }
         };
 

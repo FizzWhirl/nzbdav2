@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-PAR2-NOT-BLOCKING");
-            Log.Warning("  FIX: Missing PAR2 files no longer get marked HasBlockingMissingArticles in the stats UI.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-NFC-NORMALIZE");
+            Log.Warning("  FIX: Apply Unicode NFC normalization to MissingArticles filenames so NFC and NFD variants group together.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-GD-LIMIT");
-            Log.Warning("  RELIABILITY: Cap zero-fill graceful degradation at N segments per stream (default 3); past the cap, truncate the stream and mark IsCorrupted so playback gets a clean EOF and the auto-repair pipeline can act.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-GD-LEDGER");
+            Log.Warning("  RELIABILITY/UI: GD-cap truncations now dump corrupted segments into the missing-articles ledger; new Settings > WebDAV control exposes the cap.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -315,6 +315,23 @@ class Program
 
             // Start the OrganizedLinksUtil refresh service after initial setup
             OrganizedLinksUtil.StartRefreshService(app.Services, app.Services.GetRequiredService<ConfigManager>(), ct);
+
+            // Wire BufferedSegmentStream's missing-articles-ledger hooks now that
+            // the DI container is alive. The GD-cap truncation path uses these to
+            // dump corrupted segments into the ledger so the missing-articles UI
+            // reflects truncation events. Done here (not at app start) because
+            // ProviderErrorService is a singleton resolved from the DI container.
+            try
+            {
+                BufferedSegmentStream.SetMissingArticleLedgerHooks(
+                    () => app.Services.GetService<ProviderErrorService>(),
+                    () => app.Services.GetRequiredService<ConfigManager>().GetUsenetProviderConfig().Providers.Count
+                );
+            }
+            catch (Exception hookEx)
+            {
+                Log.Warning(hookEx, "Failed to wire BufferedSegmentStream missing-articles-ledger hooks; GD-cap truncations will not be reflected in the missing-articles tab.");
+            }
 
             // Initial call to InitializeAsync is part of the refresh service now,
             // so we don't need a separate call here. The refresh service will trigger it.

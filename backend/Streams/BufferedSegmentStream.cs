@@ -45,6 +45,24 @@ public class BufferedSegmentStream : Stream
 
     public static int GetMaxGracefulDegradationSegments() => s_maxGracefulDegradationSegments;
 
+    /// <summary>
+    /// Optional accessors injected at startup so that the GD-cap truncation path can
+    /// dump the affected segments into the missing-articles ledger. Kept as static
+    /// hooks (rather than DI) because BufferedSegmentStream itself is constructed
+    /// in many places (NzbFileStream, the throughput tester, the benchmark controller)
+    /// without the DI container being available.
+    /// </summary>
+    private static Func<ProviderErrorService?>? s_providerErrorServiceAccessor;
+    private static Func<int>? s_providerCountAccessor;
+
+    public static void SetMissingArticleLedgerHooks(
+        Func<ProviderErrorService?> providerErrorServiceAccessor,
+        Func<int> providerCountAccessor)
+    {
+        s_providerErrorServiceAccessor = providerErrorServiceAccessor;
+        s_providerCountAccessor = providerCountAccessor;
+    }
+
     // Memory-pressure throttle: when an OOM is observed in the fetch path, force GC and
     // briefly suppress new fetches across all streams to let the heap recover. This avoids
     // the cascading OOM storms that were observed under sustained streaming load.
@@ -1490,6 +1508,47 @@ public class BufferedSegmentStream : Stream
                         Log.Error(dbEx, "[BufferedStream] Failed to update item corruption status after graceful-degradation limit.");
                     }
                 });
+            }
+
+            // Dump _corruptedSegments to the missing-articles ledger so the file's
+            // segment-evidence reflects the truncation. This covers segments that
+            // failed for non-ArticleNotFound reasons (timeouts, connection errors)
+            // which would otherwise never appear in the ledger. We record one event
+            // per (segment, provider) so the per-segment provider bitmask shows the
+            // segment as failed across every provider — which is the truth, since
+            // we only get here after exhausting all providers + retries.
+            try
+            {
+                var providerErrorService = s_providerErrorServiceAccessor?.Invoke();
+                var providerCount = s_providerCountAccessor?.Invoke() ?? 0;
+                var ledgerFilename = _usageContext?.DetailsObject?.Text
+                                      ?? _usageContext?.Details
+                                      ?? jobName;
+                if (providerErrorService != null && providerCount > 0 && !string.IsNullOrEmpty(ledgerFilename))
+                {
+                    var isImported = _usageContext?.IsImported ?? false;
+                    var truncationError = $"Segment failed all retries (stream truncated at GD limit {gdLimit}). Last error: {lastException?.GetType().Name ?? "Unknown"}";
+                    foreach (var (segIndex, segId) in _corruptedSegments)
+                    {
+                        if (string.IsNullOrEmpty(segId)) continue;
+                        for (int providerIdx = 0; providerIdx < providerCount; providerIdx++)
+                        {
+                            providerErrorService.RecordError(
+                                providerIdx,
+                                ledgerFilename,
+                                segId,
+                                truncationError,
+                                isImported,
+                                "STREAM_TRUNCATED");
+                        }
+                    }
+                    Log.Information("[BufferedStream] Recorded {SegCount} truncated segments × {ProvCount} providers to missing-articles ledger for {Filename}",
+                        _corruptedSegments.Count, providerCount, ledgerFilename);
+                }
+            }
+            catch (Exception ledgerEx)
+            {
+                Log.Warning(ledgerEx, "[BufferedStream] Failed to dump corrupted segments to missing-articles ledger.");
             }
 
             if (operationDetails != null)

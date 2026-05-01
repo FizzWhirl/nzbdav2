@@ -117,6 +117,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **UI**: Added a "Max Graceful Degradation Segments" control to [Settings > WebDAV](frontend/app/routes/settings/webdav/webdav.tsx) so the GD-cap can be tuned without env vars or DB edits. Empty / unset is treated as the default (`3`).
+*   **Reliability**: When the GD-cap fires, [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) now also dumps every entry in `_corruptedSegments` (one event per segment per provider, tagged `STREAM_TRUNCATED`) into the `MissingArticleEvents` ledger. This guarantees that segments that failed for non-`ArticleNotFound` reasons (timeouts, connection errors) still appear on the Missing Articles page once the stream is truncated, and that the per-segment provider bitmask correctly shows the segment as failed across every provider. Wiring is via two new static hooks (`SetMissingArticleLedgerHooks`) populated from `Program.cs` once the DI container is alive.
+
+## v0.6.Z (2026-04-28)
 *   **Reliability**: Cap zero-fill graceful degradation at N segments per stream (default `3`, configurable via DB key `usenet.max-graceful-degradation-segments` or env `MAX_GRACEFUL_DEGRADATION_SEGMENTS`). When the cap is exceeded, [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) throws `PermanentSegmentFailureException` instead of continuing to inject zeros — players see a clean EOF and stop playback gracefully instead of stalling on garbage decoded from the zero-filled bytes. The DavItem is also flipped to `IsCorrupted=true` immediately (regardless of the transient/permanent classification) so the next health-check cycle can repair or remove the file. Set the value to `int.MaxValue` to restore legacy "always zero-fill" behaviour, or `0` to truncate on the very first failure.
 
 ## v0.6.Z (2026-04-28)

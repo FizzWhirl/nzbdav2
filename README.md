@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Fix**: PAR2 files (`*.par2`, `*.vol*+*.par2`) are no longer marked as `HasBlockingMissingArticles` in [`ProviderErrorService`](backend/Services/ProviderErrorService.cs) when they go missing across all providers. PAR2 in nzbdav is only used as a filename / metadata oracle (no Reed-Solomon recovery is performed), so a missing PAR2 never blocks streaming and should not show up as critical/blocking in the missing-articles UI. Inspired by SAB 5.0 fix “If only par2 files were missing, jobs could get incorrectly aborted”.
+
+## v0.6.Z (2026-04-28)
 *   **Revert**: Roll back the two ArrayPool buffer-pooling changes — [`SharedStreamEntry.PumpLoop`](backend/Streams/SharedStreamEntry.cs) and [`GetAndHeadHandlerPatch.CopyToAsync`](backend/WebDav/Base/GetAndHeadHandlerPatch.cs) — and restore the original per-call buffer allocations.
 
 ## v0.6.Z (2026-04-28)

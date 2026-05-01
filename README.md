@@ -117,6 +117,14 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Reliability**: Detect moov-at-end MP4 / MOV files during media analysis and downgrade them to the Unknown GD-cap tier (cap = `0`, truncate on the very first permanent segment failure). [`MediaAnalysisService`](backend/Services/MediaAnalysisService.cs) now performs a 512-byte HTTP `Range` probe of the file after a successful ffprobe, walks the top-level MP4 box atoms, and injects a top-level `__nzbdav_mp4_layout` field (`faststart` / `moov-at-end` / `fragmented` / `unknown`) into the stored `MediaInfo` JSON. No DB migration required. [`BufferedSegmentStream.ResolveContainerFragilityTier`](backend/Streams/BufferedSegmentStream.cs) reads this field and:
+    *   `moov-at-end` → Unknown tier (cap = `0`) — losing any segment risks losing the moov box, which makes the entire file unplayable.
+    *   `fragmented` (real `moof` boxes) → Resilient tier (cap = configured) — fragmented MP4 is highly resync-tolerant.
+    *   `faststart` / missing / `unknown` → Standard tier (cap = `min(configured, 2)`).
+*   **Logging**: [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) now logs the resolved effective GD cap (configured + effective values) at every stream construction so operators can audit which container tier a file landed in without waiting for an actual GD failure.
+*   **UI**: Settings > WebDAV help text updated to document moov-at-end detection and the fragmented-MP4 promotion.
+
+## v0.6.Z (2026-04-28)
 *   **Reliability**: The graceful-degradation cap is now **container-aware**. The user-configured value (Settings > WebDAV → "Max Graceful Degradation Segments") still applies as the *maximum*, but [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) refines it per file from the ffprobe-populated `MediaInfo.format_name` (cached per stream after the first GD failure):
     *   **Resilient** containers (MKV / WebM / MPEG-TS / fragmented MP4) — use the configured cap unchanged. These containers have strong resync semantics (cluster boundaries / packet sync bytes / fragment boxes), so zero-fill substitution is more likely to be skipped by a tolerant decoder.
     *   **Standard** containers (MP4 / MOV / AVI / WMV / FLV / 3GP / ASF) — hard-capped at `min(configured, 2)`. Their structural metadata (moov / index boxes) is sensitive to byte-offset corruption.

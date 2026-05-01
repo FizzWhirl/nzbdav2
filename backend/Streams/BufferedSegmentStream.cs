@@ -159,6 +159,28 @@ public class BufferedSegmentStream : Stream
             || formatName.Contains("avi") || formatName.Contains("asf")
             || formatName.Contains("wmv") || formatName.Contains("flv"))
         {
+            // Fragmented MP4 (moof boxes per fragment) is highly resilient — promote to Resilient tier.
+            // moov-at-end MP4/MOV is catastrophic — losing the moov box means the whole file is
+            // unplayable. Demote to Unknown tier (cap=0). The "__nzbdav_mp4_layout" field is
+            // injected by MediaAnalysisService.TryAddMp4LayoutAnnotationAsync.
+            const string layoutKey = "\"__nzbdav_mp4_layout\"";
+            var layoutKeyIdx = lower.IndexOf(layoutKey, StringComparison.Ordinal);
+            if (layoutKeyIdx >= 0)
+            {
+                var lc = lower.IndexOf(':', layoutKeyIdx + layoutKey.Length);
+                if (lc >= 0)
+                {
+                    var lq = lower.IndexOf('"', lc + 1);
+                    var le = lq >= 0 ? lower.IndexOf('"', lq + 1) : -1;
+                    if (lq >= 0 && le >= 0)
+                    {
+                        var layout = lower.Substring(lq + 1, le - lq - 1);
+                        if (layout == "moov-at-end") return ContainerFragilityTier.Unknown;
+                        if (layout == "fragmented") return ContainerFragilityTier.Resilient;
+                        // "faststart" or "unknown" → fall through to Standard.
+                    }
+                }
+            }
             return ContainerFragilityTier.Standard;
         }
 
@@ -611,6 +633,28 @@ public class BufferedSegmentStream : Stream
 
         Length = fileSize;
         _totalSegments = effectiveCount;
+
+        // Surface the resolved GD-cap tier as an info log so operators can audit which
+        // container tier a file landed in without having to wait for an actual GD failure.
+        // We do this once per stream construction; the tier resolver caches its result so
+        // this won't trigger redundant DB lookups during normal streaming.
+        try
+        {
+            if (_usageContext?.DetailsObject?.DavItemId != null)
+            {
+                var configuredCap = s_maxGracefulDegradationSegments;
+                var effectiveCap = ResolveEffectiveGracefulDegradationCap(configuredCap);
+                var jobName = _usageContext?.DetailsObject?.Text ?? "Unknown";
+                Log.Information(
+                    "[BufferedStream] GD cap resolved for stream: configured={Configured} effective={Effective} (Job={Job}, DavItemId={DavItemId})",
+                    configuredCap, effectiveCap, jobName, _usageContext.Value.DetailsObject.DavItemId);
+            }
+        }
+        catch (Exception logEx)
+        {
+            // Never let logging kill the stream.
+            Log.Debug(logEx, "[BufferedStream] Failed to log effective GD cap at construction.");
+        }
     }
 
     private void UpdateUsageContext()

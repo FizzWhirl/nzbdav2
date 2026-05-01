@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-GD-CONTAINER-AWARE");
-            Log.Warning("  RELIABILITY/UI: GD cap is now per-container (resilient = configured, standard = min(configured,2), unknown = 0); Missing Articles tab shows a 'Truncated' badge when STREAM_TRUNCATED events exist.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-MOOV-AT-END");
+            Log.Warning("  RELIABILITY: MediaAnalysis now probes MP4/MOV files for moov-at-end layout; the GD-cap tier resolver uses that to hard-cap moov-at-end files at 0 (truncate on first failure). Effective tier is logged at every stream construction.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

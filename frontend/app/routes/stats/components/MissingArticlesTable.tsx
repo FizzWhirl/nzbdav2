@@ -346,6 +346,23 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
                                                     </span>
                                                 </OverlayTrigger>
 
+                                                {(item.operationCounts?.["STREAM_TRUNCATED"] ?? 0) > 0 && (
+                                                    <OverlayTrigger
+                                                        placement="top"
+                                                        overlay={
+                                                            <Tooltip id={`truncated-tip-${key}`}>
+                                                                Stream was truncated mid-playback after the graceful-degradation cap was exceeded.
+                                                                {' '}{item.operationCounts["STREAM_TRUNCATED"]} segment(s) recorded as failed across all providers
+                                                                via the truncation dump (in addition to any per-provider <code>ARTICLE_RETRIEVAL</code> events).
+                                                            </Tooltip>
+                                                        }
+                                                    >
+                                                        <span className="badge bg-info text-dark" style={{ cursor: 'help' }}>
+                                                            Truncated
+                                                        </span>
+                                                    </OverlayTrigger>
+                                                )}
+
                                                 <OverlayTrigger placement="top" overlay={renderOperationTooltip(item.operationCounts)}>
                                                     <span className="badge bg-secondary" style={{ cursor: 'help' }}>
                                                         {Object.entries(item.operationCounts || {})

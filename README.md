@@ -117,6 +117,14 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Reliability**: The graceful-degradation cap is now **container-aware**. The user-configured value (Settings > WebDAV → "Max Graceful Degradation Segments") still applies as the *maximum*, but [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) refines it per file from the ffprobe-populated `MediaInfo.format_name` (cached per stream after the first GD failure):
+    *   **Resilient** containers (MKV / WebM / MPEG-TS / fragmented MP4) — use the configured cap unchanged. These containers have strong resync semantics (cluster boundaries / packet sync bytes / fragment boxes), so zero-fill substitution is more likely to be skipped by a tolerant decoder.
+    *   **Standard** containers (MP4 / MOV / AVI / WMV / FLV / 3GP / ASF) — hard-capped at `min(configured, 2)`. Their structural metadata (moov / index boxes) is sensitive to byte-offset corruption.
+    *   **Unknown / non-video** files — hard-capped at `0` (truncate on the very first failure).
+*   **UI**: The Settings > WebDAV help text now documents what the configured cap applies to and which behaviours are fixed (per the per-container override above).
+*   **UI**: The [Missing Articles](frontend/app/routes/stats/components/MissingArticlesTable.tsx) table now shows a "Truncated" badge (with hover-tooltip explaining the count) on rows that have any `STREAM_TRUNCATED` events recorded in `OperationCountsJson` — i.e. files whose stream was forcibly truncated by the GD cap. This makes it easy to distinguish GD-cap truncations from genuine `ARTICLE_RETRIEVAL` failures at a glance.
+
+## v0.6.Z (2026-04-28)
 *   **UI**: Added a "Max Graceful Degradation Segments" control to [Settings > WebDAV](frontend/app/routes/settings/webdav/webdav.tsx) so the GD-cap can be tuned without env vars or DB edits. Empty / unset is treated as the default (`3`).
 *   **Reliability**: When the GD-cap fires, [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) now also dumps every entry in `_corruptedSegments` (one event per segment per provider, tagged `STREAM_TRUNCATED`) into the `MissingArticleEvents` ledger. This guarantees that segments that failed for non-`ArticleNotFound` reasons (timeouts, connection errors) still appear on the Missing Articles page once the stream is truncated, and that the per-segment provider bitmask correctly shows the segment as failed across every provider. Wiring is via two new static hooks (`SetMissingArticleLedgerHooks`) populated from `Program.cs` once the DI container is alive.
 

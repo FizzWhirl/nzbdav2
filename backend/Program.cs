@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-TIER-IN-MODAL");
-            Log.Warning("  UI: File-details modal now shows the resolved Streaming Tier (Resilient / Standard / Unknown) and the MP4 layout (faststart / moov-at-end / fragmented) for each file, mirroring the backend GD-cap resolution.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-LAZY-BACKFILL-AND-TRUNC-BYPASS");
+            Log.Warning("  RELIABILITY: BufferedSegmentStream now lazily backfills the __nzbdav_mp4_layout annotation for legacy MP4-family files on first stream (recursion-safe via Streaming-only gate + in-flight dedupe). HealthCheckService now bypasses the 24h Arr-import grace gate for items hard-truncated by the streaming layer (CorruptionReason starts with 'Stream truncated:').");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -326,6 +326,11 @@ class Program
                 BufferedSegmentStream.SetMissingArticleLedgerHooks(
                     () => app.Services.GetService<ProviderErrorService>(),
                     () => app.Services.GetRequiredService<ConfigManager>().GetUsenetProviderConfig().Providers.Count
+                );
+                // Wire the lazy MP4-layout backfill so the streaming path can fix legacy
+                // MP4 files that were analyzed before the layout-probe feature shipped.
+                BufferedSegmentStream.SetMediaAnalysisServiceAccessor(
+                    () => app.Services.GetService<MediaAnalysisService>()
                 );
             }
             catch (Exception hookEx)

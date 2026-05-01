@@ -64,6 +64,21 @@ public class BufferedSegmentStream : Stream
     }
 
     /// <summary>
+    /// Optional accessor for the MediaAnalysisService, injected at startup. Lets the
+    /// stream-construction path lazily backfill the <c>__nzbdav_mp4_layout</c> annotation
+    /// for MP4-family files that were analyzed before the layout-probe feature shipped.
+    /// </summary>
+    private static Func<MediaAnalysisService?>? s_mediaAnalysisServiceAccessor;
+    public static void SetMediaAnalysisServiceAccessor(Func<MediaAnalysisService?> accessor)
+        => s_mediaAnalysisServiceAccessor = accessor;
+
+    /// <summary>
+    /// Tracks DavItemIds with an MP4-layout backfill currently in flight, so concurrent
+    /// stream constructions for the same file don't kick off duplicate probes.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, byte> s_mp4LayoutBackfillsInFlight = new();
+
+    /// <summary>
     /// Container fragility tier — drives the per-file effective GD cap. Computed once per
     /// file from ffprobe metadata (DavItem.MediaInfo) by parsing the format_name field.
     ///
@@ -126,6 +141,9 @@ public class BufferedSegmentStream : Stream
             Log.Warning(ex, "[BufferedStream] Failed to load MediaInfo for container-fragility resolution; defaulting to Resilient tier.");
             return ContainerFragilityTier.Resilient;
         }
+
+        // Cache the raw MediaInfo for the lazy-backfill check at the end of construction.
+        _cachedMediaInfoForLayoutCheck = mediaInfoJson;
 
         if (string.IsNullOrWhiteSpace(mediaInfoJson)) return ContainerFragilityTier.Unknown;
 
@@ -408,6 +426,10 @@ public class BufferedSegmentStream : Stream
     // the first GD failure. -1 = not yet computed. See ResolveEffectiveGracefulDegradationCap.
     private int _cachedEffectiveGdCap = -1;
 
+    // Cached MediaInfo JSON loaded by ResolveContainerFragilityTier — used by the
+    // construction-time lazy MP4-layout backfill check so we don't double-query the DB.
+    private string? _cachedMediaInfoForLayoutCheck;
+
     // Per-stream provider scoring for cooldown system
     private readonly ConcurrentDictionary<int, ProviderStreamScore> _providerScores = new();
 
@@ -648,6 +670,58 @@ public class BufferedSegmentStream : Stream
                 Log.Information(
                     "[BufferedStream] GD cap resolved for stream: configured={Configured} effective={Effective} (Job={Job}, DavItemId={DavItemId})",
                     configuredCap, effectiveCap, jobName, _usageContext.Value.DetailsObject.DavItemId);
+
+                // Lazy backfill: if this is a real user-facing streaming request (not an
+                // analysis / probe / health-check pass) and the file's MediaInfo lacks the
+                // __nzbdav_mp4_layout annotation, fire-and-forget a one-shot HTTP probe to
+                // populate it. This handles legacy MP4-family files that were analyzed
+                // before the layout-probe feature shipped — they default to Standard tier
+                // (cap ≤ 2) on first stream, and from the next stream onwards they get the
+                // correct moov-at-end / faststart / fragmented tier.
+                //
+                // The recursion check (Streaming only, never QueueAnalysis / Analysis) is
+                // critical: the probe HTTP GET creates another BufferedSegmentStream, and
+                // we must not have it kick off another probe.
+                if (_usageContext.Value.UsageType == ConnectionUsageType.Streaming
+                    && _cachedMediaInfoForLayoutCheck != null
+                    && !_cachedMediaInfoForLayoutCheck.Contains("\"__nzbdav_mp4_layout\"", StringComparison.Ordinal)
+                    && IsMp4FamilyMediaInfo(_cachedMediaInfoForLayoutCheck))
+                {
+                    var davItemId = _usageContext.Value.DetailsObject.DavItemId.Value;
+                    if (s_mp4LayoutBackfillsInFlight.TryAdd(davItemId, 0))
+                    {
+                        var svc = s_mediaAnalysisServiceAccessor?.Invoke();
+                        if (svc != null)
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    using var probeCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                                    var resolvedLayout = await svc.BackfillMp4LayoutAnnotationAsync(davItemId, probeCts.Token).ConfigureAwait(false);
+                                    if (!string.IsNullOrEmpty(resolvedLayout))
+                                    {
+                                        Log.Information("[BufferedStream] MP4 layout backfilled for DavItemId={DavItemId} → layout={Layout}. Subsequent streams will use the refined tier.",
+                                            davItemId, resolvedLayout);
+                                    }
+                                }
+                                catch (Exception probeEx)
+                                {
+                                    Log.Debug(probeEx, "[BufferedStream] Lazy MP4 layout backfill failed for DavItemId={DavItemId}.", davItemId);
+                                }
+                                finally
+                                {
+                                    s_mp4LayoutBackfillsInFlight.TryRemove(davItemId, out _);
+                                }
+                            });
+                        }
+                        else
+                        {
+                            // No accessor wired — make sure we don't leak the in-flight marker.
+                            s_mp4LayoutBackfillsInFlight.TryRemove(davItemId, out _);
+                        }
+                    }
+                }
             }
         }
         catch (Exception logEx)
@@ -655,6 +729,19 @@ public class BufferedSegmentStream : Stream
             // Never let logging kill the stream.
             Log.Debug(logEx, "[BufferedStream] Failed to log effective GD cap at construction.");
         }
+    }
+
+    private static bool IsMp4FamilyMediaInfo(string mediaInfoJson)
+    {
+        var lower = mediaInfoJson.ToLowerInvariant();
+        var idx = lower.IndexOf("\"format_name\"", StringComparison.Ordinal);
+        if (idx < 0) return false;
+        var colon = lower.IndexOf(':', idx);
+        var qs = colon > 0 ? lower.IndexOf('"', colon + 1) : -1;
+        var qe = qs > 0 ? lower.IndexOf('"', qs + 1) : -1;
+        if (qs < 0 || qe < 0) return false;
+        var fmt = lower.Substring(qs + 1, qe - qs - 1);
+        return fmt.Contains("mp4") || fmt.Contains("mov") || fmt.Contains("m4a") || fmt.Contains("3gp");
     }
 
     private void UpdateUsageContext()

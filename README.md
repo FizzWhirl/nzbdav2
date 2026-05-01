@@ -117,6 +117,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **Reliability**: [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) now lazily backfills the `__nzbdav_mp4_layout` annotation for MP4-family files that were analyzed before the layout-probe feature shipped. On the first user-facing streaming request for any such file, a one-shot HTTP probe runs in the background, fetches the first 512 bytes via the existing analysis-mode WebDAV path, parses the box atoms, and writes the resolved layout (`faststart` / `moov-at-end` / `fragmented` / `unknown`) into the file's `MediaInfo` JSON. From the next stream onwards the file uses its correctly-tiered effective GD cap. Recursion is prevented by gating on `ConnectionUsageType.Streaming` (so the inner probe stream — which uses `QueueAnalysis` — never re-fires) and by deduplicating concurrent backfills via a static in-flight set keyed by `DavItemId`.
+*   **Reliability**: [`HealthCheckService`](backend/Services/HealthCheckService.cs) now bypasses the 24-hour Sonarr/Radarr-import grace gate when the item was already hard-truncated by the streaming layer (i.e. `IsCorrupted == true && CorruptionReason starts with "Stream truncated:"`). The cached truncation evidence already proves the file can't satisfy a play, so making Sonarr/Radarr wait 24 h before triggering a repair / re-grab is needless delay.
+
+## v0.6.Z (2026-04-28)
 *   **UI**: The file-details modal now surfaces the **Streaming tier** for every analyzed file (Resilient / Standard / Unknown), plus the resolved **MP4 layout** (`faststart` / `moov-at-end` / `fragmented`) when applicable, so users can see at a glance why a file was tiered the way it was. Resolution mirrors [`BufferedSegmentStream.ResolveContainerFragilityTier`](backend/Streams/BufferedSegmentStream.cs) — Matroska/WebM/MPEG-TS and fragmented MP4 → Resilient (full configured cap), faststart MP4 / MOV / AVI / WMV / FLV → Standard (cap ≤ 2), moov-at-end MP4 → Unknown (cap = 0, truncate on first failure).
 
 ## v0.6.Z (2026-04-28)

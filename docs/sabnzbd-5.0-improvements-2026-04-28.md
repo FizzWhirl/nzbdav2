@@ -1,7 +1,7 @@
 # SABnzbd 5.0 Release Notes — Applicability to nzbdav
 
 Date: 2026-04-28
-Status: Analysis only (no code changes yet)
+Status: Deep-dive complete. Implementation outcomes recorded inline below.
 
 This document maps each SABnzbd 5.0.0 release-note item against the current
 nzbdav codebase and rates whether it is applicable, already addressed, or
@@ -203,3 +203,15 @@ in the deobfuscation steps. Low cost, low risk.
 4. **Unicode NFC normalization** of filenames at ingestion.
 5. **Disk-free warning** for the config volume.
 6. **NNTP Pipelining** — biggest potential win, biggest cost; do last as a focused project.
+
+---
+
+## Implementation outcomes (2026-04-28)
+
+| # | Item | Outcome | Commit | Reason |
+|---|---|---|---|---|
+| 1 | NNTP Pipelining | **Deferred** | — | Vendored UsenetSharp uses `AsyncSemaphore _commandLock = new(1)` to enforce strict per-connection request-response sequencing, with the lock held for the entire body stream. Pipelining would require replacing the lock with an ordered request queue, demultiplexing a single shared response-reader loop into N `Pipe`s, changing the public API to support batching, and updating every call site. Multi-day project, high risk of silent body-misattribution bugs. nzbdav's typical 25-connections-per-stream model already amortizes RTT across parallelism, so the benefit is concentrated on low-connection / high-RTT users. Flag as a future focused project. |
+| 2 | PAR2 should not flip `HasBlockingMissingArticles` | **Implemented** | [`5bac1da8`](https://github.com/FizzWhirl/nzbdav2/commit/5bac1da8) | Confirmed `HasBlockingMissingArticles` is consumed only by the stats UI ("critical" badge) and the missing-articles list filter — it doesn't gate downloads. PAR2 in nzbdav is metadata-only (no Reed-Solomon recovery), so missing PAR2 should never be flagged critical. Added `IsPar2Filename` helper and skipped the flip in both `PersistEvents` and `BackfillSummariesAsync`. |
+| 3 | Drop 3 s `MediaAnalysisService` delay | **Skipped** | — | Re-read of [`MediaAnalysisService.AnalyzeMediaAsync`](backend/Services/MediaAnalysisService.cs#L41) showed the `Task.Delay(3000)` is **only on the retry path** when ffprobe returned an empty result on the first attempt — it's a per-failure backoff, not a per-job tax. Removing it would cause more rapid retries on transient provider hiccups. |
+| 4 | Bounded provider-walk timeout | **Skipped** | — | Each provider's per-operation timeout is already configurable via `GetUsenetOperationTimeout()` (default 90 s, applied per provider via [`MultiConnectionNntpClient.GetDynamicTimeout`](backend/Clients/Usenet/MultiConnectionNntpClient.cs#L72)). Health-check is already bounded via `cts.CancelAfter`. Adding an outer cap on the streaming-worker walk would risk false-failing legitimately slow-but-eventually-succeeding fetches. The new `[MultiProvider] Segment ... missing across all N providers` warning gives users the data they need to tune the existing timeout knob. |
+| 8 | Unicode NFC normalization of filenames | **Implemented** | [`8a78f529`](https://github.com/FizzWhirl/nzbdav2/commit/8a78f529) | `NormalizeFilenameForGrouping` is the join key that maps events to summaries; mixed NFC/NFD variants of the same filename would create duplicate summary rows whose evidence bitsets never converge. Added `string.Normalize(NormalizationForm.FormC)` at function entry. Limited scope to this one function — DB-write paths are out of scope. |

@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-04-28)
+*   **UI**: The file-details modal now surfaces the **Streaming tier** for every analyzed file (Resilient / Standard / Unknown), plus the resolved **MP4 layout** (`faststart` / `moov-at-end` / `fragmented`) when applicable, so users can see at a glance why a file was tiered the way it was. Resolution mirrors [`BufferedSegmentStream.ResolveContainerFragilityTier`](backend/Streams/BufferedSegmentStream.cs) — Matroska/WebM/MPEG-TS and fragmented MP4 → Resilient (full configured cap), faststart MP4 / MOV / AVI / WMV / FLV → Standard (cap ≤ 2), moov-at-end MP4 → Unknown (cap = 0, truncate on first failure).
+
+## v0.6.Z (2026-04-28)
 *   **Reliability**: Detect moov-at-end MP4 / MOV files during media analysis and downgrade them to the Unknown GD-cap tier (cap = `0`, truncate on the very first permanent segment failure). [`MediaAnalysisService`](backend/Services/MediaAnalysisService.cs) now performs a 512-byte HTTP `Range` probe of the file after a successful ffprobe, walks the top-level MP4 box atoms, and injects a top-level `__nzbdav_mp4_layout` field (`faststart` / `moov-at-end` / `fragmented` / `unknown`) into the stored `MediaInfo` JSON. No DB migration required. [`BufferedSegmentStream.ResolveContainerFragilityTier`](backend/Streams/BufferedSegmentStream.cs) reads this field and:
     *   `moov-at-end` → Unknown tier (cap = `0`) — losing any segment risks losing the moov box, which makes the entire file unplayable.
     *   `fragmented` (real `moof` boxes) → Resilient tier (cap = configured) — fragmented MP4 is highly resync-tolerant.

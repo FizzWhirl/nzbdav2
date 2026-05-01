@@ -63,8 +63,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-MOOV-AT-END");
-            Log.Warning("  RELIABILITY: MediaAnalysis now probes MP4/MOV files for moov-at-end layout; the GD-cap tier resolver uses that to hard-cap moov-at-end files at 0 (truncate on first failure). Effective tier is logged at every stream construction.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-TIER-IN-MODAL");
+            Log.Warning("  UI: File-details modal now shows the resolved Streaming Tier (Resilient / Standard / Unknown) and the MP4 layout (faststart / moov-at-end / fragmented) for each file, mirroring the backend GD-cap resolution.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

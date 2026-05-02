@@ -67,6 +67,21 @@ public class MediaAnalysisService(
         }
         else
         {
+             // Detect moov-at-end MP4/MOV layout so the BufferedSegmentStream graceful-degradation
+             // tier resolver can hard-cap these as Unknown (cap=0) — losing any segment in a
+             // moov-at-end file risks losing the moov box, which makes the whole file unplayable.
+             // We mutate the ffprobe JSON in place to add a top-level "__nzbdav_mp4_layout" field
+             // (no DB migration required). This is a no-op for non-MP4 containers.
+             try
+             {
+                 var augmented = await TryAddMp4LayoutAnnotationAsync(result, webDavUrl, analysisRunId, ct).ConfigureAwait(false);
+                 if (augmented != null) result = augmented;
+             }
+             catch (Exception probeEx)
+             {
+                 Log.Debug(probeEx, "[MediaAnalysis] MP4 layout probe failed for {Name}; treating as faststart by default.", item.Name);
+             }
+
              item.MediaInfo = result;
              // Decode-integrity sampling at 10%/90% has been removed — ffprobe metadata is the only check.
              item.IsCorrupted = false;
@@ -182,5 +197,138 @@ public class MediaAnalysisService(
     {
         var configured = Environment.GetEnvironmentVariable(envName);
         return string.IsNullOrWhiteSpace(configured) ? defaultCommand : configured;
+    }
+
+    /// <summary>
+    /// Static HttpClient for the MP4 layout probe. Reused across calls (HttpClient is designed
+    /// for reuse). Short timeout because the probe must not block the analysis pipeline.
+    /// </summary>
+    private static readonly HttpClient s_layoutProbeClient = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(10)
+    };
+
+    /// <summary>
+    /// If <paramref name="ffprobeJson"/> describes an MP4 / MOV file, fetches the first
+    /// 512 bytes via a Range request to <paramref name="webDavUrl"/>, parses the MP4 box
+    /// atoms, and returns a copy of the JSON with an extra top-level field:
+    ///   "__nzbdav_mp4_layout": "faststart" | "moov-at-end" | "unknown"
+    /// Returns null for non-MP4 containers or if anything goes wrong (caller keeps the
+    /// original JSON unchanged).
+    /// </summary>
+    private static async Task<string?> TryAddMp4LayoutAnnotationAsync(string ffprobeJson, string webDavUrl, string analysisRunId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(ffprobeJson)) return null;
+
+        // Fast path: check format_name without full JSON parse.
+        var lower = ffprobeJson.ToLowerInvariant();
+        var fmtIdx = lower.IndexOf("\"format_name\"", StringComparison.Ordinal);
+        if (fmtIdx < 0) return null;
+        var colonIdx = lower.IndexOf(':', fmtIdx);
+        var quoteEnd = colonIdx > 0 ? lower.IndexOf('"', colonIdx + 2) : -1;
+        var quoteEndEnd = quoteEnd > 0 ? lower.IndexOf('"', quoteEnd + 1) : -1;
+        if (quoteEnd < 0 || quoteEndEnd < 0) return null;
+        var formatName = lower.Substring(quoteEnd + 1, quoteEndEnd - quoteEnd - 1);
+        var isMp4Like = formatName.Contains("mp4") || formatName.Contains("mov")
+                        || formatName.Contains("m4a") || formatName.Contains("3gp");
+        if (!isMp4Like) return null;
+
+        // Fetch the first 512 bytes — enough to clear the ftyp box (typically 24-32 bytes)
+        // and inspect the type of the second top-level box. We keep it small so this never
+        // turns into a full-file read on a sparse/streaming backend.
+        byte[]? headerBytes = null;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, webDavUrl);
+            req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 511);
+            req.Headers.TryAddWithoutValidation("X-Analysis-Mode", "true");
+            req.Headers.TryAddWithoutValidation("X-Internal-Analysis-Auth", EnvironmentUtil.GetVariable("FRONTEND_BACKEND_API_KEY"));
+            req.Headers.TryAddWithoutValidation("X-Analysis-Run-Id", analysisRunId);
+            req.Headers.TryAddWithoutValidation("X-Analysis-Pass", "mp4-layout-probe");
+            using var resp = await s_layoutProbeClient.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return null;
+            headerBytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (headerBytes == null || headerBytes.Length < 16) return null;
+
+        // Walk top-level MP4 boxes: [size:4 BE][type:4 ASCII][...]. Sizes ==0 mean
+        // "extends to end of file" (not relevant here); ==1 means 64-bit size in next 8 bytes.
+        // We only care which top-level box appears AFTER the initial ftyp.
+        string layout = "unknown";
+        try
+        {
+            int offset = 0;
+            int boxesSeen = 0;
+            while (offset + 8 <= headerBytes.Length && boxesSeen < 8)
+            {
+                long size = ((long)headerBytes[offset] << 24) | ((long)headerBytes[offset + 1] << 16)
+                            | ((long)headerBytes[offset + 2] << 8) | headerBytes[offset + 3];
+                string type = System.Text.Encoding.ASCII.GetString(headerBytes, offset + 4, 4);
+                int headerLen = 8;
+                if (size == 1)
+                {
+                    if (offset + 16 > headerBytes.Length) break;
+                    size = ((long)headerBytes[offset + 8] << 56) | ((long)headerBytes[offset + 9] << 48)
+                           | ((long)headerBytes[offset + 10] << 40) | ((long)headerBytes[offset + 11] << 32)
+                           | ((long)headerBytes[offset + 12] << 24) | ((long)headerBytes[offset + 13] << 16)
+                           | ((long)headerBytes[offset + 14] << 8) | headerBytes[offset + 15];
+                    headerLen = 16;
+                }
+
+                if (boxesSeen == 0 && type != "ftyp")
+                {
+                    // Not an MP4 family file at all (or the first box isn't ftyp); leave layout=unknown.
+                    break;
+                }
+
+                if (boxesSeen >= 1)
+                {
+                    // The box after ftyp tells us the layout.
+                    if (type == "moov") { layout = "faststart"; break; }
+                    if (type == "moof") { layout = "fragmented"; break; }
+                    if (type == "mdat") { layout = "moov-at-end"; break; }
+                    if (type == "free" || type == "skip" || type == "wide")
+                    {
+                        // Padding box — keep walking.
+                    }
+                    else
+                    {
+                        // Unknown intermediate box — don't guess.
+                        break;
+                    }
+                }
+
+                if (size <= 0 || size > headerBytes.Length - offset) break;
+                offset += (int)size;
+                boxesSeen++;
+            }
+        }
+        catch
+        {
+            return null;
+        }
+
+        // Inject "__nzbdav_mp4_layout" as a top-level field. Use JsonNode to preserve
+        // the rest of the document exactly as ffprobe emitted it.
+        try
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(ffprobeJson);
+            if (node is System.Text.Json.Nodes.JsonObject obj)
+            {
+                obj["__nzbdav_mp4_layout"] = layout;
+                Log.Information("[MediaAnalysis] MP4 layout probe: {Url} → {Layout}", webDavUrl, layout);
+                return obj.ToJsonString();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[MediaAnalysis] Failed to inject __nzbdav_mp4_layout into ffprobe JSON.");
+        }
+        return null;
     }
 }

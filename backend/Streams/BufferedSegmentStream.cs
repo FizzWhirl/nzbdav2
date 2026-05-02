@@ -63,6 +63,130 @@ public class BufferedSegmentStream : Stream
         s_providerCountAccessor = providerCountAccessor;
     }
 
+    /// <summary>
+    /// Container fragility tier — drives the per-file effective GD cap. Computed once per
+    /// file from ffprobe metadata (DavItem.MediaInfo) by parsing the format_name field.
+    ///
+    /// Why this matters: zero-fill graceful degradation is "blind" to container structure.
+    /// A bad segment that lands inside a structural element (MP4 moov box, AVI index, etc.)
+    /// makes the file unplayable from byte 0; a bad segment in the middle of an MKV cluster
+    /// or an MPEG-TS sequence is much more likely to be skipped by a tolerant decoder.
+    /// </summary>
+    private enum ContainerFragilityTier
+    {
+        /// <summary>MKV/WebM/MPEG-TS/fragmented MP4 — use the full configured cap.</summary>
+        Resilient = 0,
+        /// <summary>Plain MP4/MOV/AVI/WMV/FLV — hard-cap at min(configured, 2).</summary>
+        Standard = 1,
+        /// <summary>Unknown container or non-video file — hard-cap at 0 (truncate immediately).</summary>
+        Unknown = 2,
+    }
+
+    /// <summary>
+    /// Compute the effective GD cap for this stream by combining the user-configured cap
+    /// with the file's container fragility tier (cached per-stream after first lookup so we
+    /// don't hit the database on every retry).
+    /// </summary>
+    private int ResolveEffectiveGracefulDegradationCap(int configuredCap)
+    {
+        if (_cachedEffectiveGdCap >= 0) return _cachedEffectiveGdCap;
+
+        var tier = ResolveContainerFragilityTier();
+        int effective = tier switch
+        {
+            ContainerFragilityTier.Resilient => configuredCap,
+            ContainerFragilityTier.Standard => Math.Min(configuredCap, 2),
+            ContainerFragilityTier.Unknown => 0,
+            _ => configuredCap,
+        };
+        _cachedEffectiveGdCap = effective;
+        Log.Debug("[BufferedStream] Effective GD cap resolved: configured={Configured}, tier={Tier}, effective={Effective}",
+            configuredCap, tier, effective);
+        return effective;
+    }
+
+    private ContainerFragilityTier ResolveContainerFragilityTier()
+    {
+        var davItemId = _usageContext?.DetailsObject?.DavItemId;
+        if (davItemId == null) return ContainerFragilityTier.Resilient; // No file context — be permissive.
+
+        string? mediaInfoJson = null;
+        try
+        {
+            // Synchronous lookup is acceptable here: this method is called at most once
+            // per stream, only on the first GD failure, which is already a rare path.
+            using var db = new DavDatabaseContext();
+            mediaInfoJson = db.Items
+                .Where(i => i.Id == davItemId.Value)
+                .Select(i => i.MediaInfo)
+                .FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[BufferedStream] Failed to load MediaInfo for container-fragility resolution; defaulting to Resilient tier.");
+            return ContainerFragilityTier.Resilient;
+        }
+
+        if (string.IsNullOrWhiteSpace(mediaInfoJson)) return ContainerFragilityTier.Unknown;
+
+        // Extract format_name from the ffprobe JSON. We avoid full JSON parsing to keep this cheap.
+        // ffprobe emits e.g. "format_name": "matroska,webm" or "format_name": "mov,mp4,m4a,3gp,3g2,mj2".
+        var lower = mediaInfoJson.ToLowerInvariant();
+        const string key = "\"format_name\"";
+        var keyIdx = lower.IndexOf(key, StringComparison.Ordinal);
+        if (keyIdx < 0) return ContainerFragilityTier.Unknown;
+        var colonIdx = lower.IndexOf(':', keyIdx + key.Length);
+        if (colonIdx < 0) return ContainerFragilityTier.Unknown;
+        var quoteStart = lower.IndexOf('"', colonIdx + 1);
+        if (quoteStart < 0) return ContainerFragilityTier.Unknown;
+        var quoteEnd = lower.IndexOf('"', quoteStart + 1);
+        if (quoteEnd < 0) return ContainerFragilityTier.Unknown;
+        var formatName = lower.Substring(quoteStart + 1, quoteEnd - quoteStart - 1);
+
+        // Resilient containers — all explicitly designed for streaming or with strong
+        // resync semantics (cluster boundaries, fragment boxes, packet sync bytes).
+        if (formatName.Contains("matroska") || formatName.Contains("webm")
+            || formatName.Contains("mpegts") || formatName.Contains("mpegtsraw"))
+        {
+            return ContainerFragilityTier.Resilient;
+        }
+
+        // Standard tier — recoverable in the best case, catastrophic if structural
+        // metadata is hit. We don't try to detect moov-at-end vs moov-at-start here
+        // (that would require deeper parsing); we just lower the ceiling.
+        if (formatName.Contains("mp4") || formatName.Contains("mov")
+            || formatName.Contains("m4a") || formatName.Contains("3gp")
+            || formatName.Contains("avi") || formatName.Contains("asf")
+            || formatName.Contains("wmv") || formatName.Contains("flv"))
+        {
+            // Fragmented MP4 (moof boxes per fragment) is highly resilient — promote to Resilient tier.
+            // moov-at-end MP4/MOV is catastrophic — losing the moov box means the whole file is
+            // unplayable. Demote to Unknown tier (cap=0). The "__nzbdav_mp4_layout" field is
+            // injected by MediaAnalysisService.TryAddMp4LayoutAnnotationAsync.
+            const string layoutKey = "\"__nzbdav_mp4_layout\"";
+            var layoutKeyIdx = lower.IndexOf(layoutKey, StringComparison.Ordinal);
+            if (layoutKeyIdx >= 0)
+            {
+                var lc = lower.IndexOf(':', layoutKeyIdx + layoutKey.Length);
+                if (lc >= 0)
+                {
+                    var lq = lower.IndexOf('"', lc + 1);
+                    var le = lq >= 0 ? lower.IndexOf('"', lq + 1) : -1;
+                    if (lq >= 0 && le >= 0)
+                    {
+                        var layout = lower.Substring(lq + 1, le - lq - 1);
+                        if (layout == "moov-at-end") return ContainerFragilityTier.Unknown;
+                        if (layout == "fragmented") return ContainerFragilityTier.Resilient;
+                        // "faststart" or "unknown" → fall through to Standard.
+                    }
+                }
+            }
+            return ContainerFragilityTier.Standard;
+        }
+
+        return ContainerFragilityTier.Unknown;
+    }
+
     // Memory-pressure throttle: when an OOM is observed in the fetch path, force GC and
     // briefly suppress new fetches across all streams to let the heap recover. This avoids
     // the cascading OOM storms that were observed under sustained streaming load.
@@ -279,6 +403,10 @@ public class BufferedSegmentStream : Stream
     private readonly int _segmentIndexOffset;
     private readonly List<(int Index, string SegmentId)> _corruptedSegments = new();
     private int _lastSuccessfulSegmentSize = 0;
+
+    // Cached per-stream effective GD cap, computed from the file's container fragility on
+    // the first GD failure. -1 = not yet computed. See ResolveEffectiveGracefulDegradationCap.
+    private int _cachedEffectiveGdCap = -1;
 
     // Per-stream provider scoring for cooldown system
     private readonly ConcurrentDictionary<int, ProviderStreamScore> _providerScores = new();
@@ -505,6 +633,28 @@ public class BufferedSegmentStream : Stream
 
         Length = fileSize;
         _totalSegments = effectiveCount;
+
+        // Surface the resolved GD-cap tier as an info log so operators can audit which
+        // container tier a file landed in without having to wait for an actual GD failure.
+        // We do this once per stream construction; the tier resolver caches its result so
+        // this won't trigger redundant DB lookups during normal streaming.
+        try
+        {
+            if (_usageContext?.DetailsObject?.DavItemId != null)
+            {
+                var configuredCap = s_maxGracefulDegradationSegments;
+                var effectiveCap = ResolveEffectiveGracefulDegradationCap(configuredCap);
+                var jobName = _usageContext?.DetailsObject?.Text ?? "Unknown";
+                Log.Information(
+                    "[BufferedStream] GD cap resolved for stream: configured={Configured} effective={Effective} (Job={Job}, DavItemId={DavItemId})",
+                    configuredCap, effectiveCap, jobName, _usageContext.Value.DetailsObject.DavItemId);
+            }
+        }
+        catch (Exception logEx)
+        {
+            // Never let logging kill the stream.
+            Log.Debug(logEx, "[BufferedStream] Failed to log effective GD cap at construction.");
+        }
     }
 
     private void UpdateUsageContext()
@@ -1483,7 +1633,14 @@ public class BufferedSegmentStream : Stream
         // operator can override the threshold via usenet.max-graceful-degradation-segments
         // (env: MAX_GRACEFUL_DEGRADATION_SEGMENTS) — set to int.MaxValue for the legacy
         // "always zero-fill" behaviour, or 0 to truncate on the first failure.
-        var gdLimit = s_maxGracefulDegradationSegments;
+        //
+        // The user-configured value is then refined per-file by the container fragility tier
+        // computed from ffprobe metadata (cached per stream): resilient containers (MKV /
+        // Matroska, WebM, MPEG-TS, fragmented MP4) get the full configured cap; standard
+        // containers (plain MP4 / MOV / AVI / WMV / FLV) are hard-capped at min(configured, 2)
+        // because their structural metadata is more sensitive to byte-offset corruption; and
+        // unknown / non-video files are hard-capped at 0 (truncate on the first failure).
+        var gdLimit = ResolveEffectiveGracefulDegradationCap(s_maxGracefulDegradationSegments);
         if (_corruptedSegments.Count > gdLimit)
         {
             Log.Error("[BufferedStream] GRACEFUL DEGRADATION LIMIT EXCEEDED: Job={Job}, corrupted-segment count {Count} > limit {Limit}. Terminating stream and marking item as corrupted to give the player a clean EOF.",

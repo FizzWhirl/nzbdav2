@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-REVERT-WIDER");
-            Log.Warning("  REVERT: Rolled back today's GD-tier work: 4a79e1ae (lazy MP4-layout backfill + arr-import grace bypass), 67b1316a (file-details modal tier surface), 85dc8c3f (moov-at-end detection + effective-tier logging) and 7c6007f3 (container-aware GD cap + Truncated badge). Bisecting a regression where rclone clients see no folders/files after recent deploys.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-REVERT-LAZY-BACKFILL");
+            Log.Warning("  REVERT: Rolled back commits 4a79e1ae (lazy MP4-layout backfill + arr-import grace bypass) and 67b1316a (file-details modal tier surface) to bisect a rclone PROPFIND 401 regression reported on the same deploy. Earlier GD-cap reliability work (d7a2c6c2, f4e0a5e9, 7c6007f3, 85dc8c3f) is retained.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

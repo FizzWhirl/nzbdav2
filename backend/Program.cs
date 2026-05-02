@@ -57,24 +57,14 @@ class Program
             .MinimumLevel.Override("Microsoft.AspNetCore.Mvc", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.AspNetCore.Routing", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.AspNetCore.DataProtection", LogEventLevel.Error)
-            // Suppress NWebDav's "Property {Prop} is not supported on item {Name}" warnings.
-            // These are unavoidable noise: WebDAV clients (rclone, Plex, Jellyfin, finder)
-            // PROPFIND root collections asking for getcontentlength / getcontenttype, and
-            // collection nodes legitimately don't support those file-only properties. The
-            // warning fires once per (collection × property × request) and floods the log
-            // during normal operation. We only drop the specific message template; any other
-            // NWebDav warnings still pass through.
-            .Filter.ByExcluding(le =>
-                le.MessageTemplate.Text.StartsWith("Property ", StringComparison.Ordinal)
-                && le.MessageTemplate.Text.Contains("is not supported on item", StringComparison.Ordinal))
             .WriteTo.Console(theme: AnsiConsoleTheme.Code)
             .WriteTo.Sink(InMemoryLogSink.Instance)
             .CreateLogger();
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-REVERT-ALL-GD");
-            Log.Warning("  REVERT: Rolled back ALL of today's GD-cap work: 4a79e1ae, 67b1316a, 85dc8c3f, 7c6007f3, f4e0a5e9, d7a2c6c2. Only 9c8b143a (Serilog NWebDav noise filter + optional GD-field validation) remains from today. Bisecting a regression where rclone clients see no folders/files after recent deploys.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-REVERT-EVERYTHING-TODAY");
+            Log.Warning("  REVERT: Rolled back ALL of today's commits including 9c8b143a. HEAD is now identical to 8a78f529 (NFC-normalize). Bisecting a regression where rclone clients see no folders/files in the WebDAV mount after recent deploys.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

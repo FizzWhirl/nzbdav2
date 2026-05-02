@@ -117,6 +117,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-05-02)
+*   **Revert (final commit from today)**: Roll back commit `9c8b143a` (Serilog NWebDav PROPFIND-warning noise filter + `isValidOptionalNonNegativeInt` helper for the now-removed GD-cap form field). Combined with the four prior revert commits today (`0c09c3fd`, `c0a7f71f`, `808dc461` and now this one), **all seven of today's commits are now removed** and HEAD is functionally identical to `8a78f529` (NFC-normalize). If rclone clients still see empty folder listings after this build, the regression is **not** in today's code changes and the investigation should focus on environment factors: stale frontend Docker layer (`frontend/build/`), config volume contents, SQLite db state, rclone version / config, network or DNS issues.
+
+## v0.6.Z (2026-05-02)
 *   **Revert (full GD-cap rollback)**: Roll back commits `f4e0a5e9` (GD-cap Settings UI + missing-articles ledger dump on truncation), `d7a2c6c2` (base GD-cap behaviour: cap zero-fill at N segments and truncate past the limit), `85dc8c3f` (moov-at-end detection + per-stream effective-tier logging) and `7c6007f3` (container-aware GD cap + "Truncated" badge on the Missing Articles tab). Combined with the prior revert of `4a79e1ae` and `67b1316a`, **all six** of today's GD-cap-related commits are now removed. Bisecting a regression where rclone clients see no folders/files in the WebDAV mount after recent deploys; symptom is empty listings (not 401). Only `9c8b143a` remains from today (Serilog NWebDav noise filter; the `isValidOptionalNonNegativeInt` helper is now dead code with the GD-cap UI gone — will be cleaned up if this revert sticks).
 
 ## v0.6.Z (2026-05-02)

@@ -669,21 +669,6 @@ public class HealthCheckService
             // if the item still has a pending (non-imported) history entry,
             // don't repair it — Radarr/Sonarr hasn't imported it yet.
             // Timeout after 24h: if arr rejected/abandoned the import, stop waiting.
-            //
-            // EXCEPTION: if the item was already hard-truncated by the streaming layer
-            // (BufferedSegmentStream graceful-degradation cap), we know the file is
-            // unplayable regardless of import state. There is no point making Sonarr/Radarr
-            // wait 24h before triggering a repair / re-grab — the cached truncation evidence
-            // already proves the file can't satisfy a play. Skip the gate in that case.
-            var wasStreamTruncated = davItem.IsCorrupted
-                                     && !string.IsNullOrEmpty(davItem.CorruptionReason)
-                                     && davItem.CorruptionReason.StartsWith("Stream truncated:", StringComparison.Ordinal);
-            if (wasStreamTruncated)
-            {
-                Log.Information("[HealthCheck] Item {Name} was hard-truncated by streaming layer ({Reason}). Bypassing 24h arr-import grace and proceeding to repair.",
-                    davItem.Name, davItem.CorruptionReason);
-            }
-            else
             {
                 await using var historyCheckCtx = new DavDatabaseContext();
                 var importGraceCutoff = DateTime.UtcNow.AddHours(-24);

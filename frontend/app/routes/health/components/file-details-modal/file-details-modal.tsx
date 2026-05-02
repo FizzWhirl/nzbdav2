@@ -602,79 +602,6 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
     );
 }
 
-function resolveStreamingTier(formatName: string | undefined, mp4Layout: string | undefined): {
-    tierLabel: string;
-    badgeVariant: string;
-    layoutLabel: string | null;
-    description: string;
-} {
-    // Mirror of backend BufferedSegmentStream.ResolveContainerFragilityTier.
-    const fmt = (formatName || '').toLowerCase();
-    const layout = (mp4Layout || '').toLowerCase();
-
-    // Resilient containers — full configured GD cap applies.
-    const resilientFormats = ['matroska', 'webm', 'mpegts', 'mpeg-ts', 'mpeg2ts'];
-    const isMp4Family = fmt.includes('mp4') || fmt.includes('mov') || fmt.includes('m4a') || fmt.includes('m4v') || fmt.includes('3gp') || fmt.includes('3g2');
-    const isResilient = resilientFormats.some(f => fmt.includes(f));
-
-    if (isResilient) {
-        return {
-            tierLabel: 'Resilient',
-            badgeVariant: 'success',
-            layoutLabel: null,
-            description: 'Full configured graceful-degradation cap applies — these containers tolerate missing segments well.',
-        };
-    }
-
-    if (isMp4Family) {
-        const layoutLabel = layout
-            ? layout.charAt(0).toUpperCase() + layout.slice(1).replace('-', '-')
-            : 'Not yet probed';
-
-        if (layout === 'fragmented') {
-            return {
-                tierLabel: 'Resilient',
-                badgeVariant: 'success',
-                layoutLabel,
-                description: 'Fragmented MP4 (moof boxes) — promoted to resilient tier; full configured cap applies.',
-            };
-        }
-        if (layout === 'moov-at-end') {
-            return {
-                tierLabel: 'Unknown (cap = 0)',
-                badgeVariant: 'danger',
-                layoutLabel,
-                description: 'moov box is at the end of the file — losing any segment risks losing the moov box, making the entire file unplayable. Truncates on first failure.',
-            };
-        }
-        // faststart, unknown, or not-yet-probed → Standard tier
-        return {
-            tierLabel: 'Standard (cap ≤ 2)',
-            badgeVariant: 'warning',
-            layoutLabel,
-            description: 'MP4-family container — effective cap is min(configured, 2) because moov / index boxes are sensitive to byte-offset corruption.',
-        };
-    }
-
-    // AVI / WMV / FLV / unknown video container
-    const standardFormats = ['avi', 'wmv', 'flv', 'asf'];
-    if (standardFormats.some(f => fmt.includes(f))) {
-        return {
-            tierLabel: 'Standard (cap ≤ 2)',
-            badgeVariant: 'warning',
-            layoutLabel: null,
-            description: 'Index-based container — effective cap is min(configured, 2) because index corruption breaks playback.',
-        };
-    }
-
-    return {
-        tierLabel: 'Unknown (cap = 0)',
-        badgeVariant: 'danger',
-        layoutLabel: null,
-        description: 'Unknown / non-video container — truncates on first failure.',
-    };
-}
-
 function MediaInfoSummary({ json }: { json: string }) {
     let data: any;
     try {
@@ -697,9 +624,6 @@ function MediaInfoSummary({ json }: { json: string }) {
     const videoStreams = streams.filter((s: any) => s.codec_type === 'video');
     const audioStreams = streams.filter((s: any) => s.codec_type === 'audio');
 
-    // GD tier resolution — must mirror BufferedSegmentStream.ResolveContainerFragilityTier
-    const tierInfo = resolveStreamingTier(format.format_name as string | undefined, data.__nzbdav_mp4_layout as string | undefined);
-
     return (
         <div>
             {/* Format Info */}
@@ -711,16 +635,6 @@ function MediaInfoSummary({ json }: { json: string }) {
                             <Badge bg="dark" className="me-2">{format.format_long_name || format.format_name || 'Unknown'}</Badge>
                             {format.duration && <span className="me-2">Duration: {new Date(Number(format.duration) * 1000).toISOString().substr(11, 8)}</span>}
                             {format.bit_rate && <span>Bitrate: {formatSpeed(Number(format.bit_rate)/8)}</span>}
-                        </td>
-                    </tr>
-                    <tr>
-                        <td className={styles.labelCell}>Streaming tier</td>
-                        <td className={styles.valueCell}>
-                            <Badge bg={tierInfo.badgeVariant} className="me-2">{tierInfo.tierLabel}</Badge>
-                            {tierInfo.layoutLabel && (
-                                <Badge bg="secondary" className="me-2">MP4 layout: {tierInfo.layoutLabel}</Badge>
-                            )}
-                            <span className="text-muted small">{tierInfo.description}</span>
                         </td>
                     </tr>
                 </tbody>

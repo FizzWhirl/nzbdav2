@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-FIXES-1");
-            Log.Warning("  FIXES: Suppress NWebDav 'Property X is not supported on item Y' warnings (unavoidable PROPFIND noise on collection nodes); GD-Segments settings field is now correctly optional (no error styling when empty).");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-REVERT-LAZY-BACKFILL");
+            Log.Warning("  REVERT: Rolled back commits 4a79e1ae (lazy MP4-layout backfill + arr-import grace bypass) and 67b1316a (file-details modal tier surface) to bisect a rclone PROPFIND 401 regression reported on the same deploy. Earlier GD-cap reliability work (d7a2c6c2, f4e0a5e9, 7c6007f3, 85dc8c3f) is retained.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -336,11 +336,6 @@ class Program
                 BufferedSegmentStream.SetMissingArticleLedgerHooks(
                     () => app.Services.GetService<ProviderErrorService>(),
                     () => app.Services.GetRequiredService<ConfigManager>().GetUsenetProviderConfig().Providers.Count
-                );
-                // Wire the lazy MP4-layout backfill so the streaming path can fix legacy
-                // MP4 files that were analyzed before the layout-probe feature shipped.
-                BufferedSegmentStream.SetMediaAnalysisServiceAccessor(
-                    () => app.Services.GetService<MediaAnalysisService>()
                 );
             }
             catch (Exception hookEx)

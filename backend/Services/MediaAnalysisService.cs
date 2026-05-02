@@ -200,56 +200,6 @@ public class MediaAnalysisService(
     }
 
     /// <summary>
-    /// Lazy backfill: if the given DavItem has MediaInfo but no <c>__nzbdav_mp4_layout</c>
-    /// annotation, run the cheap 512-byte MP4 box probe and inject the annotation. Returns
-    /// the resolved layout (or <c>null</c> if it couldn't be determined / already annotated /
-    /// not an MP4-family container). Safe to call concurrently — the BufferedSegmentStream
-    /// caller dedupes in-flight backfills, and the underlying probe writes are idempotent.
-    /// </summary>
-    public async Task<string?> BackfillMp4LayoutAnnotationAsync(Guid davItemId, CancellationToken ct = default)
-    {
-        using var scope = scopeFactory.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
-        var item = await dbContext.Items.FindAsync([davItemId], ct).ConfigureAwait(false);
-        if (item == null || string.IsNullOrWhiteSpace(item.MediaInfo)) return null;
-
-        // Quick exit: already annotated.
-        if (item.MediaInfo.Contains("\"__nzbdav_mp4_layout\"", StringComparison.Ordinal)) return null;
-
-        // Quick exit: format isn't MP4-family — no point probing.
-        var lower = item.MediaInfo.ToLowerInvariant();
-        var fmtIdx = lower.IndexOf("\"format_name\"", StringComparison.Ordinal);
-        if (fmtIdx < 0) return null;
-        var colonIdx = lower.IndexOf(':', fmtIdx);
-        var qStart = colonIdx > 0 ? lower.IndexOf('"', colonIdx + 1) : -1;
-        var qEnd = qStart > 0 ? lower.IndexOf('"', qStart + 1) : -1;
-        if (qStart < 0 || qEnd < 0) return null;
-        var formatName = lower.Substring(qStart + 1, qEnd - qStart - 1);
-        var isMp4Like = formatName.Contains("mp4") || formatName.Contains("mov")
-                        || formatName.Contains("m4a") || formatName.Contains("3gp");
-        if (!isMp4Like) return null;
-
-        var encodedPath = string.Join("/", item.Path.Split('/').Select(Uri.EscapeDataString));
-        var webDavUrl = $"http://localhost:8080{encodedPath}";
-        var analysisRunId = $"backfill-{davItemId:N}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
-
-        var augmented = await TryAddMp4LayoutAnnotationAsync(item.MediaInfo, webDavUrl, analysisRunId, ct).ConfigureAwait(false);
-        if (augmented == null) return null;
-
-        item.MediaInfo = augmented;
-        await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        // Re-extract the resolved layout from the augmented JSON to return it.
-        var augLower = augmented.ToLowerInvariant();
-        var layoutKeyIdx = augLower.IndexOf("\"__nzbdav_mp4_layout\"", StringComparison.Ordinal);
-        if (layoutKeyIdx < 0) return null;
-        var lc = augLower.IndexOf(':', layoutKeyIdx);
-        var lq = lc > 0 ? augLower.IndexOf('"', lc + 1) : -1;
-        var le = lq > 0 ? augLower.IndexOf('"', lq + 1) : -1;
-        return (lq > 0 && le > 0) ? augLower.Substring(lq + 1, le - lq - 1) : null;
-    }
-
-    /// <summary>
     /// Static HttpClient for the MP4 layout probe. Reused across calls (HttpClient is designed
     /// for reuse). Short timeout because the probe must not block the analysis pipeline.
     /// </summary>

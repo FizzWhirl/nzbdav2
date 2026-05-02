@@ -28,6 +28,10 @@
     margin-bottom: 0;
 }
 
+.mobile-hidden-overview {
+    display: block;
+}
+
 @media (max-width: 700px) {
     .container {
         font-size: 13px;
@@ -39,5 +43,9 @@
 
     .section {
         margin-bottom: 24px;
+    }
+
+    .mobile-hidden-overview {
+        display: none;
     }
 }

@@ -229,7 +229,7 @@
 
     .subitem {
         min-height: 40px;
-        padding: 10px 12px;
+        padding: 10px var(--nav-x-padding) 10px 50px;
     }
 
     .footer {

@@ -405,7 +405,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
 
             <div className={styles.container}>
 
-                <div className={styles.section}>
+                <div className={`${styles.section} ${activeTab !== "health" ? styles["mobile-hidden-overview"] : ""}`}>
 
                     <HealthStats stats={historyStats} />
 

@@ -6,6 +6,7 @@
     padding-bottom: 0;
     border: 1px solid rgba(255, 255, 255, 0.05);
     --container-padding: 24px;
+    min-width: 0;
 }
 
 .header {
@@ -50,13 +51,16 @@
 .filterContainer {
     display: flex;
     align-items: center;
-    height: 38px; /* Match input height usually */
+    flex-wrap: wrap;
+    height: auto;
 }
 
 .tableContainer {
     min-height: 200px;
     margin-left: calc(-1 * var(--container-padding));
     margin-right: calc(-1 * var(--container-padding));
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .table {
@@ -364,6 +368,10 @@
 
 /* mobile */
 @media not (min-width: 900px) {
+    .container {
+        --container-padding: 14px;
+    }
+
     .desktop {
         display: none;
     }
@@ -397,9 +405,34 @@
         width: 100%;
     }
 
+    .filterContainer {
+        width: 100%;
+        align-items: stretch !important;
+        gap: 8px !important;
+    }
+
+    .filterContainer button,
+    .filterContainer :global(.badge) {
+        width: 100%;
+        white-space: normal;
+    }
+
+    .filterContainer :global(.form-check) {
+        width: 100%;
+    }
+
     .metaRow {
         flex-direction: column;
         align-items: flex-start;
         gap: 4px;
+    }
+
+    .dateDetailsRow {
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .dateDetailsValue {
+        margin-left: 0;
     }
 }

@@ -1,8 +1,13 @@
 .container {
     container-type: inline-size;
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .page-table {
+    width: 100%;
 
     /* header column */
     th {
@@ -35,6 +40,8 @@
         text-align: center;
         vertical-align: middle;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         border-bottom: 1px solid rgba(255, 255, 255, .05);
 
         /* first body column */
@@ -81,6 +88,7 @@
     justify-content: center;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
 }
 
 /* desktop */
@@ -110,6 +118,44 @@
 
     .page-table thead tr th:first-child {
         width: unset;
+    }
+
+    .page-table thead tr th:last-child {
+        width: 96px;
+    }
+
+    .page-table th {
+        font-size: 0.8rem;
+        padding-left: 6px;
+        padding-right: 6px;
+    }
+
+    .page-table td {
+        max-width: none;
+        padding: 12px 8px;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+    }
+
+    .page-table td:first-child {
+        min-width: 0;
+    }
+
+    .badges {
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .actions {
+        justify-content: flex-end;
+        gap: 6px;
+    }
+
+    .actions button,
+    .actions a,
+    .actions [role="button"] {
+        min-height: 36px;
     }
 }
 

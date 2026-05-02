@@ -8,6 +8,7 @@ import { AnalysisHistoryTable } from "./components/analysis-history-table/analys
 import { HealthStats } from "./components/health-stats/health-stats";
 import { FileDetailsModal } from "./components/file-details-modal/file-details-modal";
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import { createWebsocketBackoff, getBrowserWebsocketUrl, receiveMessage } from "~/utils/websocket-util";
 import { Alert, Tabs, Tab } from "react-bootstrap";
 import { useToast } from "~/context/ToastContext";
@@ -82,6 +83,8 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     const [ahSearch, setAhSearch] = useState("");
     const [ahShowFailedOnly, setAhShowFailedOnly] = useState(false);
     const [refreshHistoryTrigger, setRefreshHistoryTrigger] = useState(0);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const activeTab = searchParams.get("tab") || "health";
 
     const [showDetailsModal, setShowDetailsModal] = useState(false);
     const [selectedFileDetails, setSelectedFileDetails] = useState<FileDetails | null>(null);
@@ -388,6 +391,14 @@ export default function Health({ loaderData }: Route.ComponentProps) {
         }
     }, [addToast]);
 
+    const onTabSelect = useCallback((key: string | null) => {
+        setSearchParams(prev => {
+            if (key && key !== "health") prev.set("tab", key);
+            else prev.delete("tab");
+            return prev;
+        });
+    }, [setSearchParams]);
+
 
 
         return (
@@ -434,7 +445,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
 
                                 <div className={styles.section}>
 
-                                    <Tabs defaultActiveKey="health" className="mb-3">
+                                    <Tabs activeKey={activeTab} onSelect={onTabSelect} className="mb-3 mobile-hidden-tabs">
 
                                         <Tab eventKey="health" title="Health Check Queue">
 

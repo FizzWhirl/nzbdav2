@@ -33,7 +33,9 @@ export function EmptyQueue() {
     return (
         <fetcher.Form ref={formRef} method="POST" encType="multipart/form-data">
             <div className={pageStyles["section-title"]}>
-                <h3>Queue</h3>
+                <div className={pageStyles["section-heading"]}>
+                    <h3>Queue</h3>
+                </div>
             </div>
                 {fetcher.data?.error && (
                     <Alert variant="danger">{fetcher.data.error}</Alert>

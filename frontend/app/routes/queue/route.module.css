@@ -1,9 +1,11 @@
 .container {
-    min-width: 100%;
+    width: 100%;
+    min-width: 0;
     min-height: 100%;
-    padding: 30px 35px 20px 35px;
+    padding: clamp(16px, 3vw, 30px) clamp(12px, 2.5vw, 35px) 20px;
     color: #93a1a1;
     font-size: 14px;
+    overflow-x: hidden;
 }
 
 .section {
@@ -12,9 +14,69 @@
 
 .section-title {
     margin-bottom: 30px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px 16px;
+    align-items: start;
+}
+
+.section-heading {
     display: flex;
+    align-items: flex-start;
     gap: 10px;
-    align-items: baseline;
+    min-width: 0;
+}
+
+.section-heading h3 {
+    margin: 0;
+    line-height: 1.2;
+}
+
+.section-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.section-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.section-control {
+    min-width: 0;
+    max-width: 100%;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.875rem;
+    border-radius: 0.25rem;
+    border: 1px solid #dee2e6;
+}
+
+.section-search {
+    width: min(240px, 100%);
+}
+
+.section-select {
+    width: min(170px, 100%);
+}
+
+.section-check {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    white-space: nowrap;
+    min-height: 34px;
+}
+
+.section-check input {
+    margin: 0;
 }
 
 .alert {
@@ -26,5 +88,59 @@
 
     .listItem {
         margin-top: 5px
+    }
+}
+
+@media (max-width: 700px) {
+    .container {
+        font-size: 13px;
+    }
+
+    .section {
+        margin-bottom: 30px;
+    }
+
+    .section-title {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+        gap: 10px;
+        margin-bottom: 18px;
+    }
+
+    .section-heading {
+        width: 100%;
+        align-items: flex-start;
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
+
+    .section-heading h3 {
+        font-size: 1.25rem;
+    }
+
+    .section-toolbar {
+        width: 100%;
+        justify-content: stretch;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+
+    .section-toolbar > *,
+    .section-control,
+    .section-search,
+    .section-select {
+        width: 100%;
+        min-width: 0;
+        flex: 1 1 100%;
+    }
+
+    .section-check {
+        justify-content: flex-start;
+        white-space: normal;
+    }
+
+    .section-actions {
+        width: 100%;
+        justify-content: flex-start;
     }
 }

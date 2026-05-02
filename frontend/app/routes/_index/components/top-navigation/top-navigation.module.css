@@ -5,13 +5,16 @@
     gap: 15px;
 
     height: var(--top-nav-height);
-    padding: 0 var(--page-padding)
+    padding: 0 var(--page-padding);
+    min-width: 0;
 }
 
 .title-container {
     display: flex;
+    align-items: center;
     gap: 15px;
     cursor: pointer;
+    min-width: 0;
 
     /* touch area buffer */
     padding: 10px;
@@ -23,6 +26,9 @@
     font-size: 1.5em;
     font-style: normal;
     font-weight: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .logo {
@@ -35,6 +41,15 @@
 @media (max-width: calc(899.999px)) {
     .container {
         justify-content: space-between;
+        gap: 10px;
+    }
+
+    .title-container {
+        gap: 10px;
+    }
+
+    .title {
+        font-size: 1.25em;
     }
 }
 

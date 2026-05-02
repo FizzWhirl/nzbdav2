@@ -161,13 +161,13 @@ export function Dashboard({ initialData, initialConnections }: Props) {
             <ActiveStreaming connections={connections} providerNames={providerNames} />
 
             {/* Total Downloaded + Provider Health */}
-            <Row className="mb-4">
+            <Row className="mb-4 gy-4">
                 <Col lg={4}>
                     <h6 className="text-muted mb-2">Total Downloaded</h6>
                     <TotalDownloaded data={data.totalDownloaded} timeWindowLabel={timeWindowLabel} />
                 </Col>
                 <Col lg={8}>
-                    <h6 className="text-muted mb-2">Provider Health</h6>
+                    <h6 className="text-muted mb-2 mt-2 mt-lg-0">Provider Health</h6>
                     <ProviderHealth providers={data.providerHealth} />
                 </Col>
             </Row>

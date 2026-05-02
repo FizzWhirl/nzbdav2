@@ -1,5 +1,6 @@
 .container {
     max-width: 600px;
+    width: 100%;
 }
 
 .task {
@@ -39,4 +40,16 @@
 
 .list-item {
     margin-top: 5px
+}
+
+@media (max-width: 700px) {
+    .run {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .run-button,
+    .dryrun-button {
+        width: 100%;
+    }
 }

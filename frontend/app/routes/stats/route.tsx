@@ -367,8 +367,7 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                 id="stats-tabs"
                 activeKey={activeTab}
                 onSelect={handleTabSelect}
-                className="mb-4 custom-tabs"
-                variant="pills"
+                className="mb-3 mobile-hidden-tabs"
             >
                 <Tab eventKey="stats" title="Statistics">
                     {activeTab === 'stats' && connections && bandwidthHistory && currentBandwidth && (

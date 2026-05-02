@@ -11,7 +11,7 @@ export function ProviderHealth({ providers }: Props) {
     }
 
     return (
-        <div className="d-flex flex-wrap gap-2">
+        <div className="d-flex flex-wrap gap-2 mb-2 mb-lg-0">
             {providers.map((provider) => (
                 <Card
                     key={provider.providerIndex}

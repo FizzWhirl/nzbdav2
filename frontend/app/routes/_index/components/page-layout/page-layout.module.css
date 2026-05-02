@@ -1,10 +1,11 @@
 .container {
     color: white;
     font-family: helvetica;
-    max-width: 100%;
-    min-width: 100%;
-    min-height: 100%;
-    position: absolute;
+    width: 100%;
+    min-width: 0;
+    min-height: 100dvh;
+    position: relative;
+    overflow-x: hidden;
 }
 
 .top-navigation {
@@ -13,57 +14,78 @@
     position: fixed;
     top: 0;
     width: 100%;
-    z-index: 999;
+    z-index: 1000;
 }
 
 .page {
-    max-width: 100%;
-    min-width: 100%;
-    min-height: 100%;
-    position: absolute;
+    width: 100%;
+    min-width: 0;
+    min-height: 100dvh;
+    position: relative;
+    padding-top: var(--top-nav-height);
 }
 
 .left-navigation {
     background-color: var(--left-nav-background-color);
-    max-width: var(--left-nav-width);
-    min-width: var(--left-nav-width);
-    min-height: calc(100% - var(--top-nav-height));
+    width: var(--left-nav-width);
+    max-width: min(var(--left-nav-width), 86vw);
+    height: calc(100dvh - var(--top-nav-height));
     position: fixed;
     left: 0;
     z-index: 999;
     top: var(--top-nav-height);
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
+.backdrop {
+    display: none;
 }
 
 .body {
-    top: var(--top-nav-height);
-    position: absolute;
-    left: var(--bodyLeft);
-    max-width: var(--width);
-    min-width: var(--width);
-    min-height: var(--height);
-    padding: var(--padding);
-    --bodyLeft: var(--left-nav-width);
-    --width: calc(100% - 2 * var(--padding) - var(--bodyLeft));
-    --height: calc(100% - 2 * var(--padding) - var(--top-nav-height));
-    --padding: 0px;
+    position: relative;
+    margin-left: var(--left-nav-width);
+    width: calc(100% - var(--left-nav-width));
+    min-width: 0;
+    min-height: calc(100dvh - var(--top-nav-height));
+    overflow-x: hidden;
+    transition: filter 0.2s ease;
 }
 
 
 /* mobile */
 @media not (min-width: 900px)  {
     .left-navigation {
-        display: none;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+        box-shadow: 10px 0 30px rgba(0, 0, 0, 0.45);
     }
 
     .body {
-        --bodyLeft: 0px;
+        margin-left: 0;
+        width: 100%;
     }
 
     .container.hamburger-open .left-navigation {
+        transform: translateX(0);
+    }
+
+    .container.hamburger-open .backdrop {
         display: block;
+        position: fixed;
+        top: var(--top-nav-height);
+        left: min(var(--left-nav-width), 86vw);
+        right: 0;
+        bottom: 0;
+        z-index: 998;
+        padding: 0;
+        border: 0;
+        background: rgba(0, 0, 0, 0.35);
     }
 
     .container.hamburger-open .body {
         filter: brightness(50%) blur(2px);
+        pointer-events: none;
     }
 }

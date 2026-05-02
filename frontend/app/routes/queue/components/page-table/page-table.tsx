@@ -29,7 +29,7 @@ export function PageTable({ striped, children, headerCheckboxState, onHeaderChec
                         <th className={styles.desktop}>Status</th>
                         {showFailureReason && <th className={styles.desktop}>Failure Reason</th>}
                         <th className={styles.desktop}>Size</th>
-                        <th>Completed</th>
+                        <th className={styles.desktop}>Completed</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -82,8 +82,8 @@ export function PageRow(props: PageRowProps) {
                                 marginBottom: '4px',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                maxWidth: '200px'
+                                whiteSpace: 'normal',
+                                maxWidth: '100%'
                             }}>
                                 Error: {props.error.startsWith("Article with message-id") ? "Missing articles" : props.error}
                             </div>
@@ -118,7 +118,7 @@ export function PageRow(props: PageRowProps) {
             <td className={styles.desktop}>
                 {formatFileSize(props.fileSizeBytes)}
             </td>
-            <td style={{ fontSize: '0.85rem', color: '#6c757d', whiteSpace: 'nowrap' }}>
+            <td className={styles.desktop} style={{ fontSize: '0.85rem', color: '#6c757d', whiteSpace: 'nowrap' }}>
                 {formattedDate || '—'}
             </td>
             <td>

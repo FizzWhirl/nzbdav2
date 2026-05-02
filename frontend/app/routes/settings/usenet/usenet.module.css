@@ -1,5 +1,6 @@
 .container {
     max-width: 600px;
+    width: 100%;
     margin-bottom: 25px;
 }
 
@@ -29,7 +30,7 @@
 
 .providers-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(480px, 100%), 1fr));
     gap: 20px;
     margin-bottom: 28px;
 }
@@ -561,8 +562,18 @@
 
 @media (max-width: 600px) {
     .providers-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 20px;
+    }
+
+    .sectionHeader {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .sectionHeader button {
+        width: 100%;
     }
 
     .provider-card-inner {
@@ -571,6 +582,8 @@
 
     .provider-header {
         gap: 12px;
+        margin-left: 0;
+        flex-wrap: wrap;
     }
 
     .provider-icon {
@@ -581,6 +594,7 @@
 
     .provider-header-actions {
         gap: 6px;
+        margin-left: auto;
     }
 
     .provider-detail-row {

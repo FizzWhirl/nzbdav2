@@ -146,21 +146,23 @@ export function HistoryTable({
                 onConfirm={(deleteFiles) => onConfirmRemoval(deleteFiles)}
             />
             <div className={pageStyles["section-title"]}>
-                <h3>History</h3>
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div className={pageStyles["section-heading"]}>
+                    <h3>History</h3>
+                    {headerCheckboxState !== 'none' &&
+                        <div className={pageStyles["section-actions"]}>
+                            <ActionButton type="retry" onClick={onRequeue} />
+                            <ActionButton type="delete" onClick={onRemove} />
+                        </div>
+                    }
+                </div>
+                <div className={pageStyles["section-toolbar"]}>
                     {onStatusFilterChange && (
                         <select
+                            className={`${pageStyles["section-control"]} ${pageStyles["section-select"]}`}
                             value={statusFilter}
                             onChange={(e) => {
                                 onStatusFilterChange(e.target.value);
                                 onPageChange(1);
-                            }}
-                            style={{
-                                padding: '0.35rem 0.75rem',
-                                fontSize: '0.875rem',
-                                borderRadius: '0.25rem',
-                                border: '1px solid #dee2e6',
-                                minWidth: '120px'
                             }}
                         >
                             <option value="all">All Status</option>
@@ -170,17 +172,11 @@ export function HistoryTable({
                     )}
                     {statusFilter !== 'Completed' && (
                         <select
+                            className={`${pageStyles["section-control"]} ${pageStyles["section-select"]}`}
                             value={failureReason || ""}
                             onChange={(e) => {
                                 onFailureReasonChange(e.target.value || undefined);
                                 onPageChange(1);
-                            }}
-                            style={{
-                                padding: '0.35rem 0.75rem',
-                                fontSize: '0.875rem',
-                                borderRadius: '0.25rem',
-                                border: '1px solid #dee2e6',
-                                minWidth: '150px'
                             }}
                         >
                             <option value="">All Reasons</option>
@@ -188,34 +184,21 @@ export function HistoryTable({
                         </select>
                     )}
                     <input
+                        className={`${pageStyles["section-control"]} ${pageStyles["section-search"]}`}
                         type="text"
                         placeholder="Search..."
                         value={localSearch}
                         onChange={(e) => setLocalSearch(e.target.value)}
                         onKeyPress={handleSearchKeyPress}
-                        style={{
-                            padding: '0.35rem 0.75rem',
-                            fontSize: '0.875rem',
-                            borderRadius: '0.25rem',
-                            border: '1px solid #dee2e6',
-                            minWidth: '200px'
-                        }}
                     />
-                    <label style={{ display: 'flex', alignItems: 'center', fontSize: '0.9rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    <label className={pageStyles["section-check"]}>
                         <input
                             type="checkbox"
                             checked={showHidden}
                             onChange={(e) => onShowHiddenChanged(e.target.checked)}
-                            style={{ marginRight: '0.5rem' }}
                         />
                         Show Archived
                     </label>
-                    {headerCheckboxState !== 'none' &&
-                        <>
-                            <ActionButton type="retry" onClick={onRequeue} />
-                            <ActionButton type="delete" onClick={onRemove} />
-                        </>
-                    }
                 </div>
             </div>
             <PageTable headerCheckboxState={headerCheckboxState} onHeaderCheckboxChange={onSelectAll} showFailureReason={true}>

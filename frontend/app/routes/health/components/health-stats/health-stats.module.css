@@ -4,6 +4,7 @@
     border-radius: 10px;
     padding: 24px;
     border: 1px solid rgba(255, 255, 255, 0.05);
+    min-width: 0;
 }
 
 .header {
@@ -72,6 +73,10 @@
 
 /* Mobile responsiveness */
 @media (max-width: 600px) {
+    .container {
+        padding: 16px;
+    }
+
     .statsGrid {
         grid-template-columns: repeat(2, 1fr);
         gap: 16px;

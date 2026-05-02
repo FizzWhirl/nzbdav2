@@ -104,24 +104,25 @@ export function QueueTable({
     return (
         <>
             <div className={pageStyles["section-title"]}>
-                <h3>Queue</h3>
-                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        {onSearchChange && (
-                            <input
-                                type="text"
-                                placeholder="Search..."
-                                value={localSearch}
-                                onChange={(e) => setLocalSearch(e.target.value)}
-                                onKeyPress={handleSearchKeyPress}
-                                style={{
-                                    padding: '0.35rem 0.75rem',
-                                    fontSize: '0.875rem',
-                                    borderRadius: '0.25rem',
-                                    border: '1px solid #dee2e6',
-                                    minWidth: '200px'
-                                }}
-                            />
-                        )}
+                <div className={pageStyles["section-heading"]}>
+                    <h3>Queue</h3>
+                    {headerCheckboxState !== 'none' &&
+                        <div className={pageStyles["section-actions"]}>
+                            <ActionButton type="delete" onClick={onRemove} />
+                        </div>
+                    }
+                </div>
+                <div className={pageStyles["section-toolbar"]}>
+                    {onSearchChange && (
+                        <input
+                            className={`${pageStyles["section-control"]} ${pageStyles["section-search"]}`}
+                            type="text"
+                            placeholder="Search queue..."
+                            value={localSearch}
+                            onChange={(e) => setLocalSearch(e.target.value)}
+                            onKeyPress={handleSearchKeyPress}
+                        />
+                    )}
                     {fetcher.data?.error && (
                         <Alert variant="danger" style={{ margin: 0, padding: '0.25rem 0.75rem', fontSize: '0.875rem' }}>
                             {fetcher.data.error}
@@ -130,13 +131,10 @@ export function QueueTable({
                     <fetcher.Form ref={formRef} method="POST" encType="multipart/form-data" style={{ display: 'inline' }}>
                         <input ref={inputRef} name="nzbFile" type="file" accept=".nzb" style={{ display: 'none' }} onChange={onFileChange} />
                     </fetcher.Form>
-                    <Button variant="outline-secondary" size="sm" onClick={onUploadClick} disabled={isUploading} style={{ marginLeft: '0.5rem' }}>
+                    <Button variant="outline-secondary" size="sm" onClick={onUploadClick} disabled={isUploading}>
                         {isUploading ? 'Uploading...' : '+ Add NZB'}
                     </Button>
-                    </div>
-                {headerCheckboxState !== 'none' &&
-                    <ActionButton type="delete" onClick={onRemove} />
-                }
+                </div>
             </div>
             <div style={{ minHeight: "300px" }}>
                 <PageTable headerCheckboxState={headerCheckboxState} onHeaderCheckboxChange={onSelectAll} striped>

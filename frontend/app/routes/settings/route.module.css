@@ -1,9 +1,11 @@
 .container {
-    min-width: 100%;
+    width: 100%;
+    min-width: 0;
     min-height: 100%;
-    padding: 30px 35px 20px 35px;
+    padding: clamp(16px, 3vw, 30px) clamp(12px, 2.5vw, 35px) 20px;
     color: #93a1a1;
     font-size: 16px;
+    overflow-x: hidden;
 }
 
 .tabs {
@@ -24,4 +26,35 @@
 
 .button {
     margin-right: 10px;
+}
+
+.container :global(.tab-content),
+.container :global(.tab-pane),
+.container :global(.accordion),
+.container :global(.card),
+.container :global(form) {
+    max-width: 100%;
+    min-width: 0;
+}
+
+.container input,
+.container select,
+.container textarea {
+    max-width: 100%;
+}
+
+@media (max-width: 700px) {
+    .container {
+        font-size: 14px;
+    }
+
+    .tabs {
+        margin-bottom: 18px;
+    }
+
+    .button {
+        width: 100%;
+        margin-right: 0;
+        margin-bottom: 10px;
+    }
 }

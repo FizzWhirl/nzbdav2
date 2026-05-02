@@ -1,9 +1,11 @@
 .container {
-    min-width: 100%;
+    width: 100%;
+    min-width: 0;
     min-height: 100%;
-    padding: 35px 30px;
+    padding: clamp(16px, 3vw, 35px) clamp(12px, 2.5vw, 30px);
     color: #93a1a1;
     font-size: 14px;
+    overflow-x: hidden;
 }
 
 .alert {
@@ -24,4 +26,18 @@
 
 .section:last-child {
     margin-bottom: 0;
+}
+
+@media (max-width: 700px) {
+    .container {
+        font-size: 13px;
+    }
+
+    .alert {
+        margin-bottom: 20px;
+    }
+
+    .section {
+        margin-bottom: 24px;
+    }
 }

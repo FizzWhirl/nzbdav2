@@ -3,6 +3,7 @@
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     padding: 1.5rem;
+    min-width: 0;
 }
 
 .header {
@@ -58,6 +59,7 @@
 
 .tableContainer {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .table {
@@ -101,4 +103,20 @@
 
 .progressBadge {
     min-width: 60px;
+}
+
+@media (max-width: 700px) {
+    .container {
+        padding: 1rem;
+    }
+
+    .header {
+        align-items: flex-start;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .tableRow td {
+        padding: 0.75rem 0.5rem;
+    }
 }

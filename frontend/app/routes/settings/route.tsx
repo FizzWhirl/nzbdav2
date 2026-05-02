@@ -11,6 +11,7 @@ import { Maintenance } from "./maintenance/maintenance";
 import { isRepairsSettingsUpdated, isRepairsSettingsValid, RepairsSettings } from "./repairs/repairs";
 import { GeneralSettings, isGeneralSettingsUpdated } from "./general/general";
 import { DebugSettings } from "./debug/debug";
+import { useSearchParams } from "react-router";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -93,7 +94,8 @@ function Body(props: BodyProps) {
     const [newConfig, setNewConfig] = React.useState(config);
     const [isSaving, setIsSaving] = React.useState(false);
     const [isSaved, setIsSaved] = React.useState(false);
-    const [activeTab, setActiveTab] = React.useState('general');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const activeTab = searchParams.get('tab') || 'general';
 
     // derived variables
     const isGeneralUpdated = isGeneralSettingsUpdated(config, newConfig);
@@ -154,8 +156,12 @@ function Body(props: BodyProps) {
         <div className={styles.container}>
             <Tabs
                 activeKey={activeTab}
-                onSelect={x => setActiveTab(x!)}
-                className={styles.tabs}
+                onSelect={x => setSearchParams(prev => {
+                    if (x && x !== 'general') prev.set('tab', x);
+                    else prev.delete('tab');
+                    return prev;
+                })}
+                className={`${styles.tabs} mobile-hidden-tabs`}
             >
                 <Tab eventKey="general" title={generalTitle}>
                     <GeneralSettings config={newConfig} setNewConfig={setNewConfig} />

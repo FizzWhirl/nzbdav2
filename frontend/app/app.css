@@ -7,14 +7,31 @@
   --page-padding: 25px;
 }
 
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 html, body {
   margin: 0;
-  min-width: 100%;
+  width: 100%;
+  min-width: 0;
   min-height: 100%;
-  position: absolute;
+  overflow-x: hidden;
   background-color: var(--body-background-color);
   color: white;
   font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+img, svg, video, canvas {
+  max-width: 100%;
+}
+
+.table-responsive {
+  -webkit-overflow-scrolling: touch;
 }
 
 /* bootstrap overrides */
@@ -24,4 +41,99 @@ html, body {
 .modal {
   --bs-modal-margin: 20px !important;
   --bs-modal-bg: hsl(196.8 25% 14.51%);
+}
+
+@media (max-width: 767px) {
+  :root {
+    --top-nav-height: 56px;
+    --page-padding: 14px;
+  }
+
+  .p-4 {
+    padding: 1rem !important;
+  }
+
+  .nav-tabs,
+  .nav-pills {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .nav-tabs::-webkit-scrollbar,
+  .nav-pills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-tabs .nav-link,
+  .nav-pills .nav-link {
+    white-space: nowrap;
+  }
+
+  .mobile-hidden-tabs {
+    display: none !important;
+  }
+
+  .d-flex.justify-content-between.align-items-center {
+    flex-wrap: wrap;
+    align-items: flex-start !important;
+    gap: 0.75rem;
+  }
+
+  .d-flex.justify-content-between.align-items-center > h1,
+  .d-flex.justify-content-between.align-items-center > h2,
+  .d-flex.justify-content-between.align-items-center > h3,
+  .d-flex.justify-content-between.align-items-center > h4 {
+    flex: 1 1 100%;
+    line-height: 1.2;
+  }
+
+  .d-flex.justify-content-between.align-items-center > .btn-group,
+  .d-flex.justify-content-between.align-items-center > .d-flex {
+    flex: 1 1 100%;
+    justify-content: flex-start !important;
+  }
+
+  .d-flex.gap-2,
+  .d-flex.gap-3 {
+    flex-wrap: wrap;
+  }
+
+  .d-flex.gap-2 > *,
+  .d-flex.gap-3 > * {
+    min-width: 0;
+  }
+
+  .d-flex.gap-2 .form-control,
+  .d-flex.gap-3 .form-control {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .btn-group {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    min-height: 38px;
+  }
+
+  .form-control,
+  .form-select,
+  .input-group {
+    min-width: 0;
+  }
+
+  .pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.15rem;
+  }
+
+  .modal {
+    --bs-modal-margin: 10px !important;
+  }
 }

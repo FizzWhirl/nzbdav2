@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-RCLONE-HOST-FIX");
-            Log.Warning("  FIX: Frontend proxy no longer rewrites the Host header (changeOrigin: false). NWebDav now emits PROPFIND hrefs with the public host instead of localhost:8080, restoring rclone v1.74.0 directory listings. Today's GD-cap commits restored after bisect cleared them.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-RCLONE-PROPSTAT-FIX");
+            Log.Warning("  FIX: PropFindResponseCleanupMiddleware strips <D:propstat> blocks with HTTP/1.1 404 status from PROPFIND responses. rclone v1.74.0 treats any 404 propstat as 'bad status' and discards the entire item; v1.73.x ignored them. Combined with the earlier changeOrigin:false Host-header fix, restores full rclone listings.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -386,6 +386,7 @@ class Program
         app.Map("/ws", websocketManager.HandleRoute);
         app.MapControllers();
         app.UseWebdavBasicAuthentication();
+        app.UsePropFindResponseCleanup();
         app.UseNWebDav();
         app.Lifetime.ApplicationStopping.Register(SigtermUtil.Cancel);
         await app.RunAsync().ConfigureAwait(false);

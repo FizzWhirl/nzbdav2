@@ -182,7 +182,7 @@ export function WebdavSettings({ config, setNewConfig }: SabnzbdSettingsProps) {
             <Form.Group>
                 <Form.Label htmlFor="max-graceful-degradation-segments-input">Max Graceful Degradation Segments</Form.Label>
                 <Form.Control
-                    {...className([styles.input, !isValidNonNegativeInt(config["usenet.max-graceful-degradation-segments"]) && styles.error])}
+                    {...className([styles.input, !isValidOptionalNonNegativeInt(config["usenet.max-graceful-degradation-segments"]) && styles.error])}
                     type="text"
                     id="max-graceful-degradation-segments-input"
                     aria-describedby="max-graceful-degradation-segments-help"
@@ -498,6 +498,15 @@ function isValidNonNegativeInt(value: string): boolean {
     if (trimmed === "") return false;
     const num = Number(trimmed);
     return Number.isInteger(num) && num >= 0 && trimmed === num.toString();
+}
+
+// Same as isValidNonNegativeInt but treats empty / unset as VALID (the backend
+// will fall back to its default). Use this for fields that are explicitly optional.
+function isValidOptionalNonNegativeInt(value: string | undefined | null): boolean {
+    if (value === undefined || value === null) return true;
+    const trimmed = String(value).trim();
+    if (trimmed === "") return true;
+    return isValidNonNegativeInt(trimmed);
 }
 
 function isValidPriority(value: string): boolean {

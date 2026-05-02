@@ -57,14 +57,24 @@ class Program
             .MinimumLevel.Override("Microsoft.AspNetCore.Mvc", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.AspNetCore.Routing", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.AspNetCore.DataProtection", LogEventLevel.Error)
+            // Suppress NWebDav's "Property {Prop} is not supported on item {Name}" warnings.
+            // These are unavoidable noise: WebDAV clients (rclone, Plex, Jellyfin, finder)
+            // PROPFIND root collections asking for getcontentlength / getcontenttype, and
+            // collection nodes legitimately don't support those file-only properties. The
+            // warning fires once per (collection × property × request) and floods the log
+            // during normal operation. We only drop the specific message template; any other
+            // NWebDav warnings still pass through.
+            .Filter.ByExcluding(le =>
+                le.MessageTemplate.Text.StartsWith("Property ", StringComparison.Ordinal)
+                && le.MessageTemplate.Text.Contains("is not supported on item", StringComparison.Ordinal))
             .WriteTo.Console(theme: AnsiConsoleTheme.Code)
             .WriteTo.Sink(InMemoryLogSink.Instance)
             .CreateLogger();
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-LAZY-BACKFILL-AND-TRUNC-BYPASS");
-            Log.Warning("  RELIABILITY: BufferedSegmentStream now lazily backfills the __nzbdav_mp4_layout annotation for legacy MP4-family files on first stream (recursion-safe via Streaming-only gate + in-flight dedupe). HealthCheckService now bypasses the 24h Arr-import grace gate for items hard-truncated by the streaming layer (CorruptionReason starts with 'Stream truncated:').");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-FIXES-1");
+            Log.Warning("  FIXES: Suppress NWebDav 'Property X is not supported on item Y' warnings (unavoidable PROPFIND noise on collection nodes); GD-Segments settings field is now correctly optional (no error styling when empty).");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

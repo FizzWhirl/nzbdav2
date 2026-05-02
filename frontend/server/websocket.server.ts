@@ -1,6 +1,7 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import { isAuthenticated } from "../app/auth/authentication.server";
 import type { IncomingMessage } from 'http';
+import { errorDetails, logJson } from './logger.server.js';
 
 function initializeWebsocketServer(wss: WebSocketServer) {
     // keep track of socket subscriptions
@@ -49,7 +50,7 @@ function initializeWebsocketServer(wss: WebSocketServer) {
                 }
             };
         } catch (error) {
-            console.error("Error authenticating websocket session:", error);
+            logJson("error", "Error authenticating websocket session", { error: errorDetails(error) });
             ws.close(1011, "Internal server error");
             return;
         }
@@ -65,7 +66,7 @@ export function initializeWebsocketClient(subscriptions: Map<string, Set<WebSock
         const socket = new WebSocket(url);
 
         socket.onopen = () => {
-            console.info("WebSocket connected");
+            logJson("info", "WebSocket connected");
             backoff.reset();
             if (reconnectTimeout) {
                 clearTimeout(reconnectTimeout);
@@ -90,11 +91,14 @@ export function initializeWebsocketClient(subscriptions: Map<string, Set<WebSock
         };
 
         socket.onerror = (event: WebSocket.ErrorEvent) => {
-            console.error('WebSocket error:', event.message);
+            logJson("error", "WebSocket error", { error: { message: event.message } });
         };
 
         socket.onclose = (event: WebSocket.CloseEvent) => {
-            console.info(`WebSocket closed (code: ${event.code}, reason: ${event.reason})`);
+            logJson("warn", `WebSocket closed (code: ${event.code}, reason: ${event.reason})`, {
+                code: event.code,
+                reason: event.reason
+            });
             scheduleReconnect();
         };
     }
@@ -103,7 +107,7 @@ export function initializeWebsocketClient(subscriptions: Map<string, Set<WebSock
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
 
         const delay = backoff.nextDelayMs();
-        console.info(`WebSocket reconnecting in ${delay}ms...`);
+        logJson("info", `WebSocket reconnecting in ${delay}ms...`, { delayMs: delay });
 
         reconnectTimeout = setTimeout(() => {
             connect();

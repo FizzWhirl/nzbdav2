@@ -1,5 +1,18 @@
 #!/bin/sh
 
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'
+}
+
+log_json() {
+    level=$1
+    shift
+    message=$*
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    escaped_message=$(json_escape "$message")
+    printf '{"timestamp":"%s","level":"%s","source":"entrypoint","message":"%s"}\n' "$timestamp" "$level" "$escaped_message"
+}
+
 wait_either() {
     local pid1=$1
     local pid2=$2
@@ -25,7 +38,7 @@ wait_either() {
 
 # Signal handling for graceful shutdown
 terminate() {
-    echo "Caught termination signal. Shutting down..."
+    log_json warn "Caught termination signal. Shutting down..."
     if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
         kill "$BACKEND_PID"
     fi
@@ -46,7 +59,7 @@ PGID=${PGID:-1000}
 EXISTING_GROUP=$(getent group "$PGID" 2>/dev/null | cut -d: -f1)
 if [ -n "$EXISTING_GROUP" ]; then
     APP_GROUP="$EXISTING_GROUP"
-    echo "Using existing group '$APP_GROUP' for GID $PGID"
+    log_json info "Using existing group '$APP_GROUP' for GID $PGID"
 elif ! getent group appgroup >/dev/null; then
     addgroup -g "$PGID" appgroup
     APP_GROUP="appgroup"
@@ -74,29 +87,29 @@ chown $PUID:$PGID /config
 cd /app/backend
 
 # Run database migration with PRAGMA optimizations (5-10x faster)
-echo "Starting database migration..."
+log_json info "Starting database migration..."
 su-exec appuser ./NzbWebDAV --db-migration
-echo "Database migration completed."
+log_json info "Database migration completed."
 
 # Run backend as appuser in background
 su-exec appuser ./NzbWebDAV &
 BACKEND_PID=$!
 
 # Wait for backend health check
-echo "Waiting for backend to start."
+log_json info "Waiting for backend to start."
 MAX_BACKEND_HEALTH_RETRIES=${MAX_BACKEND_HEALTH_RETRIES:-300}
 MAX_BACKEND_HEALTH_RETRY_DELAY=${MAX_BACKEND_HEALTH_RETRY_DELAY:-1}
 i=0
 while true; do
-    echo "Checking backend health: $BACKEND_URL/health ..."
+    log_json info "Checking backend health: $BACKEND_URL/health ..."
     if curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/health" | grep -q "^200$"; then
-        echo "Backend is healthy."
+        log_json info "Backend is healthy."
         break
     fi
 
     i=$((i+1))
     if [ "$i" -ge "$MAX_BACKEND_HEALTH_RETRIES" ]; then
-        echo "Backend failed health check after $MAX_BACKEND_HEALTH_RETRIES retries. Exiting."
+        log_json error "Backend failed health check after $MAX_BACKEND_HEALTH_RETRIES retries. Exiting."
         kill $BACKEND_PID
         wait $BACKEND_PID
         exit 1
@@ -107,7 +120,7 @@ done
 
 # Run frontend as appuser in background
 cd /app/frontend
-su-exec appuser npm run start &
+su-exec appuser node dist-node/server.js &
 FRONTEND_PID=$!
 
 # Wait for either to exit
@@ -116,9 +129,9 @@ EXIT_CODE=$?
 
 # Determine which process exited
 if [ "$EXITED_PID" -eq "$FRONTEND_PID" ]; then
-    echo "The web-frontend has exited. Shutting down the web-backend..."
+    log_json warn "The web-frontend has exited. Shutting down the web-backend..."
 else
-    echo "The web-backend has exited. Shutting down the web-frontend..."
+    log_json warn "The web-backend has exited. Shutting down the web-frontend..."
 fi
 
 # Kill the remaining process

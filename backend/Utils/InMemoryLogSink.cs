@@ -22,7 +22,6 @@ public class InMemoryLogSink : ILogEventSink
 
     public IEnumerable<LogEvent> GetLogs()
     {
-        // Return reversed (newest first) usually better for UI, or client can sort
         return _logsByLevel.Values.SelectMany(x => x).ToArray();
     }
     

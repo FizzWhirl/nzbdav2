@@ -3,6 +3,7 @@ import express from "express";
 import morgan from "morgan";
 import http from "http";
 import { WebSocketServer } from "ws";
+import { logJson } from "./server/logger.server.js";
 
 // Short-circuit the type-checking of the built output.
 const BUILD_PATH = "../build/server/index.js";
@@ -30,7 +31,7 @@ const setServerModule = (serverModule: any) => {
 
 // Handle development vs production
 if (DEVELOPMENT) {
-  console.log("Starting development server");
+  logJson("info", "Starting development server");
   const viteDevServer = await import("vite").then((vite) =>
     vite.createServer({
       server: { middlewareMode: true },
@@ -50,12 +51,29 @@ if (DEVELOPMENT) {
     }
   });
 } else {
-  console.log("Starting production server");
+  logJson("info", "Starting production server");
   app.use(
     "/assets",
     express.static("build/client/assets", { immutable: true, maxAge: "1y" }),
   );
-  app.use(morgan("tiny", {
+  app.use(morgan((tokens, req, res) => {
+    const method = tokens.method(req, res) ?? "UNKNOWN";
+    const url = tokens.url(req, res) ?? req.url;
+    const status = Number(tokens.status(req, res) ?? 0);
+    return JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: status >= 500 ? "error" : "warn",
+      source: "frontend-http",
+      message: `${method} ${url} ${status}`,
+      http: {
+        method,
+        url,
+        status,
+        responseTimeMs: Number(tokens["response-time"](req, res) ?? 0),
+        contentLength: tokens.res(req, res, "content-length") ?? null
+      }
+    });
+  }, {
     skip: (req, res) => {
       return res.statusCode < 400
         || req.url === "/favicon.ico"
@@ -73,5 +91,5 @@ setWebsocketServer(new WebSocketServer({ server }));
 
 // Begin listening for connections
 server.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  logJson("info", `Server is running on http://localhost:${PORT}`, { port: PORT });
 });

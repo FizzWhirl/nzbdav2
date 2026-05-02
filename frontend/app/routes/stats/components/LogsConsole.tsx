@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Form } from "react-bootstrap";
 
 type LogEntry = {
@@ -10,6 +10,7 @@ type LogEntry = {
 export function LogsConsole() {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [level, setLevel] = useState("Information");
+    const logsRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const fetchLogs = async () => {
@@ -27,6 +28,13 @@ export function LogsConsole() {
         const interval = setInterval(fetchLogs, 2000);
         return () => clearInterval(interval);
     }, [level]);
+
+    useEffect(() => {
+        const container = logsRef.current;
+        if (!container) return;
+
+        container.scrollTop = container.scrollHeight;
+    }, [logs]);
 
     const getLevelColor = (lvl: string) => {
         switch (lvl) {
@@ -60,6 +68,7 @@ export function LogsConsole() {
             </div>
             
             <div 
+                ref={logsRef}
                 className="flex-grow-1 bg-black rounded p-3 font-monospace" 
                 style={{ 
                     height: 'calc(100vh - 250px)', 

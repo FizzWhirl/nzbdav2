@@ -28,7 +28,7 @@ using Prometheus;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
-using Serilog.Sinks.SystemConsole.Themes;
+using NzbWebDAV.Logging;
 
 namespace NzbWebDAV;
 
@@ -67,7 +67,7 @@ class Program
             .Filter.ByExcluding(le =>
                 le.MessageTemplate.Text.StartsWith("Property ", StringComparison.Ordinal)
                 && le.MessageTemplate.Text.Contains("is not supported on item", StringComparison.Ordinal))
-            .WriteTo.Console(theme: AnsiConsoleTheme.Code)
+            .WriteTo.Console(formatter: new DozzleJsonConsoleFormatter())
             .WriteTo.Sink(InMemoryLogSink.Instance)
             .CreateLogger();
 

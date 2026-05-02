@@ -22,7 +22,7 @@ public class GetLogsController : BaseApiController
         
         var response = new GetLogsResponse
         {
-            Logs = logs.OrderByDescending(x => x.Timestamp).Select(x => new GetLogsResponse.LogEntry
+            Logs = logs.OrderBy(x => x.Timestamp).Select(x => new GetLogsResponse.LogEntry
             {
                 Timestamp = x.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
                 Level = x.Level.ToString(),

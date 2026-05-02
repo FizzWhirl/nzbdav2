@@ -180,21 +180,6 @@ export function WebdavSettings({ config, setNewConfig }: SabnzbdSettingsProps) {
             </Form.Group>
             <hr />
             <Form.Group>
-                <Form.Label htmlFor="max-graceful-degradation-segments-input">Max Graceful Degradation Segments</Form.Label>
-                <Form.Control
-                    {...className([styles.input, !isValidOptionalNonNegativeInt(config["usenet.max-graceful-degradation-segments"]) && styles.error])}
-                    type="text"
-                    id="max-graceful-degradation-segments-input"
-                    aria-describedby="max-graceful-degradation-segments-help"
-                    placeholder="3"
-                    value={config["usenet.max-graceful-degradation-segments"] || ""}
-                    onChange={e => setNewConfig({ ...config, "usenet.max-graceful-degradation-segments": e.target.value })} />
-                <Form.Text id="max-graceful-degradation-segments-help" muted>
-                    How many segments per playback stream may be served via zero-fill substitution before the stream is forcibly truncated and the file is marked as corrupted. Most decoders (H.264 / HEVC inside MP4 / MKV) lose codec sync after the first zero-filled segment, so continuing past this limit usually causes playback to hang on garbage rather than recover. Truncating the stream gives the player a clean EOF instead. (Default: <code>3</code>; set to <code>0</code> to truncate on the very first failure, or to a very large number to restore the legacy "always zero-fill" behaviour.)
-                </Form.Text>
-            </Form.Group>
-            <hr />
-            <Form.Group>
                 <Form.Label htmlFor="streaming-reserve-input">Streaming Reserve</Form.Label>
                 <Form.Control
                     {...className([styles.input, !isValidNonNegativeInt(config["usenet.streaming-reserve"]) && styles.error])}
@@ -446,7 +431,6 @@ export function isWebdavSettingsUpdated(config: Record<string, string>, newConfi
         || config["webdav.pass"] !== newConfig["webdav.pass"]
         || config["usenet.total-streaming-connections"] !== newConfig["usenet.total-streaming-connections"]
         || config["usenet.max-concurrent-buffered-streams"] !== newConfig["usenet.max-concurrent-buffered-streams"]
-        || config["usenet.max-graceful-degradation-segments"] !== newConfig["usenet.max-graceful-degradation-segments"]
         || config["usenet.streaming-reserve"] !== newConfig["usenet.streaming-reserve"]
         || config["usenet.streaming-priority"] !== newConfig["usenet.streaming-priority"]
         || config["usenet.use-buffered-streaming"] !== newConfig["usenet.use-buffered-streaming"]
@@ -463,9 +447,6 @@ export function isWebdavSettingsValid(newConfig: Record<string, string>) {
     if (!isValidUser(newConfig["webdav.user"])) return false;
     if (!isValidPositiveInt(newConfig["usenet.total-streaming-connections"])) return false;
     if (!isValidPositiveInt(newConfig["usenet.max-concurrent-buffered-streams"])) return false;
-    if (newConfig["usenet.max-graceful-degradation-segments"] !== undefined
-        && newConfig["usenet.max-graceful-degradation-segments"] !== ""
-        && !isValidNonNegativeInt(newConfig["usenet.max-graceful-degradation-segments"])) return false;
     if (!isValidNonNegativeInt(newConfig["usenet.streaming-reserve"])) return false;
     if (!isValidPriority(newConfig["usenet.streaming-priority"])) return false;
     if (!isValidPositiveInt(newConfig["usenet.shared-stream-buffer-size"])) return false;

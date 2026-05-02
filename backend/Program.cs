@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-REVERT-WIDER");
-            Log.Warning("  REVERT: Rolled back today's GD-tier work: 4a79e1ae (lazy MP4-layout backfill + arr-import grace bypass), 67b1316a (file-details modal tier surface), 85dc8c3f (moov-at-end detection + effective-tier logging) and 7c6007f3 (container-aware GD cap + Truncated badge). Bisecting a regression where rclone clients see no folders/files after recent deploys.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-REVERT-ALL-GD");
+            Log.Warning("  REVERT: Rolled back ALL of today's GD-cap work: 4a79e1ae, 67b1316a, 85dc8c3f, 7c6007f3, f4e0a5e9, d7a2c6c2. Only 9c8b143a (Serilog NWebDav noise filter + optional GD-field validation) remains from today. Bisecting a regression where rclone clients see no folders/files after recent deploys.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -228,7 +228,6 @@ class Program
 
         // Set initial concurrent buffered stream cap
         BufferedSegmentStream.SetMaxConcurrentStreams(configManager.GetMaxConcurrentBufferedStreams());
-        BufferedSegmentStream.SetMaxGracefulDegradationSegments(configManager.GetMaxGracefulDegradationSegments());
 
         // Update on config change
         configManager.OnConfigChanged += (_, eventArgs) =>
@@ -236,10 +235,6 @@ class Program
             if (eventArgs.NewConfig.ContainsKey("usenet.max-concurrent-buffered-streams"))
             {
                 BufferedSegmentStream.SetMaxConcurrentStreams(configManager.GetMaxConcurrentBufferedStreams());
-            }
-            if (eventArgs.NewConfig.ContainsKey("usenet.max-graceful-degradation-segments"))
-            {
-                BufferedSegmentStream.SetMaxGracefulDegradationSegments(configManager.GetMaxGracefulDegradationSegments());
             }
         };
 
@@ -325,23 +320,6 @@ class Program
 
             // Start the OrganizedLinksUtil refresh service after initial setup
             OrganizedLinksUtil.StartRefreshService(app.Services, app.Services.GetRequiredService<ConfigManager>(), ct);
-
-            // Wire BufferedSegmentStream's missing-articles-ledger hooks now that
-            // the DI container is alive. The GD-cap truncation path uses these to
-            // dump corrupted segments into the ledger so the missing-articles UI
-            // reflects truncation events. Done here (not at app start) because
-            // ProviderErrorService is a singleton resolved from the DI container.
-            try
-            {
-                BufferedSegmentStream.SetMissingArticleLedgerHooks(
-                    () => app.Services.GetService<ProviderErrorService>(),
-                    () => app.Services.GetRequiredService<ConfigManager>().GetUsenetProviderConfig().Providers.Count
-                );
-            }
-            catch (Exception hookEx)
-            {
-                Log.Warning(hookEx, "Failed to wire BufferedSegmentStream missing-articles-ledger hooks; GD-cap truncations will not be reflected in the missing-articles tab.");
-            }
 
             // Initial call to InitializeAsync is part of the refresh service now,
             // so we don't need a separate call here. The refresh service will trigger it.

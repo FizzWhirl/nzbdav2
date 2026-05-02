@@ -189,31 +189,6 @@ public class ConfigManager
         );
     }
 
-    /// <summary>
-    /// Maximum number of segments per stream that can be served via "graceful degradation"
-    /// (zero-fill substitution) before the stream is forcibly terminated and the file
-    /// is permanently flagged as corrupted.
-    ///
-    /// Background: zero-filling a segment mid-stream lets media containers continue
-    /// reading byte offsets, but most decoders (H.264 / HEVC inside MP4 / MKV) cannot
-    /// recover from arbitrary zero blocks in the bitstream and end up either freezing
-    /// or playing garbage. Truncating the HTTP response at the point of failure produces
-    /// a clean EOF that players handle far more gracefully ("playback ended" vs
-    /// "playback frozen on a zero-frame").
-    ///
-    /// Default: 3. Set to 0 to disable graceful degradation entirely (every permanent
-    /// segment failure becomes a hard truncation). Set to a very large number to keep
-    /// the legacy "always zero-fill" behaviour.
-    /// </summary>
-    public int GetMaxGracefulDegradationSegments()
-    {
-        return int.Parse(
-            StringUtil.EmptyToNull(GetConfigValue("usenet.max-graceful-degradation-segments"))
-            ?? StringUtil.EmptyToNull(Environment.GetEnvironmentVariable("MAX_GRACEFUL_DEGRADATION_SEGMENTS"))
-            ?? "3"
-        );
-    }
-
     public int GetSharedStreamGracePeriod()
     {
         return int.Parse(

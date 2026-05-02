@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-04-28-FIXES-1");
-            Log.Warning("  FIXES: Suppress NWebDav 'Property X is not supported on item Y' warnings (unavoidable PROPFIND noise on collection nodes); GD-Segments settings field is now correctly optional (no error styling when empty).");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-RCLONE-HOST-FIX");
+            Log.Warning("  FIX: Frontend proxy no longer rewrites the Host header (changeOrigin: false). NWebDav now emits PROPFIND hrefs with the public host instead of localhost:8080, restoring rclone v1.74.0 directory listings. Today's GD-cap commits restored after bisect cleared them.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

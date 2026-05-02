@@ -191,8 +191,6 @@ export function WebdavSettings({ config, setNewConfig }: SabnzbdSettingsProps) {
                     onChange={e => setNewConfig({ ...config, "usenet.max-graceful-degradation-segments": e.target.value })} />
                 <Form.Text id="max-graceful-degradation-segments-help" muted>
                     How many segments per playback stream may be served via zero-fill substitution before the stream is forcibly truncated and the file is marked as corrupted. Most decoders (H.264 / HEVC inside MP4 / MKV) lose codec sync after the first zero-filled segment, so continuing past this limit usually causes playback to hang on garbage rather than recover. Truncating the stream gives the player a clean EOF instead. (Default: <code>3</code>; set to <code>0</code> to truncate on the very first failure, or to a very large number to restore the legacy "always zero-fill" behaviour.)
-                    <br /><br />
-                    <strong>Per-container override (not configurable):</strong> the configured value applies to <em>resilient</em> containers (MKV / WebM / MPEG-TS / fragmented MP4 detected via the <code>moof</code> box). For <em>standard</em> containers (faststart MP4 / MOV / AVI / WMV / FLV), the effective cap is hard-limited to <code>min(configured, 2)</code> because their structural metadata (moov / index boxes) is sensitive to byte-offset corruption. <em>moov-at-end MP4 / MOV</em> files (detected by a 512-byte HTTP probe during media analysis) and <em>unknown / non-video</em> files are hard-capped at <code>0</code> (truncate on the first failure) — losing any segment in a moov-at-end file risks losing the moov box itself, making the entire file unplayable.
                 </Form.Text>
             </Form.Group>
             <hr />

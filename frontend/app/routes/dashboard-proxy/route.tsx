@@ -3,7 +3,9 @@ import { backendClient } from "~/clients/backend-client.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
     const url = new URL(request.url);
-    const hours = Number(url.searchParams.get('hours')) || 24;
+    const hoursParam = url.searchParams.get('hours');
+    const parsedHours = hoursParam === null ? 24 : Number(hoursParam);
+    const hours = Number.isFinite(parsedHours) ? parsedHours : 24;
 
     try {
         const data = await backendClient.getDashboard(hours);

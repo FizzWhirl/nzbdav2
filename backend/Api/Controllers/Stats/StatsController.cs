@@ -203,26 +203,32 @@ public class StatsController(
     {
         return ExecuteSafely(async () =>
         {
-            // range: 1h, 24h, 30d
+            // range: 1h, 24h, 30d, all
             var now = DateTimeOffset.UtcNow;
-            var cutoff = range switch
+            DateTimeOffset? cutoff = range switch
             {
                 "1h" => now.AddHours(-1),
                 "24h" => now.AddHours(-24),
                 "30d" => now.AddDays(-30),
+                "all" => null,
                 _ => now.AddHours(-1)
             };
 
-            var samples = await dbContext.BandwidthSamples
-                .AsNoTracking()
-                .Where(x => x.Timestamp >= cutoff)
-                .OrderBy(x => x.Timestamp)
-                .ToListAsync();
+            var query = dbContext.BandwidthSamples.AsNoTracking();
+
+            if (cutoff.HasValue)
+            {
+                query = query.Where(x => x.Timestamp >= cutoff.Value);
+            }
 
             if (range == "30d")
             {
                 // Aggregate to hourly
-                var aggregated = samples
+                var hourlySamples = await query
+                    .OrderBy(x => x.Timestamp)
+                    .ToListAsync();
+
+                var aggregated = hourlySamples
                     .GroupBy(x => new { x.ProviderIndex, Hour = x.Timestamp.ToString("yyyy-MM-dd HH:00") })
                     .Select(g => new 
                     {
@@ -234,6 +240,25 @@ public class StatsController(
                     .ToList();
                 return Ok(aggregated);
             }
+
+            if (range == "all")
+            {
+                var aggregated = await query
+                    .GroupBy(x => x.ProviderIndex)
+                    .Select(g => new
+                    {
+                        ProviderIndex = g.Key,
+                        Timestamp = now,
+                        Bytes = g.Sum(x => x.Bytes)
+                    })
+                    .OrderBy(x => x.ProviderIndex)
+                    .ToListAsync();
+                return Ok(aggregated);
+            }
+
+            var samples = await query
+                .OrderBy(x => x.Timestamp)
+                .ToListAsync();
 
             return Ok(samples);
         });
@@ -555,15 +580,10 @@ public class StatsController(
         return ExecuteSafely(async () =>
         {
             var now = DateTimeOffset.UtcNow;
-            var cutoff = now.AddHours(-hours);
+            var isAllTime = hours <= 0;
+            DateTimeOffset? cutoff = isAllTime ? null : now.AddHours(-hours);
             var providerConfig = configManager.GetUsenetProviderConfig();
             var providers = providerConfig.Providers;
-
-            // 1. Total Downloaded (period and all-time)
-            var periodBytes = await dbContext.BandwidthSamples
-                .AsNoTracking()
-                .Where(x => x.Timestamp >= cutoff)
-                .SumAsync(x => x.Bytes);
 
             var archivedBytes = long.TryParse(
                 (await dbContext.ConfigItems.AsNoTracking()
@@ -576,10 +596,22 @@ public class StatsController(
 
             var allTimeBytes = archivedBytes + liveBytes;
 
+            // 1. Total Downloaded (period and all-time)
+            var periodBytes = isAllTime
+                ? allTimeBytes
+                : await dbContext.BandwidthSamples
+                    .AsNoTracking()
+                    .Where(x => x.Timestamp >= cutoff!.Value)
+                    .SumAsync(x => x.Bytes);
+
             // 2. Bandwidth by provider for the period
-            var bandwidthByProvider = await dbContext.BandwidthSamples
-                .AsNoTracking()
-                .Where(x => x.Timestamp >= cutoff)
+            var bandwidthQuery = dbContext.BandwidthSamples.AsNoTracking();
+            if (cutoff.HasValue)
+            {
+                bandwidthQuery = bandwidthQuery.Where(x => x.Timestamp >= cutoff.Value);
+            }
+
+            var bandwidthByProvider = await bandwidthQuery
                 .GroupBy(x => x.ProviderIndex)
                 .Select(g => new { ProviderIndex = g.Key, Bytes = g.Sum(x => x.Bytes) })
                 .ToListAsync();
@@ -587,8 +619,13 @@ public class StatsController(
             var totalBandwidth = bandwidthByProvider.Sum(x => x.Bytes);
 
             // 3. Provider stats from NzbProviderStats (affinity data)
-            var nzbProviderStats = await dbContext.NzbProviderStats
-                .AsNoTracking()
+            var nzbProviderStatsQuery = dbContext.NzbProviderStats.AsNoTracking();
+            if (cutoff.HasValue)
+            {
+                nzbProviderStatsQuery = nzbProviderStatsQuery.Where(s => s.LastUsed >= cutoff.Value);
+            }
+
+            var nzbProviderStats = await nzbProviderStatsQuery
                 .GroupBy(s => s.ProviderIndex)
                 .Select(g => new
                 {

@@ -12,13 +12,28 @@ public class GetProviderStatsController(
     ConfigManager configManager) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Get()
+    public async Task<IActionResult> Get([FromQuery] string range = "all")
     {
         var providerConfig = configManager.GetUsenetProviderConfig();
         var providers = providerConfig.Providers;
 
-        var statsByProvider = await dbContext.NzbProviderStats
-            .AsNoTracking()
+        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset? cutoff = range switch
+        {
+            "1h" => now.AddHours(-1),
+            "24h" => now.AddHours(-24),
+            "30d" => now.AddDays(-30),
+            "all" => null,
+            _ => null
+        };
+
+        var query = dbContext.NzbProviderStats.AsNoTracking();
+        if (cutoff.HasValue)
+        {
+            query = query.Where(s => s.LastUsed >= cutoff.Value);
+        }
+
+        var statsByProvider = await query
             .GroupBy(s => s.ProviderIndex)
             .Select(g => new
             {
@@ -40,6 +55,7 @@ public class GetProviderStatsController(
                 var total = s.SuccessfulSegments + s.FailedSegments;
                 return new
                 {
+                    ProviderIndex = s.ProviderIndex,
                     ProviderHost = providers[s.ProviderIndex].Host,
                     ProviderType = providers[s.ProviderIndex].Type.ToString(),
                     TotalOperations = total,
@@ -64,8 +80,14 @@ public class GetProviderStatsController(
             Providers = providerStatsList,
             TotalOperations = totalOperations,
             CalculatedAt = DateTimeOffset.UtcNow.ToString("o"),
-            TimeWindow = "cumulative",
-            TimeWindowHours = 0
+            TimeWindow = range,
+            TimeWindowHours = range switch
+            {
+                "1h" => 1,
+                "24h" => 24,
+                "30d" => 720,
+                _ => 0
+            }
         });
     }
 }

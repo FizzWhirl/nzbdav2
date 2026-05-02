@@ -10,6 +10,7 @@ import type {
     HealthCheckInfoType, DashboardSummary
 } from "~/types/backend";
 import type { DashboardData } from "~/types/dashboard";
+import type { ProviderStatsResponse } from "~/types/provider-stats";
 
 class BackendClient {
     private async fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
@@ -481,8 +482,8 @@ class BackendClient {
         return data.resetCount;
     }
 
-    public async getProviderStats(): Promise<ProviderStatsResponse> {
-        const url = process.env.BACKEND_URL + `/api/provider-stats`;
+    public async getProviderStats(range: string = "all"): Promise<ProviderStatsResponse> {
+        const url = process.env.BACKEND_URL + `/api/provider-stats?range=${encodeURIComponent(range)}`;
 
         const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
         const response = await this.fetchWithTimeout(url, {
@@ -502,20 +503,4 @@ class BackendClient {
 
 export const backendClient = new BackendClient();
 
-export type ProviderStatsResponse = {
-    providers: ProviderStats[],
-    totalOperations: number,
-    calculatedAt: string,
-    timeWindow: string,
-    timeWindowHours: number
-}
-
-export type ProviderStats = {
-    providerHost: string,
-    providerType: string,
-    totalOperations: number,
-    operationCounts: { [key: string]: number },
-    percentageOfTotal: number,
-    totalBytes: number,
-    averageSpeedMbps: number
-}
+export type { ProviderStatsResponse, ProviderStats } from "~/types/provider-stats";

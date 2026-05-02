@@ -3,8 +3,10 @@ import { Alert, ButtonGroup, Button, Row, Col } from 'react-bootstrap';
 import type { DashboardData } from '~/types/dashboard';
 import { TIME_WINDOW_OPTIONS } from '~/types/dashboard';
 import type { ConnectionUsageContext } from '~/types/connections';
+import type { ProviderBandwidthSnapshot } from '~/types/bandwidth';
 import { ActiveStreaming } from './ActiveStreaming';
 import { TotalDownloaded } from './TotalDownloaded';
+import { CurrentBandwidth } from './CurrentBandwidth';
 import { ProviderHealth } from './ProviderHealth';
 import { ProviderUsage } from './ProviderUsage';
 import { RecentCompletions } from './RecentCompletions';
@@ -13,11 +15,13 @@ import { createWebsocketBackoff, getBrowserWebsocketUrl, receiveMessage } from '
 type Props = {
     initialData: DashboardData;
     initialConnections: Record<number, ConnectionUsageContext[]>;
+    initialBandwidth: ProviderBandwidthSnapshot[];
 };
 
-export function Dashboard({ initialData, initialConnections }: Props) {
+export function Dashboard({ initialData, initialConnections, initialBandwidth }: Props) {
     const [data, setData] = useState(initialData);
     const [connections, setConnections] = useState(initialConnections);
+    const [currentBandwidth, setCurrentBandwidth] = useState(initialBandwidth);
     const [selectedHours, setSelectedHours] = useState(initialData.timeWindowHours);
     const [isLoading, setIsLoading] = useState(false);
     const [backendError, setBackendError] = useState<string | null>(null);
@@ -46,10 +50,19 @@ export function Dashboard({ initialData, initialConnections }: Props) {
 
             ws.onopen = () => {
                 backoff.reset();
-                ws?.send(JSON.stringify({ 'cxs': 'state' }));
+                ws?.send(JSON.stringify({ 'cxs': 'state', 'bw': 'state' }));
             };
 
             ws.onmessage = receiveMessage((topic, message) => {
+                if (topic === 'bw') {
+                    try {
+                        setCurrentBandwidth(JSON.parse(message) as ProviderBandwidthSnapshot[]);
+                    } catch (e) {
+                        console.error('Failed to parse bandwidth JSON from websocket', e);
+                    }
+                    return;
+                }
+
                 if (topic !== 'cxs') return;
 
                 const parts = message.split('|');
@@ -162,11 +175,14 @@ export function Dashboard({ initialData, initialConnections }: Props) {
 
             {/* Total Downloaded + Provider Health */}
             <Row className="mb-4 gy-4">
-                <Col lg={4}>
+                <Col lg={3}>
+                    <CurrentBandwidth bandwidth={currentBandwidth} />
+                </Col>
+                <Col lg={3}>
                     <h6 className="text-muted mb-2">Total Downloaded</h6>
                     <TotalDownloaded data={data.totalDownloaded} timeWindowLabel={timeWindowLabel} />
                 </Col>
-                <Col lg={8}>
+                <Col lg={6}>
                     <h6 className="text-muted mb-2 mt-2 mt-lg-0">Provider Health</h6>
                     <ProviderHealth providers={data.providerHealth} />
                 </Col>

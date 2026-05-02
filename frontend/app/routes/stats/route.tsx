@@ -4,10 +4,11 @@ import { Button, ButtonGroup, Container, Tabs, Tab } from "react-bootstrap";
 import type { Route } from "./+types/route";
 import { backendClient } from "~/clients/backend-client.server";
 import type { BandwidthSample, ProviderBandwidthSnapshot } from "~/types/bandwidth";
+import type { ProviderStatsResponse } from "~/types/provider-stats";
 import type { HealthCheckResult, MissingArticleItem, MappedFile } from "~/types/stats";
 import type { ConnectionUsageContext } from "~/types/connections";
-import { BandwidthTable } from "./components/BandwidthTable";
 import { ProviderStatus } from "./components/ProviderStatus";
+import { ProviderStatsSummary } from "./components/ProviderStatsSummary";
 import { DeletedFilesTable } from "./components/DeletedFilesTable";
 import { MissingArticlesTable } from "./components/MissingArticlesTable";
 import { MappedFilesTable } from "./components/MappedFilesTable";
@@ -47,15 +48,17 @@ export async function loader({ request }: Route.LoaderArgs) {
     let connections: Record<number, ConnectionUsageContext[]> | null = null;
     let bandwidthHistory: BandwidthSample[] | null = null;
     let currentBandwidth: ProviderBandwidthSnapshot[] | null = null;
+    let providerStats: ProviderStatsResponse | null = null;
     let deletedFiles: { items: any[], totalCount: number } | null = null;
     let missingArticles: { items: MissingArticleItem[], totalCount: number } | null = null;
     let mappedFiles: { items: MappedFile[], totalCount: number } | null = null;
 
     if (tab === "stats") {
-        [connections, bandwidthHistory, currentBandwidth] = await Promise.all([
+        [connections, bandwidthHistory, currentBandwidth, providerStats] = await Promise.all([
             backendClient.getActiveConnections(),
             backendClient.getBandwidthHistory(range),
             backendClient.getCurrentBandwidth(),
+            backendClient.getProviderStats(range),
         ]);
     } else if (tab === "deleted") {
         deletedFiles = await backendClient.getDeletedFiles(page, 500, search);
@@ -70,7 +73,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         mappedFiles = await backendClient.getMappedFiles(page, 10, search, hasMediaInfo, missingVideo, sortBy, sortDirection);
     }
 
-    return { connections, bandwidthHistory, currentBandwidth, deletedFiles, missingArticles, mappedFiles, range, tab, page, search, blocking, orphaned, isImported, sortBy, sortDirection };
+    return { connections, bandwidthHistory, currentBandwidth, providerStats, deletedFiles, missingArticles, mappedFiles, range, tab, page, search, blocking, orphaned, isImported, sortBy, sortDirection };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -107,7 +110,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function StatsPage({ loaderData }: Route.ComponentProps) {
-    const { connections: initialConnections, bandwidthHistory, currentBandwidth, deletedFiles, missingArticles, mappedFiles, range, tab, page, search, blocking } = loaderData;
+    const { connections: initialConnections, bandwidthHistory, currentBandwidth, providerStats, deletedFiles, missingArticles, mappedFiles, range, tab, page, search, blocking } = loaderData;
     const [searchParams, setSearchParams] = useSearchParams();
     const revalidator = useRevalidator();
     const [connections, setConnections] = useState<Record<number, ConnectionUsageContext[]>>(initialConnections || {});
@@ -350,13 +353,13 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                 <h2 className="m-0">System Monitor</h2>
                 {activeTab === 'stats' && (
                     <ButtonGroup>
-                        {["1h", "24h", "30d"].map(r => (
+                        {["1h", "24h", "30d", "all"].map(r => (
                             <Button 
                                 key={r} 
                                 variant={range === r ? "primary" : "outline-secondary"}
                                 onClick={() => handleRangeChange(r)}
                             >
-                                {r}
+                                {r === "all" ? "All" : r}
                             </Button>
                         ))}
                     </ButtonGroup>
@@ -373,11 +376,12 @@ export default function StatsPage({ loaderData }: Route.ComponentProps) {
                     {activeTab === 'stats' && connections && bandwidthHistory && currentBandwidth && (
                         <>
                             <ProviderStatus bandwidth={currentBandwidth} connections={connections} />
-                            <div className="row">
-                                <div className="col-12">
-                                    <BandwidthTable data={bandwidthHistory} range={range} providers={currentBandwidth} />
-                                </div>
-                            </div>
+                            <ProviderStatsSummary
+                                providerStats={providerStats}
+                                bandwidthHistory={bandwidthHistory}
+                                currentBandwidth={currentBandwidth}
+                                range={range}
+                            />
                         </>
                     )}
                 </Tab>

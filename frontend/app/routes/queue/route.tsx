@@ -2,12 +2,11 @@ import { Link, redirect } from "react-router";
 import type { Route } from "./+types/route";
 import styles from "./route.module.css"
 import { Alert } from 'react-bootstrap';
-import { backendClient, type ProviderStatsResponse } from "~/clients/backend-client.server";
+import { backendClient } from "~/clients/backend-client.server";
 import type { HistorySlot, QueueSlot } from "~/types/backend";
 import { EmptyQueue } from "./components/empty-queue/empty-queue";
 import { HistoryTable } from "./components/history-table/history-table";
 import { QueueTable } from "./components/queue-table/queue-table";
-import { ProviderStats } from "./components/provider-stats/provider-stats";
 import { useCallback, useEffect, useState } from "react";
 import { createWebsocketBackoff, getBrowserWebsocketUrl, receiveMessage } from "~/utils/websocket-util";
 import { isAuthenticated } from "~/auth/authentication.server";
@@ -42,20 +41,15 @@ const topicSubscriptions = {
 const maxItems = 100;
 const queuePageSize = 20;
 const historyPageSize = 20;
-
 export async function loader({ request }: Route.LoaderArgs) {
     var queuePromise = backendClient.getQueue(maxItems);
     var historyPromise = backendClient.getHistory(maxItems);
-    var statsPromise = backendClient.getProviderStats();
-    var queue = await queuePromise;
-    var history = await historyPromise;
-    var stats = await statsPromise.catch(() => null); // Don't fail if stats unavailable
+    var [queue, history] = await Promise.all([queuePromise, historyPromise]);
     return {
         queueSlots: queue?.slots || [],
         historySlots: history?.slots || [],
         totalQueueCount: queue?.noofslots || 0,
         totalHistoryCount: history?.noofslots || 0,
-        providerStats: stats,
     }
 }
 
@@ -340,9 +334,6 @@ export default function Queue(props: Route.ComponentProps) {
                     onRetry={onRetryHistoryItem}
                 />
             </div>
-
-            {/* provider stats */}
-            <ProviderStats stats={props.loaderData.providerStats} />
         </div>
     );
 }

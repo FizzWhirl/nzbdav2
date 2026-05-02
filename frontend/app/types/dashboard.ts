@@ -93,4 +93,5 @@ export const TIME_WINDOW_OPTIONS = [
     { value: 168, label: '7d' },
     { value: 336, label: '14d' },
     { value: 720, label: '30d' },
+    { value: 0, label: 'All' },
 ];

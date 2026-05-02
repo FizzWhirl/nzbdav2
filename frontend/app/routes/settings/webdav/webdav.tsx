@@ -479,6 +479,15 @@ function isValidNonNegativeInt(value: string): boolean {
     return Number.isInteger(num) && num >= 0 && trimmed === num.toString();
 }
 
+// Same as isValidNonNegativeInt but treats empty / unset as VALID (the backend
+// will fall back to its default). Use this for fields that are explicitly optional.
+function isValidOptionalNonNegativeInt(value: string | undefined | null): boolean {
+    if (value === undefined || value === null) return true;
+    const trimmed = String(value).trim();
+    if (trimmed === "") return true;
+    return isValidNonNegativeInt(trimmed);
+}
+
 function isValidPriority(value: string): boolean {
     if (!isValidNonNegativeInt(value)) return false;
     const num = parseInt(value);

@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-RCLONE-PROPSTAT-FIX");
-            Log.Warning("  FIX: PropFindResponseCleanupMiddleware strips <D:propstat> blocks with HTTP/1.1 404 status from PROPFIND responses. rclone v1.74.0 treats any 404 propstat as 'bad status' and discards the entire item; v1.73.x ignored them. Combined with the earlier changeOrigin:false Host-header fix, restores full rclone listings.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-RCLONE-STREAM-HARDENING");
+            Log.Warning("  FIX: Harden rclone ranged GETs after v1.74 compatibility work: bounded range reads now keep BufferedSegmentStream retry/GD handling even when full stream slots are busy, yEnc CRC failures can zero-fill using header part sizes, and mid-stream failures abort cleanly instead of causing Kestrel Content-Length mismatch noise.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

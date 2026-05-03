@@ -611,12 +611,9 @@ export function ProviderStatus({ bandwidth, connections }: Props) {
 
     return (
         <div className="mb-4 w-100">
-            <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <div className="d-flex flex-wrap align-items-baseline gap-2 mb-3">
                 <h4 className="m-0">Real-time Provider Status</h4>
-                <div className="text-end">
-                    <div className="text-muted small text-uppercase">Overall current bandwidth</div>
-                    <div className="fs-4 fw-semibold text-info">{formatSpeed(totalCurrentSpeed)}</div>
-                </div>
+                <span className="fs-5 fw-semibold text-info">{formatSpeed(totalCurrentSpeed)}</span>
             </div>
             <Row xs={1} md={1} lg={2} className="g-4">
                 {Array.from(providerIndices).sort((a, b) => a - b).map(index => {

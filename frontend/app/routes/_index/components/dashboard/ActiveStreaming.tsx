@@ -17,44 +17,34 @@ function formatSpeed(bytesPerSecond: number): string {
 }
 
 export function ActiveStreaming({ connections, providerNames, bandwidth }: Props) {
-    const hasConnections = Object.values(connections).some(list => list.length > 0);
     const totalCurrentSpeed = bandwidth.reduce((sum, provider) => sum + provider.currentSpeed, 0);
+    const providerIndices = Array.from(new Set([
+        ...Object.keys(providerNames).map(Number),
+        ...bandwidth.map(provider => provider.providerIndex),
+        ...Object.keys(connections).map(Number)
+    ])).sort((a, b) => a - b);
 
     const header = (
-        <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div className="d-flex flex-wrap align-items-baseline gap-2 mb-3">
             <h6 className="text-muted m-0">Active Streaming</h6>
-            <div className="text-end">
-                <div className="text-muted small text-uppercase">Overall current bandwidth</div>
-                <div className="fs-4 fw-semibold text-info">{formatSpeed(totalCurrentSpeed)}</div>
-            </div>
+            <span className="fs-5 fw-semibold text-info">{formatSpeed(totalCurrentSpeed)}</span>
         </div>
     );
-
-    if (!hasConnections) {
-        return (
-            <Card bg="dark" text="white" className="border-secondary mb-4">
-                <Card.Body>
-                    {header}
-                    <div className="text-center text-muted py-4">
-                        No active streams
-                    </div>
-                </Card.Body>
-            </Card>
-        );
-    }
 
     return (
         <Card bg="dark" text="white" className="border-secondary mb-4">
             <Card.Body>
                 {header}
                 <div className="d-flex flex-wrap gap-3">
-                    {Object.entries(connections)
-                        .filter(([_, list]) => list.length > 0)
-                        .map(([providerIndex, list]) => (
+                    {providerIndices.length === 0 ? (
+                        <div className="text-center text-muted py-3 w-100">No providers configured</div>
+                    ) : providerIndices
+                        .map(providerIndex => (
                             <ProviderGroup
                                 key={providerIndex}
-                                providerName={providerNames[parseInt(providerIndex)] || `Provider ${providerIndex}`}
-                                connections={list}
+                                providerName={providerNames[providerIndex] || bandwidth.find(x => x.providerIndex === providerIndex)?.host || `Provider ${providerIndex + 1}`}
+                                currentSpeed={bandwidth.find(x => x.providerIndex === providerIndex)?.currentSpeed || 0}
+                                connections={connections[providerIndex] || []}
                             />
                         ))}
                 </div>
@@ -63,21 +53,33 @@ export function ActiveStreaming({ connections, providerNames, bandwidth }: Props
     );
 }
 
-function ProviderGroup({ providerName, connections }: { providerName: string; connections: ConnectionUsageContext[] }) {
+function ProviderGroup({ providerName, currentSpeed, connections }: { providerName: string; currentSpeed: number; connections: ConnectionUsageContext[] }) {
+    const renderStreams = (limit: number) => (
+        <>
+            {connections.slice(0, limit).map((conn, idx) => (
+                <StreamItem key={idx} connection={conn} />
+            ))}
+            {connections.length > limit && (
+                <small className="text-muted">+{connections.length - limit} more</small>
+            )}
+        </>
+    );
+
     return (
-        <div className="bg-black bg-opacity-25 rounded p-3" style={{ minWidth: '200px' }}>
+        <div className="bg-black bg-opacity-25 rounded p-3 flex-grow-1" style={{ minWidth: '200px', flexBasis: '220px', minHeight: '118px' }}>
             <div className="d-flex justify-content-between align-items-center mb-2">
-                <span className="fw-bold">{providerName}</span>
-                <span className="badge bg-secondary">{connections.length}</span>
+                <span className="fw-bold text-truncate" title={providerName}>{providerName}</span>
+                <span className={`badge ${connections.length > 0 ? 'bg-success' : 'bg-secondary'}`}>{connections.length}</span>
             </div>
-            <div className="d-flex flex-column gap-1">
-                {connections.slice(0, 5).map((conn, idx) => (
-                    <StreamItem key={idx} connection={conn} />
-                ))}
-                {connections.length > 5 && (
-                    <small className="text-muted">+{connections.length - 5} more</small>
-                )}
-            </div>
+            <div className="text-info small fw-semibold mb-2">{formatSpeed(currentSpeed)}</div>
+            {connections.length === 0 ? (
+                <div className="text-muted fst-italic small">Nothing streaming</div>
+            ) : (
+                <>
+                    <div className="d-none d-md-flex flex-column gap-1">{renderStreams(5)}</div>
+                    <div className="d-flex d-md-none flex-column gap-1">{renderStreams(2)}</div>
+                </>
+            )}
         </div>
     );
 }

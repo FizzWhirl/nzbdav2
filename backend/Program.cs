@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-HEALTH-CHECK-FIXES");
-            Log.Warning("  FIX: Health checks avoid repeated slow HEAD scans, use quick STAT fallback when header inference is inconclusive, and route confirmed DMCA/takedown failures into repair.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-HEALTH-CONCURRENCY");
+            Log.Warning("  FEATURE: Health check item concurrency is configurable; repair connection limits are shared across active checks.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

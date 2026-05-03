@@ -56,6 +56,7 @@ const defaultConfig = {
     "media.library-dir": "",
     "arr.instances": "{\"RadarrInstances\":[],\"SonarrInstances\":[],\"QueueRules\":[]}",
     "repair.connections": "",
+    "repair.concurrent-checks": "",
     "repair.enable": "false",
     "repair.min-check-interval-days": "",
     "stats.enable": "false",

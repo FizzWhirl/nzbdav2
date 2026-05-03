@@ -365,6 +365,14 @@ public class ConfigManager
         );
     }
 
+    public int GetMaxConcurrentHealthChecks()
+    {
+        return Math.Max(1, int.Parse(
+            StringUtil.EmptyToNull(GetConfigValue("repair.concurrent-checks"))
+            ?? "1" // Default to one item at a time to avoid starving streaming
+        ));
+    }
+
     public bool IsRepairJobEnabled()
     {
         var defaultValue = false;

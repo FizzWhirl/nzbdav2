@@ -32,7 +32,6 @@ public class HealthCheckService
 
     private readonly ConcurrentDictionary<string, byte> _missingSegmentIds = new();
     private readonly ConcurrentDictionary<Guid, int> _timeoutCounts = new();
-    private readonly SemaphoreSlim _concurrencyLimiter = new(1);
     private readonly ConcurrentDictionary<Guid, byte> _processingIds = new();
 
     public HealthCheckService
@@ -77,43 +76,37 @@ public class HealthCheckService
                     continue;
                 }
 
-                // Wait for a concurrency slot
-                await _concurrencyLimiter.WaitAsync(_cancellationToken).ConfigureAwait(false);
+                var maxConcurrentChecks = _configManager.GetMaxConcurrentHealthChecks();
+                if (_processingIds.Count >= maxConcurrentChecks)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), _cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
 
                 // Find next candidate
                 DavItem? candidate = null;
-                try
-                {
-                    await using var dbContext = new DavDatabaseContext();
-                    var dbClient = new DavDatabaseClient(dbContext);
-                    var currentDateTime = DateTimeOffset.UtcNow;
-                    
-                    // Fetch a few candidates to skip over ones currently being processed
-                    var healthCheckCategories = _configManager.GetHealthCheckCategories();
-                    var candidates = await GetHealthCheckQueueItems(dbClient, healthCheckCategories)
-                        .Where(x => x.NextHealthCheck == null || x.NextHealthCheck < currentDateTime)
-                        .Take(10)
-                        .ToListAsync(_cancellationToken).ConfigureAwait(false);
+                await using var dbContext = new DavDatabaseContext();
+                var dbClient = new DavDatabaseClient(dbContext);
+                var currentDateTime = DateTimeOffset.UtcNow;
+                
+                // Fetch a few candidates to skip over ones currently being processed
+                var healthCheckCategories = _configManager.GetHealthCheckCategories();
+                var candidates = await GetHealthCheckQueueItems(dbClient, healthCheckCategories)
+                    .Where(x => x.NextHealthCheck == null || x.NextHealthCheck < currentDateTime)
+                    .Take(Math.Max(10, maxConcurrentChecks * 2))
+                    .ToListAsync(_cancellationToken).ConfigureAwait(false);
 
-                    foreach (var item in candidates)
-                    {
-                        if (_processingIds.TryAdd(item.Id, 0))
-                        {
-                            candidate = item;
-                            break;
-                        }
-                    }
-                }
-                catch
+                foreach (var item in candidates)
                 {
-                    // If DB fetch fails, release slot and wait
-                    _concurrencyLimiter.Release();
-                    throw;
+                    if (_processingIds.TryAdd(item.Id, 0))
+                    {
+                        candidate = item;
+                        break;
+                    }
                 }
 
                 if (candidate == null)
                 {
-                    _concurrencyLimiter.Release();
                     await Task.Delay(TimeSpan.FromSeconds(5), _cancellationToken).ConfigureAwait(false);
                     continue;
                 }
@@ -148,7 +141,9 @@ public class HealthCheckService
 
             if (davItem == null) return;
 
-            var concurrency = _configManager.GetMaxRepairConnections();
+            var maxRepairConnections = _configManager.GetMaxRepairConnections();
+            var maxConcurrentChecks = _configManager.GetMaxConcurrentHealthChecks();
+            var concurrency = Math.Max(1, (int)Math.Ceiling((double)maxRepairConnections / maxConcurrentChecks));
 
             // set connection usage context
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken);
@@ -164,8 +159,9 @@ public class HealthCheckService
             var isUrgentCheck = davItem.NextHealthCheck == DateTimeOffset.MinValue;
             var useHead = isUrgentCheck;
 
-            Log.Information("[HealthCheck] Processing item: {Name} ({Id}). Type: {Type}. Timeout: {Timeout}m",
-                davItem.Name, davItem.Id, isUrgentCheck ? "Urgent (HEAD)" : "Routine (STAT)", timeoutMinutes);
+            Log.Information("[HealthCheck] Processing item: {Name} ({Id}). Type: {Type}. Timeout: {Timeout}m. Active: {Active}/{MaxConcurrent}. Segment concurrency: {Concurrency}/{MaxConnections}",
+                davItem.Name, davItem.Id, isUrgentCheck ? "Urgent (HEAD)" : "Routine (STAT)", timeoutMinutes,
+                _processingIds.Count, maxConcurrentChecks, concurrency, maxRepairConnections);
 
             _ = _websocketManager.SendMessage(WebsocketTopic.HealthItemProgress, $"{davItem.Id}|start");
             
@@ -225,7 +221,6 @@ public class HealthCheckService
         finally
         {
             _processingIds.TryRemove(itemInfo.Id, out _);
-            _concurrencyLimiter.Release();
         }
     }
 

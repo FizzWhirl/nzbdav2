@@ -62,7 +62,22 @@ export function RepairsSettings({ config, setNewConfig }: RepairsSettingsProps) 
                     value={config["repair.connections"] || ""}
                     onChange={e => setNewConfig({ ...config, "repair.connections": e.target.value })} />
                 <Form.Text id="repairs-connections-help" muted>
-                    The background health-check job will not use any more than this number of connections. Will default to your overall Max Connections if left empty.
+                    The background health-check job will not use any more than this number of total NNTP connections across active health checks. If multiple checks run at once, this limit is shared between them. Defaults to 1 if left empty.
+                </Form.Text>
+            </Form.Group>
+            <hr />
+            <Form.Group>
+                <Form.Label htmlFor="concurrent-health-checks-input">Concurrent Health Check Items</Form.Label>
+                <Form.Control
+                    {...className([styles.input, !isValidConcurrentHealthChecks(config["repair.concurrent-checks"]) && styles.error])}
+                    type="text"
+                    id="concurrent-health-checks-input"
+                    aria-describedby="concurrent-health-checks-help"
+                    placeholder={"1"}
+                    value={config["repair.concurrent-checks"] || ""}
+                    onChange={e => setNewConfig({ ...config, "repair.concurrent-checks": e.target.value })} />
+                <Form.Text id="concurrent-health-checks-help" muted>
+                    Number of files to health-check in parallel. Default: 1. Raising this can clear large queues faster, but the Max Connections for Health Checks setting is shared across all active checks and higher values can compete with streaming.
                 </Form.Text>
             </Form.Group>
             <hr />
@@ -116,6 +131,7 @@ export function RepairsSettings({ config, setNewConfig }: RepairsSettingsProps) 
 export function isRepairsSettingsUpdated(config: Record<string, string>, newConfig: Record<string, string>) {
     return config["repair.enable"] !== newConfig["repair.enable"]
         || config["repair.connections"] !== newConfig["repair.connections"]
+        || config["repair.concurrent-checks"] !== newConfig["repair.concurrent-checks"]
         || config["repair.min-check-interval-days"] !== newConfig["repair.min-check-interval-days"]
         || config["media.library-dir"] !== newConfig["media.library-dir"]
         || config["api.health-check-categories"] !== newConfig["api.health-check-categories"]
@@ -124,11 +140,18 @@ export function isRepairsSettingsUpdated(config: Record<string, string>, newConf
 
 export function isRepairsSettingsValid(newConfig: Record<string, string>) {
     return isValidRepairsConnections(newConfig["repair.connections"])
+    && isValidConcurrentHealthChecks(newConfig["repair.concurrent-checks"])
         && isValidMinCheckInterval(newConfig["repair.min-check-interval-days"]);
 }
 
 function isValidRepairsConnections(repairsConnections: string): boolean {
     return repairsConnections === "" || isNonNegativeInteger(repairsConnections);
+}
+
+function isValidConcurrentHealthChecks(concurrentHealthChecks: string): boolean {
+    if (concurrentHealthChecks === "") return true;
+    const num = Number(concurrentHealthChecks);
+    return Number.isInteger(num) && num >= 1 && concurrentHealthChecks.trim() === num.toString();
 }
 
 function isValidMinCheckInterval(minCheckInterval: string): boolean {

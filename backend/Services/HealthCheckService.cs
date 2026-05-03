@@ -279,7 +279,21 @@ public class HealthCheckService
             }
             else
             {
-                Log.Warning($"[HealthCheck] Item `{name}` timed out during Urgent check. Keeping priority high for immediate retry.");
+                Log.Warning("[HealthCheck] Item {Name} timed out during Urgent HEAD check. Falling back to an immediate quick STAT check instead of retrying another long HEAD scan.", name);
+
+                try
+                {
+                    await using var dbContext = new DavDatabaseContext();
+                    var nextCheck = DateTimeOffset.UtcNow.AddSeconds(-1);
+                    await dbContext.Items
+                        .Where(x => x.Id == itemId)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.NextHealthCheck, nextCheck))
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "[HealthCheck] Failed to demote timed-out urgent HEAD check to quick STAT check.");
+                }
             }
         }
     }

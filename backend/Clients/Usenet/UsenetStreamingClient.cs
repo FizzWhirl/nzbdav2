@@ -267,8 +267,11 @@ public class UsenetStreamingClient
     {
         if (useHead)
         {
-            // Health checks should always perform full HEAD scan, never Smart Analysis
-            return await AnalyzeNzbAsync(segmentIds.ToArray(), concurrency, progress, cancellationToken, useSmartAnalysis: false).ConfigureAwait(false);
+            // HEAD health checks are expensive because we must read each article body just
+            // far enough to parse the yEnc header. Use the same smart header path as NZB
+            // analysis first (first/second/last + spot checks for uniform posts) and only
+            // fall back to a full header scan when the post is genuinely non-uniform.
+            return await AnalyzeNzbAsync(segmentIds.ToArray(), concurrency, progress, cancellationToken, useSmartAnalysis: true).ConfigureAwait(false);
         }
 
         // No need to copy ReservedPooledConnectionsContext - operation limits handle this now

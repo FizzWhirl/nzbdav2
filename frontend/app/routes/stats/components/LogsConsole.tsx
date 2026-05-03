@@ -11,8 +11,16 @@ export function LogsConsole() {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [level, setLevel] = useState("Information");
     const logsRef = useRef<HTMLDivElement>(null);
+    const shouldAutoScrollRef = useRef(true);
+
+    const isScrolledToBottom = (container: HTMLDivElement) => {
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        return distanceFromBottom <= 24;
+    };
 
     useEffect(() => {
+        shouldAutoScrollRef.current = true;
+
         const fetchLogs = async () => {
             try {
                 const res = await fetch(`/api/get-logs?level=${level}`);
@@ -33,8 +41,17 @@ export function LogsConsole() {
         const container = logsRef.current;
         if (!container) return;
 
-        container.scrollTop = container.scrollHeight;
+        if (shouldAutoScrollRef.current) {
+            container.scrollTop = container.scrollHeight;
+        }
     }, [logs]);
+
+    const handleLogsScroll = () => {
+        const container = logsRef.current;
+        if (!container) return;
+
+        shouldAutoScrollRef.current = isScrolledToBottom(container);
+    };
 
     const getLevelColor = (lvl: string) => {
         switch (lvl) {
@@ -69,6 +86,7 @@ export function LogsConsole() {
             
             <div 
                 ref={logsRef}
+                onScroll={handleLogsScroll}
                 className="flex-grow-1 bg-black rounded p-3 font-monospace" 
                 style={{ 
                     height: 'calc(100vh - 250px)', 

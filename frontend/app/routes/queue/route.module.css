@@ -45,6 +45,12 @@
     flex-wrap: nowrap;
 }
 
+.queue-toolbar :global(.btn) {
+    flex-shrink: 0;
+    min-width: max-content;
+    white-space: nowrap;
+}
+
 .section-actions {
     display: flex;
     align-items: center;
@@ -167,7 +173,6 @@
     }
 
     .queue-toolbar :global(.btn) {
-        white-space: nowrap;
         flex-shrink: 0;
     }
 }

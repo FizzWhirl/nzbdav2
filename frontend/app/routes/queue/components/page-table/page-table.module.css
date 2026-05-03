@@ -28,6 +28,8 @@
         /* last header column */
         &:last-child {
             border-radius: 0 10px 0 0;
+            width: 132px;
+            min-width: 132px;
         }
     }
 
@@ -47,6 +49,12 @@
         /* first body column */
         &:first-child {
             text-align: left;
+        }
+
+        &:last-child {
+            min-width: 132px;
+            max-width: none;
+            overflow: visible;
         }
     }
 
@@ -88,7 +96,7 @@
     justify-content: center;
     align-items: center;
     gap: 10px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 }
 
 /* desktop */
@@ -121,7 +129,8 @@
     }
 
     .page-table thead tr th:last-child {
-        width: 96px;
+        width: 126px;
+        min-width: 126px;
     }
 
     .page-table th {
@@ -162,8 +171,8 @@
 /* really skinny devices */
 @media not (min-width: 410px) {
     .actions {
-        flex-direction: column;
-        align-items: end;
-        margin-right: 20px;
+        flex-direction: row;
+        align-items: center;
+        margin-right: 0;
     }
 }

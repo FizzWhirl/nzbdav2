@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-02-RAR-RANGE-HARDENING");
-            Log.Warning("  FIX: Extend rclone ranged GET hardening through RAR/multipart substreams: small archive part reads now keep BufferedSegmentStream retry/GD handling, and limited part streams can seek directly instead of reading/discarding corrupt earlier bytes.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-HEALTH-CHECK-FIXES");
+            Log.Warning("  FIX: Health checks avoid repeated slow HEAD scans, use quick STAT fallback when header inference is inconclusive, and route confirmed DMCA/takedown failures into repair.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

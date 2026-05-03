@@ -542,6 +542,23 @@ public class HealthCheckService
             // Call the Repair method which handles all arr clients properly
             await Repair(davItem, dbClient, cts2.Token, failureDetails, operation).ConfigureAwait(false);
         }
+        catch (NonRetryableDownloadException e)
+        {
+            var failureDetails = $"Confirmed non-retryable health-check failure: {e.Message}";
+
+            Log.Warning("[HealthCheck] Health check failed for item {Name}. {FailureDetails}. Attempting repair.",
+                davItem.Name, failureDetails);
+            _ = _websocketManager.SendMessage(WebsocketTopic.HealthItemProgress, $"{davItem.Id}|100");
+            _ = _websocketManager.SendMessage(WebsocketTopic.HealthItemProgress, $"{davItem.Id}|done");
+
+            using var cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var rawAffinityKey3 = Path.GetFileName(Path.GetDirectoryName(davItem.Path));
+            var normalizedAffinityKey3 = FilenameNormalizer.NormalizeName(rawAffinityKey3);
+            using var _3 = cts2.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.Repair, new ConnectionUsageDetails { Text = davItem.Path, JobName = davItem.Name, AffinityKey = normalizedAffinityKey3, DavItemId = davItem.Id }));
+
+            var operation = useHead ? "HEAD" : "STAT";
+            await Repair(davItem, dbClient, cts2.Token, failureDetails, operation).ConfigureAwait(false);
+        }
     }
 
     private async Task UpdateReleaseDate(DavItem davItem, List<string> segments, CancellationToken ct)

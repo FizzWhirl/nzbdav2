@@ -177,14 +177,16 @@ public class HealthCheckService
 
             await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, davItem.Name,
                 davItem.IsCorrupted ? "Failed" : "Success",
-                davItem.IsCorrupted ? "Health check found issues - repair attempted" : "Health check passed").ConfigureAwait(false);
+                davItem.IsCorrupted
+                    ? "Health check failed: articles were missing or unavailable; repair workflow was attempted."
+                    : "Health check completed: all required articles were available.").ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!_cancellationToken.IsCancellationRequested)
         {
             // Handle per-item timeout
             await HandleTimeout(itemInfo.Id, itemInfo.Name, itemInfo.Path, itemInfo.NextHealthCheck == DateTimeOffset.MinValue);
             await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, itemInfo.Name,
-                "Failed", "Health check timed out").ConfigureAwait(false);
+                "Failed", "Health check failed: timed out before all articles could be verified.").ConfigureAwait(false);
         }
         catch (Exception e)
         {
@@ -216,7 +218,7 @@ public class HealthCheckService
             }
 
             await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, itemInfo.Name,
-                "Failed", $"Health check error: {e.Message}").ConfigureAwait(false);
+                "Failed", $"Health check failed: unexpected error while verifying articles ({e.Message}).").ConfigureAwait(false);
         }
         finally
         {
@@ -391,7 +393,7 @@ public class HealthCheckService
                     CreatedAt = DateTimeOffset.UtcNow,
                     Result = HealthCheckResult.HealthResult.Skipped,
                     RepairStatus = HealthCheckResult.RepairAction.None,
-                    Message = "Not mapped"
+                    Message = "Health check skipped: file is not mapped in the organized library."
                 }));
                 await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
                 return;
@@ -418,7 +420,7 @@ public class HealthCheckService
                     CreatedAt = DateTimeOffset.UtcNow,
                     Result = HealthCheckResult.HealthResult.Skipped,
                     RepairStatus = HealthCheckResult.RepairAction.None,
-                    Message = "No segments found"
+                    Message = "Health check skipped: no NZB segments were found for this item."
                 }));
                 await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
                 return;
@@ -506,7 +508,7 @@ public class HealthCheckService
                 CreatedAt = DateTimeOffset.UtcNow,
                 Result = HealthCheckResult.HealthResult.Healthy,
                 RepairStatus = HealthCheckResult.RepairAction.None,
-                Message = "File is healthy."
+                Message = "Health check completed: all required articles were available."
             }));
             await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
         }

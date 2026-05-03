@@ -609,19 +609,19 @@ public class QueueItemProcessor(
                             corruptIds.Add(item.Id);
                             websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|error");
                             historyResult = "Failed";
-                            historyDetails = "Media integrity check failed — file corrupt or unplayable";
+                            historyDetails = "Media analysis failed: ffprobe could not read playable media streams; file marked corrupt or unplayable.";
                             break;
                         case MediaAnalysisResult.Timeout:
                             Log.Warning("[QueueItemProcessor] Step 5: {FileName} timed out during analysis — keeping file", item.Name);
                             websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
                             historyResult = "Pending";
-                            historyDetails = "Media integrity check timed out — file kept for retry";
+                            historyDetails = "Media analysis pending: ffprobe timed out; file kept for retry.";
                             break;
                         default:
                             Log.Information("[QueueItemProcessor] Step 5: {FileName} passed media analysis", item.Name);
                             websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
                             historyResult = "Success";
-                            historyDetails = "Media integrity check passed";
+                            historyDetails = "Media analysis completed: ffprobe found playable media streams.";
                             break;
                     }
 

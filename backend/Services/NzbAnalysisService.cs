@@ -190,13 +190,13 @@ public class NzbAnalysisService(
                     if (!retryQueued)
                     {
                         websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|error");
-                        await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed", "ffprobe timed out and retry could not be queued").ConfigureAwait(false);
+                        await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed", "Media analysis failed: ffprobe timed out and the retry could not be queued.").ConfigureAwait(false);
                         return;
                     }
 
                     websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|90");
                     websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|pending");
-                    await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Pending", "ffprobe timed out - retry scheduled in 1 hour").ConfigureAwait(false);
+                    await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Pending", "Media analysis pending: ffprobe timed out; retry scheduled in 1 hour.").ConfigureAwait(false);
                     return;
                 }
                 else
@@ -205,7 +205,7 @@ public class NzbAnalysisService(
                     Log.Warning("[NzbAnalysisService] ffprobe timed out again for {FileName}. Max retries reached.", info.Name);
                     _ffprobeRetryAttempts.TryRemove(fileId, out var unused1);
                     websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|error");
-                    await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed", "ffprobe timed out after retry").ConfigureAwait(false);
+                    await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed", "Media analysis failed: ffprobe timed out again after retry.").ConfigureAwait(false);
                     return;
                 }
             }
@@ -217,7 +217,7 @@ public class NzbAnalysisService(
             websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|done");
             Log.Information("[NzbAnalysisService] Finished analysis for file: {FileName} ({Id})", info.Name, fileId);
 
-            await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Success", "Analysis completed successfully").ConfigureAwait(false);
+            await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Success", "Analysis completed: segment-size cache and ffprobe media metadata are up to date.").ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (queueCancellationToken.IsCancellationRequested)
         {
@@ -227,7 +227,7 @@ public class NzbAnalysisService(
         {
             Log.Error(ex, "[NzbAnalysisService] Failed to analyze file {Id}", fileId);
             websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|error");
-            await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed", ex.Message).ConfigureAwait(false);
+            await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed", $"Analysis failed: {ex.Message}").ConfigureAwait(false);
         }
         finally
         {

@@ -166,6 +166,8 @@ public class HealthCheckService
 
             Log.Information("[HealthCheck] Processing item: {Name} ({Id}). Type: {Type}. Timeout: {Timeout}m",
                 davItem.Name, davItem.Id, isUrgentCheck ? "Urgent (HEAD)" : "Routine (STAT)", timeoutMinutes);
+
+            _ = _websocketManager.SendMessage(WebsocketTopic.HealthItemProgress, $"{davItem.Id}|start");
             
             await PerformHealthCheck(davItem, dbClient, concurrency, cts.Token, useHead).ConfigureAwait(false);
 

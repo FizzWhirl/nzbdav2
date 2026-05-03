@@ -253,7 +253,9 @@ export function HealthTable({
                                         </td>
                                         <td className={`${styles.statusCell} ${styles.desktop}`}>
                                             <div className={styles.statusContainer}>
-                                                {item.latestResult ? (
+                                                {item.progress !== 0 ? (
+                                                    <Badge bg="primary" className={styles.resultBadge}>Checking</Badge>
+                                                ) : item.latestResult ? (
                                                     <Badge bg={item.latestResult === 'Healthy' ? 'success' : item.latestResult === 'Skipped' ? 'info' : 'danger'} className={styles.resultBadge}>
                                                         {item.latestResult}
                                                     </Badge>
@@ -269,6 +271,8 @@ export function HealthTable({
                                             <div className={styles.nextContainer}>
                                                 {item.progress > 0
                                                     ? <ProgressBadge className={styles.progressBadge} color={"#333"} percentNum={100 + item.progress}>{item.progress}%</ProgressBadge>
+                                                    : item.progress < 0
+                                                        ? <span className={styles.nextTime}>Checking now</span>
                                                     : <span className={styles.nextTime}>{formatDate(item.nextHealthCheck, 'ASAP')}</span>
                                                 }
                                                 <Badge bg={item.operationType === 'HEAD' ? 'danger' : 'secondary'} className={styles.operationBadge}>
@@ -332,7 +336,9 @@ function DateDetailsTable({ item, onRunHealthCheck, onResetHealthStatus }: {
                 <div className={styles.dateDetailsLabel}>Status</div>
                 <div className={styles.dateDetailsValue}>
                     <div className={styles.mobileStatusRow}>
-                        {item.latestResult ? (
+                        {item.progress !== 0 ? (
+                            <Badge bg="primary" className={styles.resultBadge}>Checking</Badge>
+                        ) : item.latestResult ? (
                             <Badge bg={item.latestResult === 'Healthy' ? 'success' : item.latestResult === 'Skipped' ? 'info' : 'danger'} className={styles.resultBadge}>
                                 {item.latestResult}
                             </Badge>
@@ -351,6 +357,8 @@ function DateDetailsTable({ item, onRunHealthCheck, onResetHealthStatus }: {
                     <div className={styles.mobileNextRow}>
                         {item.progress > 0
                             ? <ProgressBadge className={styles.progressBadge} color={"#333"} percentNum={100 + item.progress}>{item.progress}%</ProgressBadge>
+                            : item.progress < 0
+                                ? <span>Checking now</span>
                             : <span>{formatDate(item.nextHealthCheck, 'ASAP')}</span>
                         }
                         <Badge bg={item.operationType === 'HEAD' ? 'danger' : 'secondary'} className={styles.operationBadge}>

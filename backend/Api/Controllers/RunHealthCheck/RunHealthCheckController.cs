@@ -22,10 +22,20 @@ public class RunHealthCheckController(DavDatabaseClient dbClient) : BaseApiContr
             return NotFound("Item not found");
         }
 
-        // Set NextHealthCheck to MinValue to prioritize it
-        item.NextHealthCheck = DateTimeOffset.MinValue;
+        var requestedHead = string.Equals(Request.Query["head"].ToString(), "true", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(Request.Query["mode"].ToString(), "head", StringComparison.OrdinalIgnoreCase);
+
+        // Explicit HEAD checks are deep/slow and use MinValue priority. Default manual checks
+        // should be quick STAT checks so the play action does not accidentally start a long scan.
+        item.NextHealthCheck = requestedHead
+            ? DateTimeOffset.MinValue
+            : DateTimeOffset.UtcNow.AddSeconds(-1);
         await dbClient.Ctx.SaveChangesAsync().ConfigureAwait(false);
 
-        return Ok(new { Message = "Health check scheduled successfully" });
+        return Ok(new
+        {
+            Message = requestedHead ? "HEAD health check scheduled successfully" : "Quick health check scheduled successfully",
+            Operation = requestedHead ? "HEAD" : "STAT"
+        });
     }
 }

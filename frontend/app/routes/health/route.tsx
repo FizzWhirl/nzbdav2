@@ -160,6 +160,13 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     const onHealthItemProgress = useCallback((message: string) => {
         const [davItemId, progress] = message.split('|');
         if (progress === "done") return;
+        if (progress === "start") {
+            setQueueItems(queueItems => queueItems.map(item => item.id === davItemId
+                ? { ...item, progress: -1 }
+                : item
+            ));
+            return;
+        }
         setQueueItems(queueItems => {
             var index = queueItems.findIndex(x => x.id === davItemId);
             if (index === -1) return queueItems;
@@ -243,13 +250,13 @@ export default function Health({ loaderData }: Route.ComponentProps) {
                 const response = await fetch(`/api/health/check/${id}`, { method: 'POST' });
                 if (!response.ok) throw new Error(await response.text());
 
-                // Refresh the queue locally to show "ASAP" or similar, although websocket updates should handle it
+                // Refresh the queue locally to show a quick STAT check is pending, although websocket updates should handle it
                 setQueueItems(items => items.map(item =>
                     item.id === id
-                    ? { ...item, nextHealthCheck: new Date().toISOString() } // Temporarily show as now/ASAP
+                    ? { ...item, nextHealthCheck: new Date().toISOString(), operationType: 'STAT' }
                     : item
                 ));
-                addToast("Health check scheduled successfully", "success", "Success");
+                addToast("Quick health check scheduled successfully", "success", "Success");
             } catch (e) {
                 addToast(`Failed to start health check: ${e}`, "danger", "Error");
             }
@@ -258,9 +265,11 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     const onRunHeadHealthCheck = useCallback(async (ids: string[]) => {
         try {
             // Run health checks for all selected items
-            await Promise.all(ids.map(id =>
-                fetch(`/api/health/check/${id}`, { method: 'POST' })
+            const responses = await Promise.all(ids.map(id =>
+                fetch(`/api/health/check/${id}?head=true`, { method: 'POST' })
             ));
+            const failed = responses.find(response => !response.ok);
+            if (failed) throw new Error(await failed.text());
 
             // Update local state
             setQueueItems(items => items.map(item =>

@@ -3,6 +3,7 @@ declare const styles: {
   readonly "container": string;
   readonly "list": string;
   readonly "listItem": string;
+  readonly "queue-toolbar": string;
   readonly "section": string;
   readonly "section-actions": string;
   readonly "section-check": string;

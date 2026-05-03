@@ -112,7 +112,7 @@ export function QueueTable({
                         </div>
                     }
                 </div>
-                <div className={pageStyles["section-toolbar"]}>
+                <div className={`${pageStyles["section-toolbar"]} ${pageStyles["queue-toolbar"]}`}>
                     {onSearchChange && (
                         <input
                             className={`${pageStyles["section-control"]} ${pageStyles["section-search"]}`}

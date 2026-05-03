@@ -41,6 +41,10 @@
     flex-wrap: wrap;
 }
 
+.queue-toolbar {
+    flex-wrap: nowrap;
+}
+
 .section-actions {
     display: flex;
     align-items: center;
@@ -142,5 +146,28 @@
     .section-actions {
         width: 100%;
         justify-content: flex-start;
+    }
+
+    .queue-toolbar {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+    }
+
+    .queue-toolbar > *,
+    .queue-toolbar .section-control,
+    .queue-toolbar .section-search {
+        width: auto;
+        flex: 0 0 auto;
+    }
+
+    .queue-toolbar .section-search {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .queue-toolbar :global(.btn) {
+        white-space: nowrap;
+        flex-shrink: 0;
     }
 }

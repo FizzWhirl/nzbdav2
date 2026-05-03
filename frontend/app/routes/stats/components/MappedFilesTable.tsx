@@ -110,7 +110,7 @@ export function MappedFilesTable({ items, totalCount, page, search, onFileClick,
     };
 
     return (
-        <div className="p-4 rounded-lg bg-black bg-opacity-20 mb-4">
+        <div className="mb-4 w-100">
             <div className="d-flex justify-content-between align-items-center mb-3">
                 <div className="d-flex align-items-center gap-3">
                     <h4 className="m-0">Mapped Files</h4>

@@ -610,7 +610,7 @@ export function ProviderStatus({ bandwidth, connections }: Props) {
     }, [addToast]);
 
     return (
-        <div className="p-4 rounded-lg bg-black bg-opacity-20 mb-4">
+        <div className="mb-4 w-100">
             <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                 <h4 className="m-0">Real-time Provider Status</h4>
                 <div className="text-end">

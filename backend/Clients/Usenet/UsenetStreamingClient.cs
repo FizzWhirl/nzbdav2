@@ -17,6 +17,8 @@ namespace NzbWebDAV.Clients.Usenet;
 
 public class UsenetStreamingClient
 {
+    private sealed class SmartAnalysisInconclusiveException(string message) : Exception(message);
+
     private readonly CachingNntpClient _client;
     private ArticleCachingNntpClient? _articleCache;
     private readonly WebsocketManager _websocketManager;
@@ -85,7 +87,7 @@ public class UsenetStreamingClient
         return message.Contains("430") || message.Contains("no such article", StringComparison.OrdinalIgnoreCase);
     }
 
-    public async Task<long[]> AnalyzeNzbAsync(string[] segmentIds, int concurrency, IProgress<int>? progress, CancellationToken ct, bool useSmartAnalysis = true)
+    public async Task<long[]> AnalyzeNzbAsync(string[] segmentIds, int concurrency, IProgress<int>? progress, CancellationToken ct, bool useSmartAnalysis = true, bool allowFullScan = true)
     {
         // Copy context from parent token
         using var childCt = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -227,6 +229,12 @@ public class UsenetStreamingClient
             }
         }
 
+        if (!allowFullScan)
+        {
+            throw new SmartAnalysisInconclusiveException(
+                $"Smart header analysis could not infer uniform segment sizes for {segmentIds.Length} segments.");
+        }
+
         var sizes = new long[segmentIds.Length];
         var tasks = segmentIds
             .Select(async (id, index) =>
@@ -265,13 +273,23 @@ public class UsenetStreamingClient
         bool useHead = true
     )
     {
+        var segmentArray = segmentIds as string[] ?? segmentIds.ToArray();
+
         if (useHead)
         {
             // HEAD health checks are expensive because we must read each article body just
             // far enough to parse the yEnc header. Use the same smart header path as NZB
             // analysis first (first/second/last + spot checks for uniform posts) and only
-            // fall back to a full header scan when the post is genuinely non-uniform.
-            return await AnalyzeNzbAsync(segmentIds.ToArray(), concurrency, progress, cancellationToken, useSmartAnalysis: true).ConfigureAwait(false);
+            // fall back to STAT existence checks if the post is genuinely non-uniform.
+            try
+            {
+                return await AnalyzeNzbAsync(segmentArray, concurrency, progress, cancellationToken, useSmartAnalysis: true, allowFullScan: false).ConfigureAwait(false);
+            }
+            catch (SmartAnalysisInconclusiveException ex)
+            {
+                Log.Warning(ex, "[HealthCheck] Smart HEAD analysis was inconclusive for {SegmentCount} segments. Falling back to quick STAT existence checks instead of a full BODY header scan.", segmentArray.Length);
+                return await CheckAllSegmentsAsync(segmentArray, concurrency, progress, cancellationToken, useHead: false).ConfigureAwait(false);
+            }
         }
 
         // No need to copy ReservedPooledConnectionsContext - operation limits handle this now
@@ -282,7 +300,7 @@ public class UsenetStreamingClient
         var usageContext = token.GetContext<ConnectionUsageContext>();
         var timeoutSeconds = _configManager.GetUsenetOperationTimeout();
 
-        var tasks = segmentIds
+        var tasks = segmentArray
             .Select(async x =>
             {
                 using var segmentCts = CancellationTokenSource.CreateLinkedTokenSource(token);

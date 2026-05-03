@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-HEALTH-CONCURRENCY");
-            Log.Warning("  FEATURE: Health check item concurrency is configurable; repair connection limits are shared across active checks.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-LOG-UI-POLISH");
+            Log.Warning("  FIX: Dozzle console logs now emit one resolved backend message with a single categorisable level field.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

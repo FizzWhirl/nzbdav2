@@ -177,17 +177,15 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
                         className="bg-dark text-light border-secondary"
                     />
 
-                    <div className="d-flex align-items-center bg-dark rounded border border-secondary px-2 py-1">
-                        <BootstrapForm.Check 
-                            type="checkbox"
-                            id="blocked-only-check"
-                            label="Blocked Only"
-                            checked={blocking === true}
-                            onChange={(e) => handleFilterChange(e.target.checked ? true : undefined, undefined, undefined)}
-                            className="text-light mb-0 small"
-                            style={{ fontSize: '0.875rem' }}
-                        />
-                    </div>
+                    <BootstrapForm.Check 
+                        type="checkbox"
+                        id="blocked-only-check"
+                        label="Blocked Only"
+                        checked={blocking === true}
+                        onChange={(e) => handleFilterChange(e.target.checked ? true : undefined, undefined, undefined)}
+                        className="text-light mb-0 small flex-shrink-0"
+                        style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}
+                    />
 
                     <Dropdown as={ButtonGroup}>
                         <Button 

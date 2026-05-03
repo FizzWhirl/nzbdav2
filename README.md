@@ -98,6 +98,7 @@ The backend exposes a SABnzbd-compatible API subset (`/api?mode=...`). Sonarr an
 mkdir -p $(pwd)/nzbdav2 && \
 docker run --rm -it \
   -v $(pwd)/nzbdav2:/config \
+  -e TZ=Pacific/Auckland \
   -e PUID=1000 \
   -e PGID=1000 \
   -p 3000:3000 \
@@ -105,6 +106,20 @@ docker run --rm -it \
 ```
 
 After starting, navigate to `http://localhost:3000` and open Settings to configure your Usenet provider connections.
+
+### Timezone in Docker Compose
+
+If dates or times appear offset in server-rendered pages or logs, set the container timezone in your Compose environment. For New Zealand, use:
+
+```yaml
+services:
+  nzbdav2:
+    image: ghcr.io/fizzwhirl/nzbdav2:latest
+    environment:
+      TZ: Pacific/Auckland
+```
+
+Browser-rendered dates use the browser/device timezone; server-rendered dates and container logs use the container `TZ` value.
 
 For all environment variables and configuration options, see [`CLAUDE.md`](./CLAUDE.md).
 
@@ -131,6 +146,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Logging**: Backend console JSON for Dozzle now emits a single resolved message with one lowercase `level` field and no duplicated `messageTemplate`/`properties` payload, avoiding unresolved template variables and repeated content in log viewers.
 *   **UI**: Widened Queue/History action columns so Explore, Retry, and Delete controls fit on one row; Provider Stats & Bandwidth now switches to compact provider cards on mobile and keeps downloaded/segment-operation totals aligned with the section title on wider screens.
 *   **UI**: Stabilised the dashboard Active Streaming section by showing every provider all the time with an idle state when nothing is streaming. Overall bandwidth is now shown inline with Active Streaming and Real-time Provider Status titles to reduce repeated headings and mobile vertical height.
+*   **UI**: Analysis History now labels rows as Health Check, Media Analysis, NZB Analysis, or Analysis, uses distinct colors for pending/skipped/failed results, and health/media-analysis detail messages have been rewritten to explain what actually ran.
+*   **UI**: File Details now shows the next health-check due time, and date/time displays include timezone abbreviations so it is clearer which timezone is being used.
+*   **Docker**: Runtime images now include `tzdata`; set `TZ` in Docker Compose (for example `Pacific/Auckland`) to make server-rendered dates and container logs use the expected local timezone.
 *   **UI**: Improved mobile responsiveness across the React frontend. The app shell now uses viewport-safe sizing with a single scrolling slide-in navigation drawer, mobile-only menu sub-items for Health / Stats / Settings pages, edge-to-edge hover/selected states and touch targets for primary menu items, a right-side backdrop tap target to close the drawer, route pages use responsive padding instead of fixed desktop spacing, queue/history/health tables collapse redundant columns and wrap metadata/actions more cleanly, Settings and Explore forms stack on narrow screens, and Bootstrap tab/toolbars no longer force horizontal page overflow on mobile.
 *   **UI / Logging**: Sidebar sub-menu rows and the logout action now use the same edge-to-edge touch target treatment as primary menu items while keeping sub-menu text aligned with the primary label text. The Stats desktop tabs now match the Health / Settings tab styling, the Queue History header is top-aligned against its filters, System Logs render oldest-to-newest and auto-scroll to the latest entry by default, and container console logs are emitted as JSON with a lowercase `level` field for Dozzle-style log categorisation.
 *   **Fix (SABnzbd queue compatibility)**: Treat `mode=queue&limit=0` (and matching history/page-size requests) as "no limit" instead of `Take(0)`, so Sonarr/Radarr can see the full pending queue rather than only the active item plus completed history.

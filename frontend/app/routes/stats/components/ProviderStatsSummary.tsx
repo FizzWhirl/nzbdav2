@@ -58,7 +58,6 @@ export function ProviderStatsSummary({ providerStats, bandwidthHistory, currentB
     });
 
     const totalBytes = Object.values(bytesByProvider).reduce((sum, bytes) => sum + bytes, 0);
-    const totalCurrentSpeed = currentBandwidth.reduce((sum, provider) => sum + provider.currentSpeed, 0);
     const maxBytes = Math.max(0, ...providerIndexes.map(index => bytesByProvider[index] || 0));
 
     const getProviderName = (index: number) => {
@@ -74,10 +73,6 @@ export function ProviderStatsSummary({ providerStats, bandwidthHistory, currentB
                     <div>
                         <h4 className="m-0">Provider Stats & Bandwidth</h4>
                         <div className="text-muted small">Showing {rangeLabel(range)}</div>
-                    </div>
-                    <div className="text-end">
-                        <div className="text-muted small">Overall current bandwidth</div>
-                        <div className="fs-4 fw-semibold text-info">{formatSpeed(totalCurrentSpeed)}</div>
                     </div>
                 </div>
 

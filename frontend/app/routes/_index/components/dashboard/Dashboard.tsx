@@ -6,7 +6,6 @@ import type { ConnectionUsageContext } from '~/types/connections';
 import type { ProviderBandwidthSnapshot } from '~/types/bandwidth';
 import { ActiveStreaming } from './ActiveStreaming';
 import { TotalDownloaded } from './TotalDownloaded';
-import { CurrentBandwidth } from './CurrentBandwidth';
 import { ProviderHealth } from './ProviderHealth';
 import { ProviderUsage } from './ProviderUsage';
 import { RecentCompletions } from './RecentCompletions';
@@ -171,18 +170,15 @@ export function Dashboard({ initialData, initialConnections, initialBandwidth }:
             }
 
             {/* Active Streaming - Full Width */}
-            <ActiveStreaming connections={connections} providerNames={providerNames} />
+            <ActiveStreaming connections={connections} providerNames={providerNames} bandwidth={currentBandwidth} />
 
             {/* Total Downloaded + Provider Health */}
             <Row className="mb-4 gy-4">
-                <Col lg={3}>
-                    <CurrentBandwidth bandwidth={currentBandwidth} />
-                </Col>
-                <Col lg={3}>
+                <Col lg={4}>
                     <h6 className="text-muted mb-2">Total Downloaded</h6>
                     <TotalDownloaded data={data.totalDownloaded} timeWindowLabel={timeWindowLabel} />
                 </Col>
-                <Col lg={6}>
+                <Col lg={8}>
                     <h6 className="text-muted mb-2 mt-2 mt-lg-0">Provider Health</h6>
                     <ProviderHealth providers={data.providerHealth} />
                 </Col>

@@ -58,6 +58,14 @@ type GroupedConnection = {
     inactiveSince?: number | null;
 };
 
+function formatSpeed(bytesPerSec: number) {
+    if (bytesPerSec === 0) return "0 B/s";
+    const k = 1024;
+    const sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
+    const i = Math.min(Math.floor(Math.log(bytesPerSec) / Math.log(k)), sizes.length - 1);
+    return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
 function ProviderCard({ 
     providerIndex, 
     bandwidth, 
@@ -296,14 +304,6 @@ function ProviderCard({
         return () => clearInterval(timer);
     }, [updateGroups]);
 
-    const formatSpeed = (bytesPerSec: number) => {
-        if (bytesPerSec === 0) return "0 B/s";
-        const k = 1024;
-        const sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
-        const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-        return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-    };
-
     const formatLatency = (ms: number) => {
         if (!ms) return "0 ms";
         if (ms < 1000) return `${ms} ms`;
@@ -526,6 +526,7 @@ export function ProviderStatus({ bandwidth, connections }: Props) {
         ...bandwidth.map(b => b.providerIndex),
         ...Object.keys(connections).map(Number)
     ]);
+    const totalCurrentSpeed = bandwidth.reduce((sum, provider) => sum + provider.currentSpeed, 0);
 
     const onFileClick = useCallback(async (davItemId: string) => {
         setShowDetailsModal(true);
@@ -610,7 +611,13 @@ export function ProviderStatus({ bandwidth, connections }: Props) {
 
     return (
         <div className="p-4 rounded-lg bg-black bg-opacity-20 mb-4">
-            <h4 className="mb-3">Real-time Provider Status</h4>
+            <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                <h4 className="m-0">Real-time Provider Status</h4>
+                <div className="text-end">
+                    <div className="text-muted small text-uppercase">Overall current bandwidth</div>
+                    <div className="fs-4 fw-semibold text-info">{formatSpeed(totalCurrentSpeed)}</div>
+                </div>
+            </div>
             <Row xs={1} md={1} lg={2} className="g-4">
                 {Array.from(providerIndices).sort((a, b) => a - b).map(index => {
                     const bw = bandwidth.find(b => b.providerIndex === index);

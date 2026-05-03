@@ -1,19 +1,43 @@
 import { Card } from 'react-bootstrap';
 import type { ConnectionUsageContext } from '~/types/connections';
+import type { ProviderBandwidthSnapshot } from '~/types/bandwidth';
 
 type Props = {
     connections: Record<number, ConnectionUsageContext[]>;
     providerNames: Record<number, string>;
+    bandwidth: ProviderBandwidthSnapshot[];
 };
 
-export function ActiveStreaming({ connections, providerNames }: Props) {
+function formatSpeed(bytesPerSecond: number): string {
+    if (bytesPerSecond <= 0) return '0 B/s';
+    const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+    const index = Math.min(Math.floor(Math.log(bytesPerSecond) / Math.log(1024)), units.length - 1);
+    const value = bytesPerSecond / Math.pow(1024, index);
+    return `${value.toFixed(index >= 2 ? 1 : 0)} ${units[index]}`;
+}
+
+export function ActiveStreaming({ connections, providerNames, bandwidth }: Props) {
     const hasConnections = Object.values(connections).some(list => list.length > 0);
+    const totalCurrentSpeed = bandwidth.reduce((sum, provider) => sum + provider.currentSpeed, 0);
+
+    const header = (
+        <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <h6 className="text-muted m-0">Active Streaming</h6>
+            <div className="text-end">
+                <div className="text-muted small text-uppercase">Overall current bandwidth</div>
+                <div className="fs-4 fw-semibold text-info">{formatSpeed(totalCurrentSpeed)}</div>
+            </div>
+        </div>
+    );
 
     if (!hasConnections) {
         return (
             <Card bg="dark" text="white" className="border-secondary mb-4">
-                <Card.Body className="text-center text-muted py-4">
-                    No active streams
+                <Card.Body>
+                    {header}
+                    <div className="text-center text-muted py-4">
+                        No active streams
+                    </div>
                 </Card.Body>
             </Card>
         );
@@ -22,7 +46,7 @@ export function ActiveStreaming({ connections, providerNames }: Props) {
     return (
         <Card bg="dark" text="white" className="border-secondary mb-4">
             <Card.Body>
-                <h6 className="text-muted mb-3">Active Streaming</h6>
+                {header}
                 <div className="d-flex flex-wrap gap-3">
                     {Object.entries(connections)
                         .filter(([_, list]) => list.length > 0)

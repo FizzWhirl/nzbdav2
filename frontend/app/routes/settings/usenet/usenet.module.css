@@ -452,10 +452,14 @@
 
 .benchmark-results {
     margin-top: 16px;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .benchmark-table {
     width: 100%;
+    min-width: max-content;
     border-collapse: collapse;
     font-size: 14px;
 }
@@ -472,6 +476,7 @@
     color: #839496;
     font-weight: 600;
     font-size: 12px;
+    white-space: nowrap;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }

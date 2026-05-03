@@ -31,7 +31,19 @@ img, svg, video, canvas {
 }
 
 .table-responsive {
+  max-width: 100%;
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+table th,
+.table th {
+  white-space: nowrap;
+  min-width: max-content;
+}
+
+.modal-body {
+  overflow-x: auto;
 }
 
 /* bootstrap overrides */

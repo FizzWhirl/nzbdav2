@@ -1,6 +1,7 @@
 import { Table, Button, Form, Pagination, Badge } from "react-bootstrap";
 import { formatDistanceToNow } from "date-fns";
 import type { AnalysisHistoryItem } from "~/types/backend";
+import { formatDateTime } from "~/utils/datetime";
 
 interface Props {
     items: AnalysisHistoryItem[];
@@ -57,6 +58,7 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
                 <thead>
                     <tr>
                         <th>Date</th>
+                        <th>Type</th>
                         <th>File Name</th>
                         <th>Job Name</th>
                         <th>Result</th>
@@ -67,7 +69,7 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
                 <tbody>
                     {items.length === 0 ? (
                         <tr>
-                            <td colSpan={6} className="text-center text-muted fst-italic py-4">
+                            <td colSpan={7} className="text-center text-muted fst-italic py-4">
                                 No history found
                             </td>
                         </tr>
@@ -79,7 +81,14 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
                                 style={{ cursor: "pointer" }}
                             >
                                 <td style={{ whiteSpace: "nowrap" }}>
-                                    {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
+                                    <span title={formatDateTime(item.createdAt)}>
+                                        {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
+                                    </span>
+                                </td>
+                                <td>
+                                    <Badge bg={getHistoryTypeColor(item)}>
+                                        {getHistoryType(item)}
+                                    </Badge>
                                 </td>
                                 <td className="text-break" style={{ maxWidth: "250px" }} title={item.fileName}>
                                     {item.fileName}
@@ -88,7 +97,7 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
                                     {item.jobName || "-"}
                                 </td>
                                 <td>
-                                    <Badge bg={item.result === "Success" ? "success" : "danger"}>
+                                    <Badge bg={getResultColor(item.result)}>
                                         {item.result}
                                     </Badge>
                                 </td>
@@ -111,4 +120,31 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
             </Table>
         </div>
     );
+}
+
+function getHistoryType(item: AnalysisHistoryItem) {
+    const details = (item.details || "").toLowerCase();
+    if (details.startsWith("health check")) return "Health Check";
+    if (details.startsWith("analysis")) return "Analysis";
+    if (details.includes("ffprobe") || details.startsWith("media analysis") || details.startsWith("media integrity")) return "Media Analysis";
+    if (details.includes("segment")) return "NZB Analysis";
+    return "Analysis";
+}
+
+function getHistoryTypeColor(item: AnalysisHistoryItem) {
+    switch (getHistoryType(item)) {
+        case "Health Check": return "primary";
+        case "Media Analysis": return "info";
+        case "NZB Analysis": return "secondary";
+        default: return "dark";
+    }
+}
+
+function getResultColor(result: string) {
+    switch (result) {
+        case "Success": return "success";
+        case "Pending": return "warning";
+        case "Skipped": return "info";
+        default: return "danger";
+    }
 }

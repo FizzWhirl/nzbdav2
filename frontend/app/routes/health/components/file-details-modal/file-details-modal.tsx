@@ -5,6 +5,7 @@ import type { FileDetails } from "~/types/backend";
 import styles from "./file-details-modal.module.css";
 import { useToast } from "~/context/ToastContext";
 import { useConfirm } from "~/context/ConfirmContext";
+import { formatDateOnly, formatDateTime, formatHealthDueDate } from "~/utils/datetime";
 
 export type FileDetailsModalProps = {
     show: boolean;
@@ -367,7 +368,7 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                     {fileDetails.createdAt && (
                                         <tr>
                                             <td className={styles.labelCell}>Created</td>
-                                            <td className={styles.valueCell}>{new Date(fileDetails.createdAt).toLocaleString()}</td>
+                                            <td className={styles.valueCell}>{formatDateTime(fileDetails.createdAt)}</td>
                                         </tr>
                                     )}
                                 </tbody>
@@ -478,10 +479,14 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                                         <tr>
                                             <td className={styles.labelCell}>Last Health Check</td>
                                             <td className={styles.valueCell}>
-                                                {new Date(fileDetails.lastHealthCheck).toLocaleString()}
+                                                {formatDateTime(fileDetails.lastHealthCheck)}
                                             </td>
                                         </tr>
                                     )}
+                                    <tr>
+                                        <td className={styles.labelCell}>Next Health Check</td>
+                                        <td className={styles.valueCell}>{formatHealthDueDate(fileDetails.nextHealthCheck)}</td>
+                                    </tr>
                                     {fileDetails.latestHealthCheckResult && (
                                         <>
                                             <tr>
@@ -815,7 +820,7 @@ function formatRelativeTime(dateString: string): string {
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    return formatDateOnly(date);
 }
 
 function getSuccessRateColor(rate: number): string {

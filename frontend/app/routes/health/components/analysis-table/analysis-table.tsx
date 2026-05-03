@@ -2,6 +2,7 @@ import { Table } from "react-bootstrap";
 import styles from "./analysis-table.module.css";
 import { Truncate } from "~/routes/queue/components/truncate/truncate";
 import { ProgressBadge } from "~/routes/queue/components/status-badge/status-badge";
+import { formatTimeOnly } from "~/utils/datetime";
 import { Search } from "lucide-react";
 
 export type AnalysisItem = {
@@ -63,7 +64,7 @@ export function AnalysisTable({ items }: AnalysisTableProps) {
                                         </div>
                                     </td>
                                     <td>
-                                        {new Date(item.startedAt).toLocaleTimeString()}
+                                        {formatTimeOnly(item.startedAt)}
                                     </td>
                                     <td>
                                         <ProgressBadge className={styles.progressBadge} color={"#333"} percentNum={100 + item.progress}>

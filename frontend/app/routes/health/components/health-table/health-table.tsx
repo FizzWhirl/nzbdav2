@@ -5,6 +5,7 @@ import { Truncate } from "~/routes/queue/components/truncate/truncate";
 import { ProgressBadge } from "~/routes/queue/components/status-badge/status-badge";
 import { useCallback, useEffect, useState } from "react";
 import { Activity, Play, RotateCcw, Search, Wrench, Zap } from "lucide-react";
+import { formatCompactDateTime, formatHealthDueDate } from "~/utils/datetime";
 
 export type HealthTableProps = {
     isEnabled: boolean,
@@ -395,27 +396,12 @@ function DateDetailsTable({ item, onRunHealthCheck, onResetHealthStatus }: {
 }
 
 function formatDate(dateString: string | null, fallback: string) {
-    try {
-        if (!dateString) return fallback;
-        const now = new Date();
-        const datetime = new Date(dateString);
-        return isSameDate(datetime, now)
-            ? datetime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-            : datetime.toLocaleDateString();
-    } catch {
-        return 'Unknown';
-    }
+    return fallback === 'ASAP'
+        ? formatHealthDueDate(dateString, fallback)
+        : formatCompactDateTime(dateString, fallback);
 };
 
 function formatDateBadge(dateString: string | null, fallback: string, variant: 'info' | 'warning' | 'success') {
     const dateText = formatDate(dateString, fallback);
     return <Badge bg={variant} className={styles.dateBadge}>{dateText}</Badge>;
 };
-
-function isSameDate(one: Date, two: Date) {
-    return (
-        one.getFullYear() === two.getFullYear() &&
-        one.getMonth() === two.getMonth() &&
-        one.getDate() === two.getDate()
-    );
-}

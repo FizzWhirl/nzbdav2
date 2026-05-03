@@ -1,3 +1,4 @@
+import { formatDateTime } from "~/utils/datetime";
 import styles from "./usenet.module.css"
 import { type Dispatch, type SetStateAction, useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Button, Form } from "react-bootstrap";
@@ -937,7 +938,7 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                                         </Button>
                                     </div>
                                     <div style={{ fontSize: '0.8rem', color: 'var(--bs-secondary-color)' }}>
-                                        {displayRun.isCurrent ? 'Just now' : new Date(displayRun.createdAt).toLocaleString()}
+                                        {displayRun.isCurrent ? 'Just now' : formatDateTime(displayRun.createdAt)}
                                     </div>
                                 </div>
 

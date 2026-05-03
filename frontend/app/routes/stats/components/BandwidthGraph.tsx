@@ -1,5 +1,6 @@
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { BandwidthSample } from "~/types/bandwidth";
+import { formatDateTime } from "~/utils/datetime";
 
 interface Props {
     data: BandwidthSample[];
@@ -9,7 +10,7 @@ interface Props {
 export function BandwidthGraph({ data, range }: Props) {
     const formattedData = data.map(d => ({
         ...d,
-        date: new Date(d.timestamp).toLocaleString(),
+        date: formatDateTime(d.timestamp),
         mb: parseFloat((d.bytes / 1024 / 1024).toFixed(2))
     }));
 

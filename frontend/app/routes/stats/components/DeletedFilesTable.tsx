@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Table, Pagination, Button, Form as BootstrapForm } from "react-bootstrap";
 import { Form, useSearchParams } from "react-router";
+import { formatDateTime } from "~/utils/datetime";
 import type { HealthCheckResult } from "~/types/stats";
 
 interface Props {
@@ -94,7 +95,7 @@ export function DeletedFilesTable({ files, totalCount, page, search }: Props) {
                             files.map((file) => (
                                 <tr key={file.id} style={{ fontSize: '0.8rem' }}>
                                     <td className="whitespace-nowrap text-muted" style={{ width: '160px' }}>
-                                        {new Date(file.createdAt).toLocaleString()}
+                                        {formatDateTime(file.createdAt)}
                                     </td>
                                     <td className="font-mono truncate max-w-xs text-light" title={file.path}>
                                         {file.jobName ? (

@@ -3,6 +3,7 @@ import { Table, Button, Form as BootstrapForm, Pagination, OverlayTrigger, Toolt
 import { Form, useSearchParams } from "react-router";
 import type { MappedFile } from "~/types/stats";
 import { formatFileSize } from "~/utils/file-size";
+import { formatDateTime } from "~/utils/datetime";
 
 interface Props {
     items: MappedFile[];
@@ -220,7 +221,7 @@ export function MappedFilesTable({ items, totalCount, page, search, onFileClick,
                                         {formatFileSize(item.fileSize)}
                                     </td>
                                     <td className="font-mono small text-muted">
-                                        {new Date(item.createdAt).toLocaleString()}
+                                        {formatDateTime(item.createdAt)}
                                     </td>
                                     <td className="font-mono small text-light" style={{ whiteSpace: 'normal', wordBreak: 'break-all' }} title={item.linkPath}>
                                         {item.linkPath}

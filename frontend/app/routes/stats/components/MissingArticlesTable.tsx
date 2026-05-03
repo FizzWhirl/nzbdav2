@@ -3,6 +3,7 @@ import { Table, Button, Form as BootstrapForm, Pagination, OverlayTrigger, Toolt
 import { Form, useSearchParams } from "react-router";
 import type { MissingArticleItem } from "~/types/stats";
 import type { ProviderBandwidthSnapshot } from "~/types/bandwidth";
+import { formatTimeOnly } from "~/utils/datetime";
 import { useToast } from "~/context/ToastContext";
 
 interface Props {
@@ -318,7 +319,7 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
                                             />
                                         </td>
                                         <td className="text-nowrap text-muted small">
-                                            {new Date(item.latestTimestamp).toLocaleTimeString()}
+                                            {formatTimeOnly(item.latestTimestamp)}
                                         </td>
                                         <td>
                                             <ExpandableCell maxWidth="200px" className="text-light">

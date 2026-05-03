@@ -20,6 +20,7 @@ declare const styles: {
   readonly "fileNameSmall": string;
   readonly "filterContainer": string;
   readonly "header": string;
+  readonly "inlineIcon": string;
   readonly "jobName": string;
   readonly "lastCheckTime": string;
   readonly "metaRow": string;
@@ -38,6 +39,7 @@ declare const styles: {
   readonly "progressBadge": string;
   readonly "resultBadge": string;
   readonly "searchContainer": string;
+  readonly "searchInput": string;
   readonly "statusCell": string;
   readonly "statusContainer": string;
   readonly "table": string;

@@ -32,6 +32,7 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
                         label="Show Failed Only"
                         checked={showFailedOnly}
                         onChange={(e) => onShowFailedOnlyChange(e.target.checked)}
+                        style={{ whiteSpace: "nowrap", minWidth: "max-content" }}
                     />
                 </div>
                 <div className="d-flex gap-2">

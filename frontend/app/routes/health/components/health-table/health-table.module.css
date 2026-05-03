@@ -48,11 +48,35 @@
     min-width: 200px;
 }
 
+.searchInput {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    background: hsl(196.8, 25%, 14.51%);
+    color: hsl(180, 7%, 85%);
+    padding: 6px 12px;
+    font-size: 0.95rem;
+}
+
+.searchInput::placeholder {
+    color: hsl(180, 7%, 48%);
+}
+
 .filterContainer {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     height: auto;
+}
+
+.filterContainer :global(.form-check) {
+    white-space: nowrap;
+}
+
+.inlineIcon {
+    margin-right: 6px;
+    vertical-align: -2px;
 }
 
 .tableContainer {
@@ -274,7 +298,8 @@
 }
 
 .emptyIcon {
-    font-size: 3em;
+    width: 48px;
+    height: 48px;
     margin-bottom: 16px;
     opacity: 0.6;
 }
@@ -356,7 +381,11 @@
 
 .actionButton {
     cursor: pointer;
-    font-size: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
     transition: transform 0.2s, opacity 0.2s;
     opacity: 0.8;
 
@@ -419,6 +448,7 @@
 
     .filterContainer :global(.form-check) {
         width: 100%;
+        white-space: nowrap;
     }
 
     .metaRow {

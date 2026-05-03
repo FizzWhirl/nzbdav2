@@ -2,6 +2,7 @@ import { Table } from "react-bootstrap";
 import styles from "./analysis-table.module.css";
 import { Truncate } from "~/routes/queue/components/truncate/truncate";
 import { ProgressBadge } from "~/routes/queue/components/status-badge/status-badge";
+import { Search } from "lucide-react";
 
 export type AnalysisItem = {
     id: string,
@@ -30,7 +31,7 @@ export function AnalysisTable({ items }: AnalysisTableProps) {
 
             {items.length === 0 ? (
                 <div className={styles.emptyState}>
-                    <div className={styles.emptyIcon}>🔍</div>
+                    <Search className={styles.emptyIcon} aria-hidden />
                     <div className={styles.emptyTitle}>No Active Analyses</div>
                     <div className={styles.emptyDescription}>
                         Analysis runs in the background when you stream a file for the first time or manually trigger it.

@@ -1,9 +1,10 @@
-import { Table, Badge, Pagination, Form, InputGroup, Button } from "react-bootstrap";
+import { Table, Badge, Pagination, Form, Button } from "react-bootstrap";
 import type { HealthCheckQueueItem } from "~/types/backend";
 import styles from "./health-table.module.css";
 import { Truncate } from "~/routes/queue/components/truncate/truncate";
 import { ProgressBadge } from "~/routes/queue/components/status-badge/status-badge";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Activity, Play, RotateCcw, Search, Wrench, Zap } from "lucide-react";
 
 export type HealthTableProps = {
     isEnabled: boolean,
@@ -50,7 +51,18 @@ export function HealthTable({
 }: HealthTableProps) {
 
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [localSearch, setLocalSearch] = useState(search);
     const totalPages = Math.ceil(totalCount / pageSize);
+
+    useEffect(() => {
+        setLocalSearch(search);
+    }, [search]);
+
+    const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            onSearchChange(localSearch);
+        }
+    }, [localSearch, onSearchChange]);
 
     const toggleSelection = (id: string) => {
         setSelectedIds(prev => {
@@ -104,16 +116,14 @@ export function HealthTable({
 
             <div className={styles.controls}>
                 <div className={styles.searchContainer}>
-                    <InputGroup>
-                        <InputGroup.Text id="search-addon">🔍</InputGroup.Text>
-                        <Form.Control
-                            placeholder="Search files..."
-                            aria-label="Search"
-                            aria-describedby="search-addon"
-                            value={search}
-                            onChange={(e) => onSearchChange(e.target.value)}
-                        />
-                    </InputGroup>
+                    <input
+                        className={styles.searchInput}
+                        type="text"
+                        placeholder="Search health queue..."
+                        value={localSearch}
+                        onChange={(e) => setLocalSearch(e.target.value)}
+                        onKeyDown={handleSearchKeyDown}
+                    />
                 </div>
                 <div className={styles.filterContainer} style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                     {selectedIds.size > 0 && (
@@ -125,7 +135,8 @@ export function HealthTable({
                                 onClick={handleBulkRepair}
                                 disabled={!onRepair}
                             >
-                                🔧 Repair Selected
+                                <Wrench size={14} className={styles.inlineIcon} />
+                                Repair Selected
                             </Button>
                             <Button
                                 variant="warning"
@@ -133,7 +144,8 @@ export function HealthTable({
                                 onClick={handleBulkHeadCheck}
                                 disabled={!onRunHeadHealthCheck}
                             >
-                                ⚡ HEAD Check Selected
+                                <Zap size={14} className={styles.inlineIcon} />
+                                HEAD Check Selected
                             </Button>
                             <Button
                                 variant="secondary"
@@ -141,27 +153,28 @@ export function HealthTable({
                                 onClick={handleBulkReset}
                                 disabled={!onResetHealthStatus}
                             >
-                                🔄 Reset Status Selected
+                                <RotateCcw size={14} className={styles.inlineIcon} />
+                                Reset Status Selected
                             </Button>
                         </>
                     )}
                     <Form.Check
-                        type="switch"
-                        id="show-unhealthy-switch"
+                        type="checkbox"
+                        id="show-unhealthy-checkbox"
                         label="Unhealthy Only"
                         checked={showUnhealthy}
                         onChange={(e) => onShowUnhealthyChange(e.target.checked)}
                     />
                     <Form.Check
-                        type="switch"
-                        id="show-failed-switch"
+                        type="checkbox"
+                        id="show-failed-checkbox"
                         label="Corrupted Only"
                         checked={showFailed}
                         onChange={(e) => onShowFailedChange(e.target.checked)}
                     />
                     <Form.Check
-                        type="switch"
-                        id="show-all-switch"
+                        type="checkbox"
+                        id="show-all-checkbox"
                         label="Show All Files"
                         checked={showAll}
                         onChange={(e) => onShowAllChange(e.target.checked)}
@@ -171,7 +184,7 @@ export function HealthTable({
 
             {!isEnabled ? (
                 <div className={styles.emptyState}>
-                    <div className={styles.emptyIcon}>🩺💙💪</div>
+                    <Activity className={styles.emptyIcon} aria-hidden />
                     <div className={styles.emptyTitle}>Enable Repairs In Settings</div>
                     <div className={styles.emptyDescription}>
                         Once you enable repairs, all mounted usenet files will be queued for continuous health monitoring
@@ -179,9 +192,7 @@ export function HealthTable({
                 </div>
             ) : healthCheckItems.length === 0 ? (
                 <div className={styles.emptyState}>
-                    <div className={styles.emptyIcon}>
-                        {search ? "🔍" : "🩺💙💪"}
-                    </div>
+                    {search ? <Search className={styles.emptyIcon} aria-hidden /> : <Activity className={styles.emptyIcon} aria-hidden />}
                     <div className={styles.emptyTitle}>
                         {search ? "No Results Found" : "No Items To Health-Check"}
                     </div>
@@ -273,7 +284,7 @@ export function HealthTable({
                                                     title="Run Health Check Now"
                                                     role="button"
                                                 >
-                                                    ▶️
+                                                    <Play size={17} aria-hidden />
                                                 </div>
                                                 <div
                                                     className={styles.actionButton}
@@ -281,7 +292,7 @@ export function HealthTable({
                                                     title="Reset Health Status"
                                                     role="button"
                                                 >
-                                                    🔄
+                                                    <RotateCcw size={17} aria-hidden />
                                                 </div>
                                             </div>
                                         </td>
@@ -358,7 +369,7 @@ function DateDetailsTable({ item, onRunHealthCheck, onResetHealthStatus }: {
                             title="Run Health Check Now"
                             role="button"
                         >
-                            ▶️
+                            <Play size={17} aria-hidden />
                         </div>
                         <div
                             className={styles.actionButton}
@@ -366,7 +377,7 @@ function DateDetailsTable({ item, onRunHealthCheck, onResetHealthStatus }: {
                             title="Reset Health Status"
                             role="button"
                         >
-                            🔄
+                            <RotateCcw size={17} aria-hidden />
                         </div>
                     </div>
                 </div>

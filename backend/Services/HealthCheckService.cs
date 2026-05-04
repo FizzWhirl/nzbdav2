@@ -818,7 +818,7 @@ public class HealthCheckService
                 {
                     try
                     {
-                        var mediaIds = await sonarrClient.GetMediaIds(davItem.Path);
+                        var mediaIds = await sonarrClient.GetMediaIds(symlinkOrStrmPath);
                         if (mediaIds != null && mediaIds.Value.episodeIds.Any())
                         {
                             episodeId = mediaIds.Value.episodeIds.First(); // Use the first episode ID found

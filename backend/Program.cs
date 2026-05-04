@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-HEALTH-HISTORY-CLARITY");
-            Log.Warning("  UI: Health, media analysis, and date/time displays now use clearer labels and timezone-aware formatting.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-ARR-REPAIR-SEARCH");
+            Log.Warning("  FIX: Repairs now explicitly trigger Sonarr/Radarr replacement searches after deleting failed files.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

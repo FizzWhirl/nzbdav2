@@ -8,18 +8,20 @@ interface Props {
     page: number;
     search: string;
     showFailedOnly: boolean;
+    typeFilter: string;
     onPageChange: (page: number) => void;
     onSearchChange: (search: string) => void;
     onShowFailedOnlyChange: (showFailedOnly: boolean) => void;
+    onTypeFilterChange: (typeFilter: string) => void;
     onAnalyze: (id: string) => void;
-    onItemClick: (davItemId: string) => void;
+    onItemClick: (item: AnalysisHistoryItem) => void;
 }
 
-export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPageChange, onSearchChange, onShowFailedOnlyChange, onAnalyze, onItemClick }: Props) {
+export function AnalysisHistoryTable({ items, page, search, showFailedOnly, typeFilter, onPageChange, onSearchChange, onShowFailedOnlyChange, onTypeFilterChange, onAnalyze, onItemClick }: Props) {
     return (
         <div>
             <div className="d-flex justify-content-between align-items-center mb-3">
-                <div className="d-flex gap-3 align-items-center">
+                <div className="d-flex gap-3 align-items-center flex-wrap">
                     <Form.Control
                         type="text"
                         placeholder="Search history..."
@@ -27,6 +29,18 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
                         onChange={(e) => onSearchChange(e.target.value)}
                         style={{ maxWidth: "300px" }}
                     />
+                    <Form.Select
+                        value={typeFilter}
+                        onChange={(e) => onTypeFilterChange(e.target.value)}
+                        aria-label="Filter analysis history by type"
+                        style={{ maxWidth: "220px" }}
+                    >
+                        <option value="all">All Types</option>
+                        <option value="Health Check">Health Check</option>
+                        <option value="Analysis">Analysis</option>
+                        <option value="Media Analysis">Media Analysis</option>
+                        <option value="NZB Analysis">NZB Analysis</option>
+                    </Form.Select>
                     <Form.Check
                         type="checkbox"
                         id="show-failed-only"
@@ -77,7 +91,7 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
                         items.map((item) => (
                             <tr
                                 key={item.id}
-                                onClick={() => onItemClick(item.davItemId)}
+                                onClick={() => onItemClick(item)}
                                 style={{ cursor: "pointer" }}
                             >
                                 <td style={{ whiteSpace: "nowrap" }}>
@@ -105,13 +119,17 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
                                     {item.details || "-"}
                                 </td>
                                 <td>
-                                    <Button
-                                        variant="outline-primary"
-                                        size="sm"
-                                        onClick={(e) => { e.stopPropagation(); onAnalyze(item.davItemId); }}
-                                    >
-                                        Re-Analyze
-                                    </Button>
+                                    {item.isRemoved ? (
+                                        <Badge bg="secondary">Removed</Badge>
+                                    ) : (
+                                        <Button
+                                            variant="outline-primary"
+                                            size="sm"
+                                            onClick={(e) => { e.stopPropagation(); onAnalyze(item.davItemId); }}
+                                        >
+                                            Re-Analyze
+                                        </Button>
+                                    )}
                                 </td>
                             </tr>
                         ))
@@ -123,6 +141,8 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, onPa
 }
 
 function getHistoryType(item: AnalysisHistoryItem) {
+    if (item.type) return item.type;
+
     const details = (item.details || "").toLowerCase();
     if (details.startsWith("health check")) return "Health Check";
     if (details.startsWith("analysis")) return "Analysis";

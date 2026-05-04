@@ -435,8 +435,8 @@ class BackendClient {
         return response.json();
     }
 
-    public async getAnalysisHistory(page: number = 0, pageSize: number = 100, search: string = ""): Promise<AnalysisHistoryItem[]> {
-        const url = process.env.BACKEND_URL + `/api/analysis-history?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(search)}`;
+    public async getAnalysisHistory(page: number = 0, pageSize: number = 100, search: string = "", showFailedOnly: boolean = false, type: string = "all"): Promise<AnalysisHistoryItem[]> {
+        const url = process.env.BACKEND_URL + `/api/analysis-history?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(search)}&showFailedOnly=${showFailedOnly}&type=${encodeURIComponent(type)}`;
         const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
         const response = await this.fetchWithTimeout(url, { headers: { "x-api-key": apiKey } });
         if (!response.ok) throw new Error(`Failed to get analysis history: ${(await response.json()).error}`);

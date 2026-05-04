@@ -12,6 +12,7 @@ export type FileDetailsModalProps = {
     onHide: () => void;
     fileDetails: FileDetails | null;
     loading: boolean;
+    errorMessage?: string | null;
     onResetStats?: (jobName: string) => void;
     onRunHealthCheck?: (id: string) => void;
     onAnalyze?: (id: string) => void;
@@ -20,7 +21,7 @@ export type FileDetailsModalProps = {
     onDelete?: (id: string, name: string) => void;
 }
 
-export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetStats, onRunHealthCheck, onAnalyze, onRepair, onTestDownload, onDelete }: FileDetailsModalProps) {
+export function FileDetailsModal({ show, onHide, fileDetails, loading, errorMessage, onResetStats, onRunHealthCheck, onAnalyze, onRepair, onTestDownload, onDelete }: FileDetailsModalProps) {
     const [testingDownload, setTestingDownload] = useState(false);
     const [repairingClassification, setRepairingClassification] = useState(false);
     const [flushingCache, setFlushingCache] = useState(false);
@@ -599,7 +600,7 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, onResetSt
                     </div>
                 ) : (
                     <div className={styles.errorContainer}>
-                        Failed to load file details
+                        {errorMessage || "Failed to load file details"}
                     </div>
                 )}
             </Modal.Body>

@@ -31,6 +31,18 @@ const topicSubscriptions = {
     [topicNames.analysisItemProgress]: 'event',
 }
 
+function getFileDetailsErrorMessage(status: number, context?: { fileName?: string | null, isRemoved?: boolean }) {
+    if (status === 404 && context?.isRemoved) {
+        return `This history row refers to ${context.fileName ? `"${context.fileName}"` : 'a file'} that has already been removed from NzbDav, usually because health repair deleted it and triggered a replacement search. Details are no longer available for removed items.`;
+    }
+
+    if (status === 404) {
+        return `This file is no longer present in NzbDav. It may have been deleted, repaired, or replaced after this history row was created.`;
+    }
+
+    return `File details could not be loaded (HTTP ${status}). Check the backend logs for the underlying error.`;
+}
+
 export async function loader({ request }: { request: Request }) {
     const url = new URL(request.url);
     const showFailed = url.searchParams.get("showFailed") === "true";
@@ -82,6 +94,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     const [ahPage, setAhPage] = useState(0);
     const [ahSearch, setAhSearch] = useState("");
     const [ahShowFailedOnly, setAhShowFailedOnly] = useState(false);
+    const [ahTypeFilter, setAhTypeFilter] = useState("all");
     const [refreshHistoryTrigger, setRefreshHistoryTrigger] = useState(0);
     const [searchParams, setSearchParams] = useSearchParams();
     const activeTab = searchParams.get("tab") || "health";
@@ -89,6 +102,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     const [showDetailsModal, setShowDetailsModal] = useState(false);
     const [selectedFileDetails, setSelectedFileDetails] = useState<FileDetails | null>(null);
     const [loadingFileDetails, setLoadingFileDetails] = useState(false);
+    const [fileDetailsError, setFileDetailsError] = useState<string | null>(null);
     const { addToast } = useToast();
 
     // effects
@@ -109,7 +123,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     useEffect(() => {
         const fetchHistory = async () => {
             try {
-                const response = await fetch(`/api/analysis-history?page=${ahPage}&pageSize=100&search=${encodeURIComponent(ahSearch)}&showFailedOnly=${ahShowFailedOnly}`);
+                const response = await fetch(`/api/analysis-history?page=${ahPage}&pageSize=100&search=${encodeURIComponent(ahSearch)}&showFailedOnly=${ahShowFailedOnly}&type=${encodeURIComponent(ahTypeFilter)}`);
                 if (response.ok) {
                     setAnalysisHistory(await response.json());
                 }
@@ -118,7 +132,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
             }
         };
         fetchHistory();
-    }, [ahPage, ahSearch, ahShowFailedOnly, refreshHistoryTrigger]);
+    }, [ahPage, ahSearch, ahShowFailedOnly, ahTypeFilter, refreshHistoryTrigger]);
 
     // events
     const onHealthItemStatus = useCallback(async (message: string) => {
@@ -283,10 +297,11 @@ export default function Health({ loaderData }: Route.ComponentProps) {
         }
     }, [setQueueItems, addToast]);
 
-    const onItemClick = useCallback(async (davItemId: string) => {
+    const onItemClick = useCallback(async (davItemId: string, context?: { fileName?: string | null, isRemoved?: boolean }) => {
         setShowDetailsModal(true);
         setLoadingFileDetails(true);
         setSelectedFileDetails(null);
+        setFileDetailsError(null);
 
         try {
             const response = await fetch(`/api/file-details/${davItemId}`);
@@ -294,18 +309,26 @@ export default function Health({ loaderData }: Route.ComponentProps) {
                 const fileDetails = await response.json();
                 setSelectedFileDetails(fileDetails);
             } else {
-                console.error('Failed to fetch file details:', await response.text());
+                const errorText = await response.text();
+                console.error('Failed to fetch file details:', errorText);
+                setFileDetailsError(getFileDetailsErrorMessage(response.status, context));
             }
         } catch (error) {
             console.error('Error fetching file details:', error);
+            setFileDetailsError('File details could not be loaded because the request failed. Check the backend logs for details.');
         } finally {
             setLoadingFileDetails(false);
         }
     }, []);
 
+    const onAnalysisHistoryItemClick = useCallback((item: AnalysisHistoryItem) => {
+        onItemClick(item.davItemId, { fileName: item.fileName, isRemoved: item.isRemoved });
+    }, [onItemClick]);
+
     const onHideDetailsModal = useCallback(() => {
         setShowDetailsModal(false);
         setSelectedFileDetails(null);
+        setFileDetailsError(null);
     }, []);
 
     const onResetFileStats = useCallback(async (jobName: string) => {
@@ -514,11 +537,13 @@ export default function Health({ loaderData }: Route.ComponentProps) {
                                                 page={ahPage}
                                                 search={ahSearch}
                                                 showFailedOnly={ahShowFailedOnly}
+                                                typeFilter={ahTypeFilter}
                                                 onPageChange={setAhPage}
                                                 onSearchChange={(s) => { setAhSearch(s); setAhPage(0); }}
                                                 onShowFailedOnlyChange={(val) => { setAhShowFailedOnly(val); setAhPage(0); }}
+                                                onTypeFilterChange={(val) => { setAhTypeFilter(val); setAhPage(0); }}
                                                 onAnalyze={onAnalyze}
-                                                onItemClick={onItemClick}
+                                                onItemClick={onAnalysisHistoryItemClick}
                                             />
                                         </Tab>
 
@@ -531,6 +556,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
                     onHide={onHideDetailsModal}
                     fileDetails={selectedFileDetails}
                     loading={loadingFileDetails}
+                    errorMessage={fileDetailsError}
                     onResetStats={onResetFileStats}
                     onRunHealthCheck={onRunHealthCheck}
                     onAnalyze={onAnalyze}

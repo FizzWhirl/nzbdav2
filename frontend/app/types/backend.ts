@@ -162,4 +162,6 @@ export type AnalysisHistoryItem = {
     result: string;
     details?: string | null;
     durationMs: number;
+    type?: string | null;
+    isRemoved?: boolean;
 }

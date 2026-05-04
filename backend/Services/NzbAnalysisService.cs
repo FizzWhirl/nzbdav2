@@ -106,7 +106,7 @@ public class NzbAnalysisService(
             if (davItem.Path != null)
             {
                 // Path format: /.../Category/JobName/Filename.ext
-                var directoryName = Path.GetFileName(Path.GetDirectoryName(davItem.Path));
+                var directoryName = JobNameUtil.FromDavPath(davItem.Path);
                 if (!string.IsNullOrEmpty(directoryName))
                 {
                     info.JobName = directoryName;
@@ -269,6 +269,13 @@ public class NzbAnalysisService(
         {
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
+            var itemPath = await db.Items
+                .AsNoTracking()
+                .Where(i => i.Id == davItemId)
+                .Select(i => i.Path)
+                .FirstOrDefaultAsync()
+                .ConfigureAwait(false);
+            jobName = JobNameUtil.PreferJobName(jobName, fileName, itemPath);
             
             var item = new AnalysisHistoryItem
             {

@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-ANALYSIS-REPAIR-CONCURRENCY");
-            Log.Warning("  FIX: Analysis now treats items removed by health repair as skipped instead of failed concurrency errors.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-05-ANALYSIS-HISTORY-POLISH");
+            Log.Warning("  UI: Analysis History now has corrected job names, type filtering, and removed-item handling.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

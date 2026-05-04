@@ -143,6 +143,7 @@ public class HealthCheckService
                 .ConfigureAwait(false);
 
             if (davItem == null) return;
+            var jobName = JobNameUtil.FromDavPath(davItem.Path) ?? davItem.Name;
 
             var maxRepairConnections = _configManager.GetMaxRepairConnections();
             var maxConcurrentChecks = _configManager.GetMaxConcurrentHealthChecks();
@@ -179,7 +180,7 @@ public class HealthCheckService
             if (!itemStillExists)
             {
                 Log.Information("[HealthCheck] Finished item: {Name}. Result: Unhealthy (Repair removed item and triggered replacement workflow)", davItem.Name);
-                await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, davItem.Name,
+                await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, jobName,
                     "Failed",
                     "Health check failed: articles were missing or unavailable; repair removed the item and triggered replacement workflow.").ConfigureAwait(false);
                 return;
@@ -190,7 +191,7 @@ public class HealthCheckService
             var result = davItem.IsCorrupted ? "Unhealthy (Repair Attempted)" : "Healthy";
             Log.Information("[HealthCheck] Finished item: {Name}. Result: {Result}", davItem.Name, result);
 
-            await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, davItem.Name,
+            await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, jobName,
                 davItem.IsCorrupted ? "Failed" : "Success",
                 davItem.IsCorrupted
                     ? "Health check failed: articles were missing or unavailable; repair workflow was attempted."
@@ -200,7 +201,7 @@ public class HealthCheckService
         {
             // Handle per-item timeout
             await HandleTimeout(itemInfo.Id, itemInfo.Name, itemInfo.Path, itemInfo.NextHealthCheck == DateTimeOffset.MinValue);
-            await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, itemInfo.Name,
+            await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, JobNameUtil.FromDavPath(itemInfo.Path) ?? itemInfo.Name,
                 "Failed", "Health check failed: timed out before all articles could be verified.").ConfigureAwait(false);
         }
         catch (Exception e)
@@ -232,7 +233,7 @@ public class HealthCheckService
                 Log.Error(dbEx, "[HealthCheck] Failed to save error status to database.");
             }
 
-            await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, itemInfo.Name,
+            await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, JobNameUtil.FromDavPath(itemInfo.Path) ?? itemInfo.Name,
                 "Failed", $"Health check failed: unexpected error while verifying articles ({e.Message}).").ConfigureAwait(false);
         }
         finally
@@ -1026,6 +1027,14 @@ public class HealthCheckService
         {
             using var scope = _serviceScopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
+            var itemPath = await db.Items
+                .AsNoTracking()
+                .Where(i => i.Id == davItemId)
+                .Select(i => i.Path)
+                .FirstOrDefaultAsync()
+                .ConfigureAwait(false);
+            jobName = JobNameUtil.PreferJobName(jobName, fileName, itemPath);
+
             var item = new AnalysisHistoryItem
             {
                 DavItemId = davItemId,

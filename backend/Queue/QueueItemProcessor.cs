@@ -617,6 +617,12 @@ public class QueueItemProcessor(
                             historyResult = "Pending";
                             historyDetails = "Media analysis pending: ffprobe timed out; file kept for retry.";
                             break;
+                        case MediaAnalysisResult.Removed:
+                            Log.Information("[QueueItemProcessor] Step 5: {FileName} was removed before media analysis could save results", item.Name);
+                            websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");
+                            historyResult = "Skipped";
+                            historyDetails = "Media analysis skipped: file was removed while analysis was running.";
+                            break;
                         default:
                             Log.Information("[QueueItemProcessor] Step 5: {FileName} passed media analysis", item.Name);
                             websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{item.Id}|done");

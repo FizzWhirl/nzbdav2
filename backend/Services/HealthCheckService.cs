@@ -24,6 +24,9 @@ public class HealthCheckService
     private readonly ConfigManager _configManager;
     private readonly UsenetStreamingClient _usenetClient;
     private readonly WebsocketManager _websocketManager;
+    private const int StatSegmentsPerMinutePerConnection = 250;
+    private const int AdaptiveTimeoutBufferMinutes = 10;
+
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ProviderErrorService _providerErrorService;
     private readonly NzbAnalysisService _nzbAnalysisService;
@@ -147,8 +150,7 @@ public class HealthCheckService
 
             // set connection usage context
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken);
-            var timeoutMinutes = 30;
-            cts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes)); // Timeout after 30 minutes per file
+            var baseTimeoutMinutes = _configManager.GetHealthCheckTimeoutMinutes();
             
             // Normalize AffinityKey from parent directory (matches WebDav file patterns)
             var rawAffinityKey = Path.GetFileName(Path.GetDirectoryName(davItem.Path));
@@ -159,8 +161,8 @@ public class HealthCheckService
             var isUrgentCheck = davItem.NextHealthCheck == DateTimeOffset.MinValue;
             var useHead = isUrgentCheck;
 
-            Log.Information("[HealthCheck] Processing item: {Name} ({Id}). Type: {Type}. Timeout: {Timeout}m. Active: {Active}/{MaxConcurrent}. Segment concurrency: {Concurrency}/{MaxConnections}",
-                davItem.Name, davItem.Id, isUrgentCheck ? "Urgent (HEAD)" : "Routine (STAT)", timeoutMinutes,
+            Log.Information("[HealthCheck] Processing item: {Name} ({Id}). Type: {Type}. Base timeout: {Timeout}m. Active: {Active}/{MaxConcurrent}. Segment concurrency: {Concurrency}/{MaxConnections}",
+                davItem.Name, davItem.Id, isUrgentCheck ? "Urgent (HEAD)" : "Routine (STAT)", baseTimeoutMinutes,
                 _processingIds.Count, maxConcurrentChecks, concurrency, maxRepairConnections);
 
             _ = _websocketManager.SendMessage(WebsocketTopic.HealthItemProgress, $"{davItem.Id}|start");
@@ -448,10 +450,14 @@ public class HealthCheckService
             var progress = progressHook.ToPercentage(segments.Count);
             var isImported = OrganizedLinksUtil.GetLink(davItem, _configManager, allowScan: false) != null;
             using var healthCheckCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var timeoutMinutes = GetHealthCheckTimeoutMinutes(segments.Count, concurrency);
+            healthCheckCts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
             // Normalize AffinityKey from parent directory (matches WebDav file patterns)
             var rawAffinityKey2 = Path.GetFileName(Path.GetDirectoryName(davItem.Path));
             var normalizedAffinityKey2 = FilenameNormalizer.NormalizeName(rawAffinityKey2);
             using var contextScope = healthCheckCts.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.HealthCheck, new ConnectionUsageDetails { Text = davItem.Path, JobName = davItem.Name, AffinityKey = normalizedAffinityKey2, IsImported = isImported, DavItemId = davItem.Id }));
+            Log.Information("[HealthCheck] Verifying {SegmentCount} segments for {Name} using {Operation}. Timeout: {Timeout}m. Concurrency: {Concurrency}",
+                segments.Count, davItem.Name, useHead ? "HEAD" : "STAT", timeoutMinutes, concurrency);
             var sizes = await _usenetClient.CheckAllSegmentsAsync(segments, concurrency, progress, healthCheckCts.Token, useHead).ConfigureAwait(false);
 
             // If we did a HEAD check, we now have the segment sizes. Cache them for faster seeking.
@@ -556,6 +562,16 @@ public class HealthCheckService
             var operation = useHead ? "HEAD" : "STAT";
             await Repair(davItem, dbClient, cts2.Token, failureDetails, operation).ConfigureAwait(false);
         }
+    }
+
+    private int GetHealthCheckTimeoutMinutes(int segmentCount, int concurrency)
+    {
+        var baseTimeoutMinutes = _configManager.GetHealthCheckTimeoutMinutes();
+        var effectiveConcurrency = Math.Max(1, concurrency);
+        var adaptiveTimeoutMinutes = (int)Math.Ceiling(segmentCount / (double)(StatSegmentsPerMinutePerConnection * effectiveConcurrency))
+                                     + AdaptiveTimeoutBufferMinutes;
+
+        return Math.Max(baseTimeoutMinutes, adaptiveTimeoutMinutes);
     }
 
     private async Task UpdateReleaseDate(DavItem davItem, List<string> segments, CancellationToken ct)

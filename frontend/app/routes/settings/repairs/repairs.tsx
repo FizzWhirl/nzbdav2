@@ -82,6 +82,21 @@ export function RepairsSettings({ config, setNewConfig }: RepairsSettingsProps) 
             </Form.Group>
             <hr />
             <Form.Group>
+                <Form.Label htmlFor="health-check-timeout-input">Minimum Health Check Timeout (Minutes)</Form.Label>
+                <Form.Control
+                    {...className([styles.input, !isValidHealthCheckTimeout(config["repair.health-check-timeout-minutes"]) && styles.error])}
+                    type="text"
+                    id="health-check-timeout-input"
+                    aria-describedby="health-check-timeout-help"
+                    placeholder={"30"}
+                    value={config["repair.health-check-timeout-minutes"] || ""}
+                    onChange={e => setNewConfig({ ...config, "repair.health-check-timeout-minutes": e.target.value })} />
+                <Form.Text id="health-check-timeout-help" muted>
+                    Minimum per-file timeout for health checks. Default: 30 minutes. Large files automatically get a longer timeout based on segment count and health-check connection count, but raise this if slow providers still time out.
+                </Form.Text>
+            </Form.Group>
+            <hr />
+            <Form.Group>
                 <Form.Label htmlFor="min-check-interval-input">Minimum Health Check Interval (Days)</Form.Label>
                 <Form.Control
                     {...className([styles.input, !isValidMinCheckInterval(config["repair.min-check-interval-days"]) && styles.error])}
@@ -132,6 +147,7 @@ export function isRepairsSettingsUpdated(config: Record<string, string>, newConf
     return config["repair.enable"] !== newConfig["repair.enable"]
         || config["repair.connections"] !== newConfig["repair.connections"]
         || config["repair.concurrent-checks"] !== newConfig["repair.concurrent-checks"]
+        || config["repair.health-check-timeout-minutes"] !== newConfig["repair.health-check-timeout-minutes"]
         || config["repair.min-check-interval-days"] !== newConfig["repair.min-check-interval-days"]
         || config["media.library-dir"] !== newConfig["media.library-dir"]
         || config["api.health-check-categories"] !== newConfig["api.health-check-categories"]
@@ -140,7 +156,8 @@ export function isRepairsSettingsUpdated(config: Record<string, string>, newConf
 
 export function isRepairsSettingsValid(newConfig: Record<string, string>) {
     return isValidRepairsConnections(newConfig["repair.connections"])
-    && isValidConcurrentHealthChecks(newConfig["repair.concurrent-checks"])
+        && isValidConcurrentHealthChecks(newConfig["repair.concurrent-checks"])
+        && isValidHealthCheckTimeout(newConfig["repair.health-check-timeout-minutes"])
         && isValidMinCheckInterval(newConfig["repair.min-check-interval-days"]);
 }
 
@@ -152,6 +169,12 @@ function isValidConcurrentHealthChecks(concurrentHealthChecks: string): boolean 
     if (concurrentHealthChecks === "") return true;
     const num = Number(concurrentHealthChecks);
     return Number.isInteger(num) && num >= 1 && concurrentHealthChecks.trim() === num.toString();
+}
+
+function isValidHealthCheckTimeout(healthCheckTimeout: string): boolean {
+    if (healthCheckTimeout === "") return true;
+    const num = Number(healthCheckTimeout);
+    return Number.isInteger(num) && num >= 1 && healthCheckTimeout.trim() === num.toString();
 }
 
 function isValidMinCheckInterval(minCheckInterval: string): boolean {

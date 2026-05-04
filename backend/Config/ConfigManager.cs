@@ -373,6 +373,15 @@ public class ConfigManager
         ));
     }
 
+    public int GetHealthCheckTimeoutMinutes()
+    {
+        return Math.Max(1, int.Parse(
+            StringUtil.EmptyToNull(GetConfigValue("repair.health-check-timeout-minutes"))
+            ?? StringUtil.EmptyToNull(Environment.GetEnvironmentVariable("HEALTH_CHECK_TIMEOUT_MINUTES"))
+            ?? "30"
+        ));
+    }
+
     public bool IsRepairJobEnabled()
     {
         var defaultValue = false;

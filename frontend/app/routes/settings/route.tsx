@@ -57,6 +57,7 @@ const defaultConfig = {
     "arr.instances": "{\"RadarrInstances\":[],\"SonarrInstances\":[],\"QueueRules\":[]}",
     "repair.connections": "",
     "repair.concurrent-checks": "",
+    "repair.health-check-timeout-minutes": "",
     "repair.enable": "false",
     "repair.min-check-interval-days": "",
     "stats.enable": "false",

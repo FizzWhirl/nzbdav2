@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-ARR-REPAIR-SEARCH");
-            Log.Warning("  FIX: Repairs now trigger Arr replacement searches and remove remaining symlink/strm links.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-HEALTH-ADAPTIVE-TIMEOUT");
+            Log.Warning("  FIX: Large health checks now use segment-aware adaptive timeouts with a configurable minimum.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

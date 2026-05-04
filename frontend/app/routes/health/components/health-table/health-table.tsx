@@ -54,6 +54,7 @@ export function HealthTable({
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [localSearch, setLocalSearch] = useState(search);
     const totalPages = Math.ceil(totalCount / pageSize);
+    const orderedItems = [...healthCheckItems].sort(compareHealthQueueItems);
 
     useEffect(() => {
         setLocalSearch(search);
@@ -78,10 +79,10 @@ export function HealthTable({
     };
 
     const toggleSelectAll = () => {
-        if (selectedIds.size === healthCheckItems.length) {
+        if (selectedIds.size === orderedItems.length) {
             setSelectedIds(new Set());
         } else {
-            setSelectedIds(new Set(healthCheckItems.map(item => item.id)));
+            setSelectedIds(new Set(orderedItems.map(item => item.id)));
         }
     };
 
@@ -212,7 +213,7 @@ export function HealthTable({
                                     <th style={{ width: '40px' }}>
                                         <Form.Check
                                             type="checkbox"
-                                            checked={selectedIds.size === healthCheckItems.length && healthCheckItems.length > 0}
+                                            checked={selectedIds.size === orderedItems.length && orderedItems.length > 0}
                                             onChange={toggleSelectAll}
                                         />
                                     </th>
@@ -223,7 +224,7 @@ export function HealthTable({
                                 </tr>
                             </thead>
                             <tbody>
-                                {healthCheckItems.map(item => (
+                                {orderedItems.map(item => (
                                     <tr
                                         key={item.id}
                                         className={styles.tableRow}
@@ -405,3 +406,28 @@ function formatDateBadge(dateString: string | null, fallback: string, variant: '
     const dateText = formatDate(dateString, fallback);
     return <Badge bg={variant} className={styles.dateBadge}>{dateText}</Badge>;
 };
+
+function compareHealthQueueItems(a: HealthCheckQueueItem, b: HealthCheckQueueItem) {
+    const activeDiff = getQueueRank(a) - getQueueRank(b);
+    if (activeDiff !== 0) return activeDiff;
+
+    const nextDiff = getDueTimestamp(a.nextHealthCheck) - getDueTimestamp(b.nextHealthCheck);
+    if (nextDiff !== 0) return nextDiff;
+
+    const releaseDiff = getDueTimestamp(b.releaseDate) - getDueTimestamp(a.releaseDate);
+    if (releaseDiff !== 0) return releaseDiff;
+
+    return a.name.localeCompare(b.name);
+}
+
+function getQueueRank(item: HealthCheckQueueItem) {
+    if (item.progress !== 0) return 0;
+    if (getDueTimestamp(item.nextHealthCheck) <= Date.now()) return 1;
+    return 2;
+}
+
+function getDueTimestamp(value: string | null) {
+    if (!value) return 0;
+    const timestamp = new Date(value).getTime();
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+}

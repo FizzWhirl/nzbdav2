@@ -17,8 +17,9 @@ export function RemoveUnlinkedFiles({ savedConfig }: RemoveUnlinkedFilesProps) {
 
     // derived variables
     const libraryDir = savedConfig["media.library-dir"];
-    const isDone = progress?.startsWith("Done");
-    const isFinished = progress?.startsWith("Done") || progress?.startsWith("Failed") || progress?.startsWith("Aborted");
+    const normalizedProgress = progress?.replace(/^Dry Run -\s*/, "");
+    const isDone = normalizedProgress?.startsWith("Done");
+    const isFinished = normalizedProgress?.startsWith("Done") || normalizedProgress?.startsWith("Failed") || normalizedProgress?.startsWith("Aborted");
     const isRunning = !isFinished && (isFetching || progress !== null);
     const isRunButtonEnabled = !!libraryDir && connected && !isRunning;
     const runButtonVariant = isRunButtonEnabled ? 'success' : 'secondary';

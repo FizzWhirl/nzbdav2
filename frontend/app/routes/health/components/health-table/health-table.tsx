@@ -54,7 +54,13 @@ export function HealthTable({
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [localSearch, setLocalSearch] = useState(search);
     const totalPages = Math.ceil(totalCount / pageSize);
-    const orderedItems = [...healthCheckItems].sort(compareHealthQueueItems);
+    // The backend returns items in the same order the scheduler uses:
+    // NextHealthCheck ascending, then ReleaseDate descending, then Id.
+    // Only lift currently active WebSocket rows above that server order.
+    const orderedItems = healthCheckItems
+        .map((item, index) => ({ item, index }))
+        .sort(compareHealthQueueItems)
+        .map(({ item }) => item);
 
     useEffect(() => {
         setLocalSearch(search);
@@ -246,7 +252,7 @@ export function HealthTable({
                                                 <div className={item.jobName ? styles.fileNameSmall : styles.name}><Truncate>{item.name}</Truncate></div>
                                                 <div className={styles.metaRow}>
                                                     <span className={styles.path}><Truncate>{item.path}</Truncate></span>
-                                                    <span className={styles.createdDate}>Added {formatDate(item.releaseDate, 'Unknown')}</span>
+                                                    <span className={styles.createdDate}>Released {formatDate(item.releaseDate, 'Unknown')}</span>
                                                 </div>
                                                 <div className={styles.mobile}>
                                                     <DateDetailsTable item={item} onRunHealthCheck={onRunHealthCheck} onResetHealthStatus={onResetHealthStatus} />
@@ -407,27 +413,17 @@ function formatDateBadge(dateString: string | null, fallback: string, variant: '
     return <Badge bg={variant} className={styles.dateBadge}>{dateText}</Badge>;
 };
 
-function compareHealthQueueItems(a: HealthCheckQueueItem, b: HealthCheckQueueItem) {
-    const activeDiff = getQueueRank(a) - getQueueRank(b);
+function compareHealthQueueItems(
+    a: { item: HealthCheckQueueItem, index: number },
+    b: { item: HealthCheckQueueItem, index: number }
+) {
+    const activeDiff = getQueueRank(a.item) - getQueueRank(b.item);
     if (activeDiff !== 0) return activeDiff;
 
-    const nextDiff = getDueTimestamp(a.nextHealthCheck) - getDueTimestamp(b.nextHealthCheck);
-    if (nextDiff !== 0) return nextDiff;
-
-    const releaseDiff = getDueTimestamp(b.releaseDate) - getDueTimestamp(a.releaseDate);
-    if (releaseDiff !== 0) return releaseDiff;
-
-    return a.name.localeCompare(b.name);
+    return a.index - b.index;
 }
 
 function getQueueRank(item: HealthCheckQueueItem) {
     if (item.progress !== 0) return 0;
-    if (getDueTimestamp(item.nextHealthCheck) <= Date.now()) return 1;
-    return 2;
-}
-
-function getDueTimestamp(value: string | null) {
-    if (!value) return 0;
-    const timestamp = new Date(value).getTime();
-    return Number.isNaN(timestamp) ? 0 : timestamp;
+    return 1;
 }

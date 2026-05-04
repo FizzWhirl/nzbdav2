@@ -74,7 +74,7 @@ class Program
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
             Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-ARR-REPAIR-SEARCH");
-            Log.Warning("  FIX: Repairs now explicitly trigger Sonarr/Radarr replacement searches after deleting failed files.");
+            Log.Warning("  FIX: Repairs now trigger Arr replacement searches and remove remaining symlink/strm links.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

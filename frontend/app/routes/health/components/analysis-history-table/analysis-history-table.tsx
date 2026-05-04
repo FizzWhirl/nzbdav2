@@ -8,16 +8,18 @@ interface Props {
     page: number;
     search: string;
     showFailedOnly: boolean;
+    showActionNeededOnly: boolean;
     typeFilter: string;
     onPageChange: (page: number) => void;
     onSearchChange: (search: string) => void;
     onShowFailedOnlyChange: (showFailedOnly: boolean) => void;
+    onShowActionNeededOnlyChange: (showActionNeededOnly: boolean) => void;
     onTypeFilterChange: (typeFilter: string) => void;
     onAnalyze: (id: string) => void;
     onItemClick: (item: AnalysisHistoryItem) => void;
 }
 
-export function AnalysisHistoryTable({ items, page, search, showFailedOnly, typeFilter, onPageChange, onSearchChange, onShowFailedOnlyChange, onTypeFilterChange, onAnalyze, onItemClick }: Props) {
+export function AnalysisHistoryTable({ items, page, search, showFailedOnly, showActionNeededOnly, typeFilter, onPageChange, onSearchChange, onShowFailedOnlyChange, onShowActionNeededOnlyChange, onTypeFilterChange, onAnalyze, onItemClick }: Props) {
     return (
         <div>
             <div className="d-flex justify-content-between align-items-center mb-3">
@@ -47,6 +49,14 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, type
                         label="Show Failed Only"
                         checked={showFailedOnly}
                         onChange={(e) => onShowFailedOnlyChange(e.target.checked)}
+                        style={{ whiteSpace: "nowrap", minWidth: "max-content" }}
+                    />
+                    <Form.Check
+                        type="checkbox"
+                        id="show-action-needed-only"
+                        label="Action Needed Only"
+                        checked={showActionNeededOnly}
+                        onChange={(e) => onShowActionNeededOnlyChange(e.target.checked)}
                         style={{ whiteSpace: "nowrap", minWidth: "max-content" }}
                     />
                 </div>
@@ -119,9 +129,7 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, type
                                     {item.details || "-"}
                                 </td>
                                 <td>
-                                    {item.isRemoved ? (
-                                        <Badge bg="secondary">Removed</Badge>
-                                    ) : (
+                                    {!item.isRemoved && (
                                         <Button
                                             variant="outline-primary"
                                             size="sm"

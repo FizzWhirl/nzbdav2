@@ -164,4 +164,5 @@ export type AnalysisHistoryItem = {
     durationMs: number;
     type?: string | null;
     isRemoved?: boolean;
+    isActionNeeded?: boolean;
 }

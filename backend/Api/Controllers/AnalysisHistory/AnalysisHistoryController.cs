@@ -12,7 +12,7 @@ namespace NzbWebDAV.Api.Controllers.AnalysisHistory;
 public class AnalysisHistoryController(DavDatabaseContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<List<AnalysisHistoryResponseItem>>> GetHistory([FromQuery] int page = 0, [FromQuery] int pageSize = 100, [FromQuery] string? search = null, [FromQuery] bool showFailedOnly = false, [FromQuery] string? type = null)
+    public async Task<ActionResult<List<AnalysisHistoryResponseItem>>> GetHistory([FromQuery] int page = 0, [FromQuery] int pageSize = 100, [FromQuery] string? search = null, [FromQuery] bool showFailedOnly = false, [FromQuery] string? type = null, [FromQuery] bool showActionNeededOnly = false)
     {
         var apiKey = HttpContext.GetRequestApiKey();
         if (apiKey == null || apiKey != EnvironmentUtil.GetVariable("FRONTEND_BACKEND_API_KEY"))
@@ -31,6 +31,15 @@ public class AnalysisHistoryController(DavDatabaseContext db) : ControllerBase
         if (showFailedOnly)
         {
             query = query.Where(x => x.Result == "Failed");
+        }
+
+        if (showActionNeededOnly)
+        {
+            query = query.Where(x => db.HealthCheckResults
+                .Where(r => r.DavItemId == x.DavItemId)
+                .OrderByDescending(r => r.CreatedAt)
+                .Select(r => r.RepairStatus)
+                .FirstOrDefault() == HealthCheckResult.RepairAction.ActionNeeded);
         }
 
         var normalizedType = NormalizeHistoryType(type);
@@ -52,21 +61,21 @@ public class AnalysisHistoryController(DavDatabaseContext db) : ControllerBase
             .Select(x => new { x.Id, x.Path })
             .ToDictionaryAsync(x => x.Id, x => x.Path);
 
-        var healthPaths = await db.HealthCheckResults
+        var healthRows = await db.HealthCheckResults
             .AsNoTracking()
             .Where(x => itemIds.Contains(x.DavItemId))
             .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new { x.DavItemId, x.Path })
+            .Select(x => new { x.DavItemId, x.Path, x.RepairStatus })
             .ToListAsync();
-        var latestHealthPathByItemId = healthPaths
+        var latestHealthByItemId = healthRows
             .GroupBy(x => x.DavItemId)
-            .ToDictionary(x => x.Key, x => x.First().Path);
+            .ToDictionary(x => x.Key, x => x.First());
 
         var response = items.Select(item =>
         {
             itemPaths.TryGetValue(item.DavItemId, out var currentPath);
-            latestHealthPathByItemId.TryGetValue(item.DavItemId, out var healthPath);
-            var jobName = JobNameUtil.PreferJobName(item.JobName, item.FileName, currentPath ?? healthPath);
+            latestHealthByItemId.TryGetValue(item.DavItemId, out var latestHealth);
+            var jobName = JobNameUtil.PreferJobName(item.JobName, item.FileName, currentPath ?? latestHealth?.Path);
 
             return new AnalysisHistoryResponseItem
             {
@@ -79,7 +88,8 @@ public class AnalysisHistoryController(DavDatabaseContext db) : ControllerBase
                 Details = item.Details,
                 DurationMs = item.DurationMs,
                 Type = GetHistoryType(item.Details),
-                IsRemoved = !itemPaths.ContainsKey(item.DavItemId)
+                IsRemoved = !itemPaths.ContainsKey(item.DavItemId),
+                IsActionNeeded = latestHealth?.RepairStatus == HealthCheckResult.RepairAction.ActionNeeded
             };
         }).ToList();
 
@@ -151,4 +161,5 @@ public class AnalysisHistoryResponseItem
     public long DurationMs { get; set; }
     public required string Type { get; set; }
     public bool IsRemoved { get; set; }
+    public bool IsActionNeeded { get; set; }
 }

@@ -37,6 +37,8 @@ public class HealthCheckService
     private readonly ConcurrentDictionary<Guid, int> _timeoutCounts = new();
     private readonly ConcurrentDictionary<Guid, byte> _processingIds = new();
 
+    public HashSet<Guid> GetActiveHealthCheckItemIds() => _processingIds.Keys.ToHashSet();
+
     public HealthCheckService
     (
         ConfigManager configManager,

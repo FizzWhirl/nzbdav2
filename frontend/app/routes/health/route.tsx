@@ -7,7 +7,7 @@ import { AnalysisTable } from "./components/analysis-table/analysis-table";
 import { AnalysisHistoryTable } from "./components/analysis-history-table/analysis-history-table";
 import { HealthStats } from "./components/health-stats/health-stats";
 import { FileDetailsModal } from "./components/file-details-modal/file-details-modal";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { createWebsocketBackoff, getBrowserWebsocketUrl, receiveMessage } from "~/utils/websocket-util";
 import { Alert, Tabs, Tab } from "react-bootstrap";
@@ -31,9 +31,13 @@ const topicSubscriptions = {
     [topicNames.analysisItemProgress]: 'event',
 }
 
+function getRemovedFileDetailsMessage(context?: { fileName?: string | null }) {
+    return `This history row refers to ${context?.fileName ? `"${context.fileName}"` : 'a file'} that has already been removed from NzbDav, usually because health repair deleted it and triggered a replacement search. Details are no longer available for removed items.`;
+}
+
 function getFileDetailsErrorMessage(status: number, context?: { fileName?: string | null, isRemoved?: boolean }) {
-    if (status === 404 && context?.isRemoved) {
-        return `This history row refers to ${context.fileName ? `"${context.fileName}"` : 'a file'} that has already been removed from NzbDav, usually because health repair deleted it and triggered a replacement search. Details are no longer available for removed items.`;
+    if (context?.isRemoved) {
+        return getRemovedFileDetailsMessage(context);
     }
 
     if (status === 404) {
@@ -94,10 +98,12 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     const [ahPage, setAhPage] = useState(0);
     const [ahSearch, setAhSearch] = useState("");
     const [ahShowFailedOnly, setAhShowFailedOnly] = useState(false);
+    const [ahShowActionNeededOnly, setAhShowActionNeededOnly] = useState(false);
     const [ahTypeFilter, setAhTypeFilter] = useState("all");
     const [refreshHistoryTrigger, setRefreshHistoryTrigger] = useState(0);
     const [searchParams, setSearchParams] = useSearchParams();
     const activeTab = searchParams.get("tab") || "health";
+    const didSkipInitialQueueFetch = useRef(false);
 
     const [showDetailsModal, setShowDetailsModal] = useState(false);
     const [selectedFileDetails, setSelectedFileDetails] = useState<FileDetails | null>(null);
@@ -107,6 +113,11 @@ export default function Health({ loaderData }: Route.ComponentProps) {
 
     // effects
     useEffect(() => {
+        if (!didSkipInitialQueueFetch.current) {
+            didSkipInitialQueueFetch.current = true;
+            return;
+        }
+
         const refetchData = async () => {
             var response = await fetch(`/api/get-health-check-queue?pageSize=30&page=${page}&search=${encodeURIComponent(search)}&showAll=${showAll}&showFailed=${showFailed}&showUnhealthy=${showUnhealthy}`);
             if (response.ok) {
@@ -123,7 +134,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     useEffect(() => {
         const fetchHistory = async () => {
             try {
-                const response = await fetch(`/api/analysis-history?page=${ahPage}&pageSize=100&search=${encodeURIComponent(ahSearch)}&showFailedOnly=${ahShowFailedOnly}&type=${encodeURIComponent(ahTypeFilter)}`);
+                const response = await fetch(`/api/analysis-history?page=${ahPage}&pageSize=100&search=${encodeURIComponent(ahSearch)}&showFailedOnly=${ahShowFailedOnly}&type=${encodeURIComponent(ahTypeFilter)}&showActionNeededOnly=${ahShowActionNeededOnly}`);
                 if (response.ok) {
                     setAnalysisHistory(await response.json());
                 }
@@ -132,7 +143,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
             }
         };
         fetchHistory();
-    }, [ahPage, ahSearch, ahShowFailedOnly, ahTypeFilter, refreshHistoryTrigger]);
+    }, [ahPage, ahSearch, ahShowFailedOnly, ahShowActionNeededOnly, ahTypeFilter, refreshHistoryTrigger]);
 
     // events
     const onHealthItemStatus = useCallback(async (message: string) => {
@@ -303,6 +314,12 @@ export default function Health({ loaderData }: Route.ComponentProps) {
         setSelectedFileDetails(null);
         setFileDetailsError(null);
 
+        if (context?.isRemoved) {
+            setFileDetailsError(getRemovedFileDetailsMessage(context));
+            setLoadingFileDetails(false);
+            return;
+        }
+
         try {
             const response = await fetch(`/api/file-details/${davItemId}`);
             if (response.ok) {
@@ -315,7 +332,9 @@ export default function Health({ loaderData }: Route.ComponentProps) {
             }
         } catch (error) {
             console.error('Error fetching file details:', error);
-            setFileDetailsError('File details could not be loaded because the request failed. Check the backend logs for details.');
+            setFileDetailsError(context?.isRemoved
+                ? getRemovedFileDetailsMessage(context)
+                : 'File details could not be loaded because the request failed. Check the backend logs for details.');
         } finally {
             setLoadingFileDetails(false);
         }
@@ -537,10 +556,12 @@ export default function Health({ loaderData }: Route.ComponentProps) {
                                                 page={ahPage}
                                                 search={ahSearch}
                                                 showFailedOnly={ahShowFailedOnly}
+                                                showActionNeededOnly={ahShowActionNeededOnly}
                                                 typeFilter={ahTypeFilter}
                                                 onPageChange={setAhPage}
                                                 onSearchChange={(s) => { setAhSearch(s); setAhPage(0); }}
                                                 onShowFailedOnlyChange={(val) => { setAhShowFailedOnly(val); setAhPage(0); }}
+                                                onShowActionNeededOnlyChange={(val) => { setAhShowActionNeededOnly(val); setAhPage(0); }}
                                                 onTypeFilterChange={(val) => { setAhTypeFilter(val); setAhPage(0); }}
                                                 onAnalyze={onAnalyze}
                                                 onItemClick={onAnalysisHistoryItemClick}

@@ -9,11 +9,12 @@ namespace NzbWebDAV.Api.Controllers.GetHealthCheckQueue;
 
 [ApiController]
 [Route("api/get-health-check-queue")]
-public class GetHealthCheckQueueController(DavDatabaseClient dbClient) : BaseApiController
+public class GetHealthCheckQueueController(DavDatabaseClient dbClient, HealthCheckService healthCheckService) : BaseApiController
 {
     private async Task<GetHealthCheckQueueResponse> GetHealthCheckQueue(GetHealthCheckQueueRequest request)
     {
         var query = HealthCheckService.GetHealthCheckQueueItems(dbClient);
+        var activeItemIds = healthCheckService.GetActiveHealthCheckItemIds();
 
         if (request.ShowFailed)
         {
@@ -98,7 +99,7 @@ public class GetHealthCheckQueueController(DavDatabaseClient dbClient) : BaseApi
                     LastHealthCheck = x.LastHealthCheck,
                     NextHealthCheck = x.NextHealthCheck == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : x.NextHealthCheck,
                     OperationType = x.NextHealthCheck == DateTimeOffset.MinValue ? "HEAD" : "STAT", // Urgent checks use HEAD, routine use STAT
-                    Progress = 0, // Active progress is tracked via WebSocket during health checks
+                    Progress = activeItemIds.Contains(x.Id) ? -1 : 0, // Active progress is refined via WebSocket during health checks
                     LatestResult = result?.Result.ToString() ?? (x.IsCorrupted ? "Unhealthy" : null)
                 };
             }).ToList(),

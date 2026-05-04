@@ -8,6 +8,7 @@ export type HealthCheckResult = {
     result: number;
     repairStatus: number;
     message: string | null;
+    operation?: string | null;
     jobName?: string | null;
 }
 
@@ -22,6 +23,10 @@ export type MissingArticleItem = {
     operationCounts: Record<string, number>;
     hasBlockingMissingArticles: boolean;
     isImported: boolean;
+    latestHealthResult?: string | null;
+    latestHealthOperation?: string | null;
+    latestHealthMessage?: string | null;
+    latestHealthCheck?: string | null;
 }
 
 export type MappedFile = {

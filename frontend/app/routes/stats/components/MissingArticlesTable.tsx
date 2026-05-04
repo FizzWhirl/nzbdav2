@@ -151,6 +151,22 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
         </Tooltip>
     );
 
+    const renderStatusTooltip = (item: MissingArticleItem, isCritical: boolean, latestIsHealthy: boolean) => (
+        <Tooltip>
+            {latestIsHealthy ? (
+                <>
+                    Latest {getHealthOperationText(item.latestHealthOperation)} health check passed{item.latestHealthCheck ? ` at ${formatTimeOnly(item.latestHealthCheck)}` : ''}.
+                    {' '}This row is historical diagnostic evidence, not the current corruption state.
+                    {item.latestHealthOperation === 'STAT' && ' STAT checks confirm article metadata exists but do not clear historical streaming/body errors.'}
+                </>
+            ) : isCritical ? (
+                <>A definitive missing-article operation has evidence for at least one segment failing across all providers.</>
+            ) : (
+                <>Missing-article or playback-failure evidence exists, but it is not definitive proof that the file is missing across all providers.</>
+            )}
+        </Tooltip>
+    );
+
     const confirmRepair = (e: React.FormEvent<HTMLFormElement>) => {
         addToast(`Repair triggered for ${selectedItems.size} item(s)`, "info", "Action Triggered");
     };
@@ -293,6 +309,7 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
                             items.map((item) => {
                                 const providerCount = Object.keys(item.providerCounts).length;
                                 const isCritical = item.hasBlockingMissingArticles;
+                                const latestIsHealthy = item.latestHealthResult === "Healthy";
                                 const displayFilename = item.filename.split('/').pop() || item.filename;
                                 const key = `${item.jobName}-${item.filename}`; // Use filename as key instead of davItemId
                                 const canOpenDetails = !!onFileClick && !!item.davItemId;
@@ -339,9 +356,9 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
                                         </td>
                                         <td>
                                             <div className="d-flex gap-1">
-                                                <OverlayTrigger placement="top" overlay={renderProviderTooltip(item.providerCounts)}>
-                                                    <span className={`badge ${isCritical ? 'bg-danger' : 'bg-warning text-dark'}`}>
-                                                        {isCritical ? "Broken" : "Partial"}
+                                                <OverlayTrigger placement="top" overlay={renderStatusTooltip(item, isCritical, latestIsHealthy)}>
+                                                    <span className={`badge ${latestIsHealthy ? 'bg-success' : isCritical ? 'bg-danger' : 'bg-warning text-dark'}`}>
+                                                        {latestIsHealthy ? `${getHealthOperationText(item.latestHealthOperation)} Healthy` : isCritical ? "Broken" : "Partial"}
                                                     </span>
                                                 </OverlayTrigger>
 
@@ -351,8 +368,8 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
                                                         overlay={
                                                             <Tooltip id={`truncated-tip-${key}`}>
                                                                 Stream was truncated mid-playback after the graceful-degradation cap was exceeded.
-                                                                {' '}{item.operationCounts["STREAM_TRUNCATED"]} segment(s) recorded as failed across all providers
-                                                                via the truncation dump (in addition to any per-provider <code>ARTICLE_RETRIEVAL</code> events).
+                                                                {' '}{item.operationCounts["STREAM_TRUNCATED"]} provider diagnostic event(s) were recorded.
+                                                                {' '}Truncation is retained for troubleshooting, but by itself is not treated as definitive missing-on-all-providers evidence.
                                                             </Tooltip>
                                                         }
                                                     >
@@ -450,4 +467,13 @@ export function MissingArticlesTable({ items, providers, totalCount, page, searc
             </div>
         </div>
     );
+}
+
+function getHealthOperationText(operation: string | null | undefined) {
+    switch ((operation || '').toUpperCase()) {
+        case 'HEAD': return 'HEAD';
+        case 'STAT_FALLBACK': return 'HEAD→STAT';
+        case 'STAT': return 'STAT';
+        default: return 'Health';
+    }
 }

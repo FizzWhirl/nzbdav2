@@ -244,6 +244,7 @@ public class GetFileDetailsController(
                 Result = latestHealthCheck.Result,
                 RepairStatus = latestHealthCheck.RepairStatus,
                 Message = latestHealthCheck.Message,
+                Operation = latestHealthCheck.Operation,
                 CreatedAt = latestHealthCheck.CreatedAt
             } : null
         };

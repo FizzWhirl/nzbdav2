@@ -151,7 +151,10 @@ public class ProviderErrorService : IDisposable
                         if (!operationCounts.ContainsKey(op)) operationCounts[op] = 0;
                         operationCounts[op]++;
 
-                        if (!string.IsNullOrWhiteSpace(evt.SegmentId) && evt.ProviderIndex >= 0 && evt.ProviderIndex < 31)
+                        if (IsDefinitiveMissingEvidenceOperation(evt.Operation)
+                            && !string.IsNullOrWhiteSpace(evt.SegmentId)
+                            && evt.ProviderIndex >= 0
+                            && evt.ProviderIndex < 31)
                         {
                             segmentEvidence.TryGetValue(evt.SegmentId, out var mask);
                             segmentEvidence[evt.SegmentId] = mask | (1 << evt.ProviderIndex);
@@ -270,6 +273,15 @@ public class ProviderErrorService : IDisposable
         {
             segmentEvidence.Remove(key);
         }
+    }
+
+    private static bool IsDefinitiveMissingEvidenceOperation(string? operation)
+    {
+        // STREAM_TRUNCATED is a playback outcome after the graceful-degradation cap
+        // is exceeded. It may be caused by transient provider timeouts or stream
+        // errors, so keep it in the ledger for diagnostics but do not use it as
+        // proof that an article is missing across every provider.
+        return !string.Equals(operation, "STREAM_TRUNCATED", StringComparison.OrdinalIgnoreCase);
     }
 
     private string ExtractJobName(string filename)
@@ -619,9 +631,30 @@ public class ProviderErrorService : IDisposable
                 .ToListAsync()
                 .ConfigureAwait(false);
 
+            var itemIds = result
+                .Select(x => x.s.DavItemId)
+                .Where(x => x != Guid.Empty)
+                .Distinct()
+                .ToList();
+            var latestHealthRows = await dbContext.HealthCheckResults
+                .AsNoTracking()
+                .Where(x => itemIds.Contains(x.DavItemId))
+                .OrderByDescending(x => x.CreatedAt)
+                .Select(x => new { x.DavItemId, x.Result, x.Operation, x.Message, x.CreatedAt })
+                .ToListAsync()
+                .ConfigureAwait(false);
+            var latestHealthByItemId = latestHealthRows
+                .GroupBy(x => x.DavItemId)
+                .ToDictionary(x => x.Key, x => x.First());
+
             var items = result.Select(x => {
                 var rcloneMountDir = configManager.GetRcloneMountDir();
                 string? davItemInternalPath = null;
+                var operationCounts = !string.IsNullOrWhiteSpace(x.s.OperationCountsJson)
+                    ? (JsonSerializer.Deserialize<Dictionary<string, int>>(x.s.OperationCountsJson) ?? new())
+                    : new Dictionary<string, int>();
+                var hasDefinitiveMissingEvidence = operationCounts.Keys.Any(IsDefinitiveMissingEvidenceOperation);
+                latestHealthByItemId.TryGetValue(x.s.DavItemId, out var latestHealth);
 
                 if (x.s.DavItemId != Guid.Empty && rcloneMountDir != null)
                 {
@@ -649,14 +682,16 @@ public class ProviderErrorService : IDisposable
                     ProviderCounts = !string.IsNullOrWhiteSpace(x.s.ProviderCountsJson) 
                         ? (JsonSerializer.Deserialize<Dictionary<int, int>>(x.s.ProviderCountsJson) ?? new()) 
                         : new(),
-                    OperationCounts = !string.IsNullOrWhiteSpace(x.s.OperationCountsJson) 
-                        ? (JsonSerializer.Deserialize<Dictionary<string, int>>(x.s.OperationCountsJson) ?? new()) 
-                        : new(),
+                    OperationCounts = operationCounts,
                     EvidenceSegmentCount = !string.IsNullOrWhiteSpace(x.s.SegmentProviderEvidenceJson)
                         ? (JsonSerializer.Deserialize<Dictionary<string, int>>(x.s.SegmentProviderEvidenceJson) ?? new()).Count
                         : 0,
-                    HasBlockingMissingArticles = x.s.HasBlockingMissingArticles,
-                    IsImported = x.IsImported // Use dynamic value
+                    HasBlockingMissingArticles = x.s.HasBlockingMissingArticles && hasDefinitiveMissingEvidence,
+                    IsImported = x.IsImported, // Use dynamic value
+                    LatestHealthResult = latestHealth?.Result.ToString(),
+                    LatestHealthOperation = latestHealth?.Operation,
+                    LatestHealthMessage = latestHealth?.Message,
+                    LatestHealthCheck = latestHealth?.CreatedAt
                 };
             }).ToList();
 
@@ -749,6 +784,58 @@ public class ProviderErrorService : IDisposable
         catch (Exception ex)
         {
             Log.Error(ex, $"Failed to clear missing article events for file: {filePath}");
+        }
+    }
+
+    public async Task ClearErrorsForItem(Guid davItemId, string? filePath, string? fileName)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
+
+            var candidates = new HashSet<string>(StringComparer.Ordinal);
+            if (!string.IsNullOrWhiteSpace(filePath))
+            {
+                candidates.Add(filePath);
+                candidates.Add(NormalizeFilenameForGrouping(filePath));
+            }
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                candidates.Add(fileName);
+                candidates.Add(NormalizeFilenameForGrouping(fileName));
+            }
+
+            if (davItemId != Guid.Empty)
+            {
+                var summaryFilenames = await dbContext.MissingArticleSummaries
+                    .AsNoTracking()
+                    .Where(x => x.DavItemId == davItemId)
+                    .Select(x => x.Filename)
+                    .ToListAsync()
+                    .ConfigureAwait(false);
+
+                foreach (var summaryFilename in summaryFilenames)
+                {
+                    candidates.Add(summaryFilename);
+                }
+            }
+
+            await dbContext.MissingArticleEvents
+                .Where(x => candidates.Contains(x.Filename))
+                .ExecuteDeleteAsync()
+                .ConfigureAwait(false);
+
+            await dbContext.MissingArticleSummaries
+                .Where(x => candidates.Contains(x.Filename))
+                .ExecuteDeleteAsync()
+                .ConfigureAwait(false);
+
+            Log.Information("Cleared missing article events/summary for item {DavItemId} ({FilePath})", davItemId, filePath ?? fileName);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to clear missing article events for item {DavItemId} ({FilePath})", davItemId, filePath ?? fileName);
         }
     }
 

@@ -499,6 +499,14 @@ export function FileDetailsModal({ show, onHide, fileDetails, loading, errorMess
                                                 </td>
                                             </tr>
                                             <tr>
+                                                <td className={styles.labelCell}>Check Type</td>
+                                                <td className={styles.valueCell}>
+                                                    <Badge bg={getHealthOperationColor(fileDetails.latestHealthCheckResult.operation)}>
+                                                        {getHealthOperationText(fileDetails.latestHealthCheckResult.operation)}
+                                                    </Badge>
+                                                </td>
+                                            </tr>
+                                            <tr>
                                                 <td className={styles.labelCell}>Repair Status</td>
                                                 <td className={styles.valueCell}>
                                                     <Badge bg={getRepairStatusColor(fileDetails.latestHealthCheckResult.repairStatus)}>
@@ -847,6 +855,24 @@ function getRepairStatusText(status: number): string {
         case 2: return 'Deleted';
         case 3: return 'Action Needed';
         default: return 'Unknown';
+    }
+}
+
+function getHealthOperationColor(operation: string | undefined): string {
+    switch ((operation || '').toUpperCase()) {
+        case 'HEAD': return 'danger';
+        case 'STAT_FALLBACK': return 'warning';
+        case 'STAT': return 'secondary';
+        default: return 'secondary';
+    }
+}
+
+function getHealthOperationText(operation: string | undefined): string {
+    switch ((operation || '').toUpperCase()) {
+        case 'HEAD': return 'HEAD';
+        case 'STAT_FALLBACK': return 'HEAD → STAT fallback';
+        case 'STAT': return 'STAT';
+        default: return operation || 'Unknown';
     }
 }
 

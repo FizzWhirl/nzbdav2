@@ -48,6 +48,7 @@ public class GetFileDetailsResponse
         public HealthCheckResult.HealthResult Result { get; set; }
         public HealthCheckResult.RepairAction RepairStatus { get; set; }
         public string? Message { get; set; }
+        public string Operation { get; set; } = "UNKNOWN";
         public DateTimeOffset CreatedAt { get; set; }
     }
 }

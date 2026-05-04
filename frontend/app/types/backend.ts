@@ -139,6 +139,7 @@ export type HealthCheckInfoType = {
     result: number;
     repairStatus: number;
     message: string | null;
+    operation: string;
     createdAt: string;
 }
 

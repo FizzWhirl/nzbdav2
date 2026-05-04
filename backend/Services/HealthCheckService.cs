@@ -172,6 +172,13 @@ public class HealthCheckService
             
             await PerformHealthCheck(davItem, dbClient, concurrency, cts.Token, useHead).ConfigureAwait(false);
 
+            var latestHealthCheck = await dbClient.Ctx.HealthCheckResults
+                .AsNoTracking()
+                .Where(x => x.DavItemId == davItem.Id)
+                .OrderByDescending(x => x.CreatedAt)
+                .FirstOrDefaultAsync(cts.Token)
+                .ConfigureAwait(false);
+
             // Success! Remove from timeout tracking
             _timeoutCounts.TryRemove(davItem.Id, out _);
 
@@ -184,7 +191,7 @@ public class HealthCheckService
                 Log.Information("[HealthCheck] Finished item: {Name}. Result: Unhealthy (Repair removed item and triggered replacement workflow)", davItem.Name);
                 await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, jobName,
                     "Failed",
-                    "Health check failed: articles were missing or unavailable; repair removed the item and triggered replacement workflow.").ConfigureAwait(false);
+                    latestHealthCheck?.Message ?? "Health check failed: articles were missing or unavailable; repair removed the item and triggered replacement workflow.").ConfigureAwait(false);
                 return;
             }
 
@@ -196,15 +203,16 @@ public class HealthCheckService
             await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, jobName,
                 davItem.IsCorrupted ? "Failed" : "Success",
                 davItem.IsCorrupted
-                    ? "Health check failed: articles were missing or unavailable; repair workflow was attempted."
-                    : "Health check completed: all required articles were available.").ConfigureAwait(false);
+                    ? latestHealthCheck?.Message ?? "Health check failed: articles were missing or unavailable; repair workflow was attempted."
+                    : latestHealthCheck?.Message ?? "Health check completed: all required articles were available.").ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!_cancellationToken.IsCancellationRequested)
         {
             // Handle per-item timeout
+            var operation = itemInfo.NextHealthCheck == DateTimeOffset.MinValue ? "HEAD" : "STAT";
             await HandleTimeout(itemInfo.Id, itemInfo.Name, itemInfo.Path, itemInfo.NextHealthCheck == DateTimeOffset.MinValue);
             await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, JobNameUtil.FromDavPath(itemInfo.Path) ?? itemInfo.Name,
-                "Failed", "Health check failed: timed out before all articles could be verified.").ConfigureAwait(false);
+                "Failed", $"{operation} health check failed: timed out before all articles could be verified.").ConfigureAwait(false);
         }
         catch (Exception e)
         {
@@ -220,6 +228,7 @@ public class HealthCheckService
 
             try
             {
+                var operation = itemInfo.NextHealthCheck == DateTimeOffset.MinValue ? "HEAD" : "STAT";
                 var utcNow = DateTimeOffset.UtcNow;
                 await SaveFailureStateWithResultAsync(
                     itemInfo.Id,
@@ -228,15 +237,17 @@ public class HealthCheckService
                     utcNow.AddDays(1),
                     true,
                     e.Message,
-                    $"Unexpected error: {e.Message}").ConfigureAwait(false);
+                    $"{operation} health check failed: unexpected error while verifying articles ({e.Message}).",
+                    operation).ConfigureAwait(false);
             }
             catch (Exception dbEx)
             {
                 Log.Error(dbEx, "[HealthCheck] Failed to save error status to database.");
             }
 
+            var analysisOperation = itemInfo.NextHealthCheck == DateTimeOffset.MinValue ? "HEAD" : "STAT";
             await SaveHealthCheckToAnalysisHistoryAsync(itemInfo.Id, itemInfo.Name, JobNameUtil.FromDavPath(itemInfo.Path) ?? itemInfo.Name,
-                "Failed", $"Health check failed: unexpected error while verifying articles ({e.Message}).").ConfigureAwait(false);
+                "Failed", $"{analysisOperation} health check failed: unexpected error while verifying articles ({e.Message}).").ConfigureAwait(false);
         }
         finally
         {
@@ -247,6 +258,7 @@ public class HealthCheckService
     private async Task HandleTimeout(Guid itemId, string name, string path, bool wasUrgent)
     {
         var timeouts = _timeoutCounts.AddOrUpdate(itemId, 1, (_, count) => count + 1);
+        var operation = wasUrgent ? "HEAD" : "STAT";
 
         if (timeouts >= 2)
         {
@@ -257,7 +269,7 @@ public class HealthCheckService
             {
                 var utcNow = DateTimeOffset.UtcNow;
                 var nextCheck = utcNow.AddDays(1);
-                const string message = "Health check timed out repeatedly (likely due to slow download or hanging).";
+                var message = $"{operation} health check timed out repeatedly (likely due to slow download or hanging).";
                 await SaveFailureStateWithResultAsync(
                     itemId,
                     path,
@@ -265,7 +277,8 @@ public class HealthCheckService
                     nextCheck,
                     true,
                     message,
-                    message).ConfigureAwait(false);
+                    message,
+                    operation).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -321,6 +334,7 @@ public class HealthCheckService
         bool isCorrupted,
         string? corruptionReason,
         string resultMessage,
+        string operation = "UNKNOWN",
         CancellationToken ct = default)
     {
         await using var dbContext = new DavDatabaseContext();
@@ -344,7 +358,8 @@ public class HealthCheckService
             CreatedAt = utcNow,
             Result = HealthCheckResult.HealthResult.Unhealthy,
             RepairStatus = HealthCheckResult.RepairAction.ActionNeeded,
-            Message = resultMessage
+            Message = resultMessage,
+            Operation = operation
         }));
 
         await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -390,6 +405,7 @@ public class HealthCheckService
     )
     {
         List<string> segments = [];
+        var requestedOperation = useHead ? "HEAD" : "STAT";
         try
         {
             // Check if item is mapped (exists in LocalLinks table)
@@ -411,7 +427,8 @@ public class HealthCheckService
                     CreatedAt = DateTimeOffset.UtcNow,
                     Result = HealthCheckResult.HealthResult.Skipped,
                     RepairStatus = HealthCheckResult.RepairAction.None,
-                    Message = "Health check skipped: file is not mapped in the organized library."
+                    Message = $"{requestedOperation} health check skipped: file is not mapped in the organized library.",
+                    Operation = requestedOperation
                 }));
                 await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
                 return;
@@ -438,7 +455,8 @@ public class HealthCheckService
                     CreatedAt = DateTimeOffset.UtcNow,
                     Result = HealthCheckResult.HealthResult.Skipped,
                     RepairStatus = HealthCheckResult.RepairAction.None,
-                    Message = "Health check skipped: no NZB segments were found for this item."
+                    Message = $"{requestedOperation} health check skipped: no NZB segments were found for this item.",
+                    Operation = requestedOperation
                 }));
                 await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
                 return;
@@ -462,7 +480,7 @@ public class HealthCheckService
             };
 
             // perform health check
-            Log.Debug($"[HealthCheck] Verifying segments for {davItem.Name} using {(useHead ? "HEAD" : "STAT")}...");
+            Log.Debug($"[HealthCheck] Verifying segments for {davItem.Name} using {requestedOperation}...");
             var progress = progressHook.ToPercentage(segments.Count);
             var isImported = OrganizedLinksUtil.GetLink(davItem, _configManager, allowScan: false) != null;
             using var healthCheckCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -473,8 +491,11 @@ public class HealthCheckService
             var normalizedAffinityKey2 = FilenameNormalizer.NormalizeName(rawAffinityKey2);
             using var contextScope = healthCheckCts.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.HealthCheck, new ConnectionUsageDetails { Text = davItem.Path, JobName = davItem.Name, AffinityKey = normalizedAffinityKey2, IsImported = isImported, DavItemId = davItem.Id }));
             Log.Information("[HealthCheck] Verifying {SegmentCount} segments for {Name} using {Operation}. Timeout: {Timeout}m. Concurrency: {Concurrency}",
-                segments.Count, davItem.Name, useHead ? "HEAD" : "STAT", timeoutMinutes, concurrency);
+                segments.Count, davItem.Name, requestedOperation, timeoutMinutes, concurrency);
             var sizes = await _usenetClient.CheckAllSegmentsAsync(segments, concurrency, progress, healthCheckCts.Token, useHead).ConfigureAwait(false);
+            var actualOperation = useHead
+                ? sizes != null ? "HEAD" : "STAT_FALLBACK"
+                : "STAT";
 
             // If we did a HEAD check, we now have the segment sizes. Cache them for faster seeking.
             if (useHead && sizes != null && davItem.Type == DavItem.ItemType.NzbFile)
@@ -485,6 +506,11 @@ public class HealthCheckService
                     nzbFile.SetSegmentSizes(sizes);
                     Log.Debug($"[HealthCheck] Cached {sizes.Length} segment sizes for {davItem.Name}");
                 }
+            }
+
+            if (actualOperation == "HEAD")
+            {
+                await _providerErrorService.ClearErrorsForItem(davItem.Id, davItem.Path, davItem.Name).ConfigureAwait(false);
             }
 
             Log.Debug($"[HealthCheck] Segments verified for {davItem.Name}. Updating database...");
@@ -530,7 +556,8 @@ public class HealthCheckService
                 CreatedAt = DateTimeOffset.UtcNow,
                 Result = HealthCheckResult.HealthResult.Healthy,
                 RepairStatus = HealthCheckResult.RepairAction.None,
-                Message = "Health check completed: all required articles were available."
+                Message = GetSuccessfulHealthCheckMessage(actualOperation),
+                Operation = actualOperation
             }));
             await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
         }
@@ -588,6 +615,17 @@ public class HealthCheckService
                                      + AdaptiveTimeoutBufferMinutes;
 
         return Math.Max(baseTimeoutMinutes, adaptiveTimeoutMinutes);
+    }
+
+    private static string GetSuccessfulHealthCheckMessage(string operation)
+    {
+        return operation switch
+        {
+            "HEAD" => "HEAD health check completed: smart article-header checks confirmed the required articles were available. Stale missing-article diagnostics for this item were cleared.",
+            "STAT_FALLBACK" => "HEAD health check was inconclusive; fallback STAT health check completed: all required article metadata was available, but historical streaming/body errors may still need a HEAD check to clear.",
+            "STAT" => "STAT health check completed: all required article metadata was available. This confirms article presence, but does not clear historical streaming/body errors.",
+            _ => "Health check completed: all required articles were available."
+        };
     }
 
     private async Task UpdateReleaseDate(DavItem davItem, List<string> segments, CancellationToken ct)
@@ -699,7 +737,10 @@ public class HealthCheckService
         try
         {
             var providerCount = _configManager.GetUsenetProviderConfig().Providers.Count;
-            var failureReason = $"File had missing articles - Checked all {providerCount} providers" + (failureDetails != null ? $" ({failureDetails})" : "") + ".";
+            var operationPrefix = string.Equals(operation, "UNKNOWN", StringComparison.OrdinalIgnoreCase)
+                ? "Health check"
+                : $"{operation} health check";
+            var failureReason = $"{operationPrefix} found missing articles - Checked all {providerCount} providers" + (failureDetails != null ? $" ({failureDetails})" : "") + ".";
 
             // if the file extension has been marked as ignored,
             // then don't bother trying to repair it. We can simply delete it.

@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-05-ANALYSIS-HISTORY-FOLLOWUP");
-            Log.Warning("  UI: Analysis History has stable removed-item messaging, action-needed filtering, and active queue ordering.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-05-HEALTH-LEDGER-CLARITY");
+            Log.Warning("  HEALTH: STAT/HEAD results and missing-article diagnostics now distinguish current checks from historical stream failures.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

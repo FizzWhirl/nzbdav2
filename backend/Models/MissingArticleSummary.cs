@@ -13,6 +13,10 @@ public class MissingArticleItem
     public int EvidenceSegmentCount { get; set; }
     public bool HasBlockingMissingArticles { get; set; }
     public bool IsImported { get; set; }
+    public string? LatestHealthResult { get; set; }
+    public string? LatestHealthOperation { get; set; }
+    public string? LatestHealthMessage { get; set; }
+    public DateTimeOffset? LatestHealthCheck { get; set; }
 }
 
 public class MissingArticleJobSummary

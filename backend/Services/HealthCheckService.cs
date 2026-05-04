@@ -24,7 +24,7 @@ public class HealthCheckService
     private readonly ConfigManager _configManager;
     private readonly UsenetStreamingClient _usenetClient;
     private readonly WebsocketManager _websocketManager;
-    private const int StatSegmentsPerMinutePerConnection = 250;
+    private const int ConservativeStatSegmentsPerMinutePerConnection = 30;
     private const int AdaptiveTimeoutBufferMinutes = 10;
 
     private readonly IServiceScopeFactory _serviceScopeFactory;
@@ -581,7 +581,7 @@ public class HealthCheckService
     {
         var baseTimeoutMinutes = _configManager.GetHealthCheckTimeoutMinutes();
         var effectiveConcurrency = Math.Max(1, concurrency);
-        var adaptiveTimeoutMinutes = (int)Math.Ceiling(segmentCount / (double)(StatSegmentsPerMinutePerConnection * effectiveConcurrency))
+        var adaptiveTimeoutMinutes = (int)Math.Ceiling(segmentCount / (double)(ConservativeStatSegmentsPerMinutePerConnection * effectiveConcurrency))
                                      + AdaptiveTimeoutBufferMinutes;
 
         return Math.Max(baseTimeoutMinutes, adaptiveTimeoutMinutes);

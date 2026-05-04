@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
@@ -11,7 +12,8 @@ public enum MediaAnalysisResult
 {
     Success,
     Failed,
-    Timeout
+    Timeout,
+    Removed
 }
 
 public class MediaAnalysisService(
@@ -24,7 +26,11 @@ public class MediaAnalysisService(
         using var scope = scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
         var item = await dbContext.Items.FindAsync([davItemId], ct).ConfigureAwait(false);
-        if (item == null) return MediaAnalysisResult.Failed;
+        if (item == null)
+        {
+            Log.Information("[MediaAnalysis] Skipping media analysis for removed item {Id}.", davItemId);
+            return MediaAnalysisResult.Removed;
+        }
 
         // 2. Construct URL for ffprobe (still needed for metadata)
         var encodedPath = string.Join("/", item.Path.Split('/').Select(Uri.EscapeDataString));
@@ -91,7 +97,15 @@ public class MediaAnalysisService(
 
         if (analysisResult != MediaAnalysisResult.Timeout)
         {
-            await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                Log.Information(ex, "[MediaAnalysis] Skipping media analysis save for {Name} ({Id}) because the item was removed while analysis was running.", item.Name, davItemId);
+                return MediaAnalysisResult.Removed;
+            }
         }
 
         Log.Information("[MediaAnalysis] Media analysis complete for {Name}. Result: {Result}", item.Name, analysisResult);

@@ -210,6 +210,24 @@ public class NzbAnalysisService(
                 }
             }
 
+            if (mediaResult == MediaAnalysisResult.Removed)
+            {
+                Log.Information("[NzbAnalysisService] Analysis skipped for {FileName} ({Id}) because the item was removed during analysis.", info.Name, fileId);
+                _ffprobeRetryAttempts.TryRemove(fileId, out var unusedRemovedRetry);
+                websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|done");
+                await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Skipped", "Analysis skipped: the file was removed during health repair while analysis was running.").ConfigureAwait(false);
+                return;
+            }
+
+            if (mediaResult == MediaAnalysisResult.Failed)
+            {
+                Log.Warning("[NzbAnalysisService] Media analysis failed for {FileName} ({Id}).", info.Name, fileId);
+                _ffprobeRetryAttempts.TryRemove(fileId, out var unusedFailedRetry);
+                websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|error");
+                await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed", "Media analysis failed: ffprobe could not read valid media metadata. The file may be corrupt, incomplete, or unavailable.").ConfigureAwait(false);
+                return;
+            }
+
             // Clear retry counter on success
             _ffprobeRetryAttempts.TryRemove(fileId, out var unused2);
 
@@ -222,6 +240,12 @@ public class NzbAnalysisService(
         catch (OperationCanceledException) when (queueCancellationToken.IsCancellationRequested)
         {
             Log.Information("[NzbAnalysisService] Analysis cancelled during shutdown for file {Id}", fileId);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            Log.Information(ex, "[NzbAnalysisService] Analysis skipped for file {Id} because the database row was removed while analysis was running.", fileId);
+            websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|done");
+            await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Skipped", "Analysis skipped: the file was removed during health repair while analysis was running.").ConfigureAwait(false);
         }
         catch (Exception ex)
         {

@@ -172,6 +172,19 @@ public class HealthCheckService
             // Success! Remove from timeout tracking
             _timeoutCounts.TryRemove(davItem.Id, out _);
 
+            var itemStillExists = await dbClient.Ctx.Items
+                .AsNoTracking()
+                .AnyAsync(x => x.Id == davItem.Id, cts.Token)
+                .ConfigureAwait(false);
+            if (!itemStillExists)
+            {
+                Log.Information("[HealthCheck] Finished item: {Name}. Result: Unhealthy (Repair removed item and triggered replacement workflow)", davItem.Name);
+                await SaveHealthCheckToAnalysisHistoryAsync(davItem.Id, davItem.Name, davItem.Name,
+                    "Failed",
+                    "Health check failed: articles were missing or unavailable; repair removed the item and triggered replacement workflow.").ConfigureAwait(false);
+                return;
+            }
+
             // Reload to get the latest state after health check
             await dbClient.Ctx.Entry(davItem).ReloadAsync(cts.Token).ConfigureAwait(false);
             var result = davItem.IsCorrupted ? "Unhealthy (Repair Attempted)" : "Healthy";

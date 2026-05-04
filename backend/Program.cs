@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-HEALTH-ADAPTIVE-TIMEOUT");
-            Log.Warning("  FIX: Large health checks now use segment-aware adaptive timeouts with a configurable minimum.");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-04-ANALYSIS-REPAIR-CONCURRENCY");
+            Log.Warning("  FIX: Analysis now treats items removed by health repair as skipped instead of failed concurrency errors.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

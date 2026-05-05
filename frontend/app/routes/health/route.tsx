@@ -69,7 +69,8 @@ export async function loader({ request }: { request: Request }) {
         historyStats: historyData.stats,
         historyItems: historyData.items,
         activeAnalyses: analysisData,
-        analysisHistory: analysisHistoryData,
+        analysisHistory: analysisHistoryData.items,
+        analysisHistoryTotalCount: analysisHistoryData.totalCount,
         isEnabled: config
             .filter(x => x.configName === enabledKey)
             .filter(x => x.configValue.toLowerCase() === "true")
@@ -86,6 +87,7 @@ export default function Health({ loaderData }: Route.ComponentProps) {
     const [queueItems, setQueueItems] = useState(loaderData.queueItems);
     const [analysisItems, setAnalysisItems] = useState<AnalysisItem[]>(loaderData.activeAnalyses);
     const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryItem[]>(loaderData.analysisHistory);
+    const [analysisHistoryTotalCount, setAnalysisHistoryTotalCount] = useState(loaderData.analysisHistoryTotalCount);
     const [uncheckedCount, setUncheckedCount] = useState(loaderData.uncheckedCount);
     const [pendingCount, setPendingCount] = useState(loaderData.pendingCount);
     const [page, setPage] = useState(0);
@@ -136,7 +138,9 @@ export default function Health({ loaderData }: Route.ComponentProps) {
             try {
                 const response = await fetch(`/api/analysis-history?page=${ahPage}&pageSize=100&search=${encodeURIComponent(ahSearch)}&showFailedOnly=${ahShowFailedOnly}&type=${encodeURIComponent(ahTypeFilter)}&showActionNeededOnly=${ahShowActionNeededOnly}`);
                 if (response.ok) {
-                    setAnalysisHistory(await response.json());
+                    const data = await response.json();
+                    setAnalysisHistory(data.items);
+                    setAnalysisHistoryTotalCount(data.totalCount);
                 }
             } catch (error) {
                 console.error("Failed to fetch analysis history", error);
@@ -553,7 +557,9 @@ export default function Health({ loaderData }: Route.ComponentProps) {
                                         <Tab eventKey="analysis-history" title="Analysis History">
                                             <AnalysisHistoryTable
                                                 items={analysisHistory}
+                                                totalCount={analysisHistoryTotalCount}
                                                 page={ahPage}
+                                                pageSize={100}
                                                 search={ahSearch}
                                                 showFailedOnly={ahShowFailedOnly}
                                                 showActionNeededOnly={ahShowActionNeededOnly}

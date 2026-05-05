@@ -6,6 +6,7 @@ using NzbWebDAV.Clients.Usenet.Connections;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
+using NzbWebDAV.Exceptions;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Utils;
 using NzbWebDAV.Websocket;
@@ -241,6 +242,14 @@ public class NzbAnalysisService(
         {
             Log.Information("[NzbAnalysisService] Analysis cancelled during shutdown for file {Id}", fileId);
         }
+        catch (NonRetryableDownloadException ex)
+        {
+            Log.Warning(ex, "[NzbAnalysisService] Confirmed non-retryable analysis failure for file {Id}. Marking for immediate repair/removal.", fileId);
+            await MarkForImmediateRepairAsync(fileId, ex.Message).ConfigureAwait(false);
+            websocketManager.SendMessage(WebsocketTopic.AnalysisItemProgress, $"{fileId}|error");
+            await SaveAnalysisHistoryAsync(fileId, info.Name, info.JobName, "Failed",
+                $"Analysis failed: {ex.Message}. The file was marked for immediate health repair/removal.").ConfigureAwait(false);
+        }
         catch (DbUpdateConcurrencyException ex)
         {
             Log.Information(ex, "[NzbAnalysisService] Analysis skipped for file {Id} because the database row was removed while analysis was running.", fileId);
@@ -260,6 +269,29 @@ public class NzbAnalysisService(
             {
                 _concurrencyLimiter.Release();
             }
+        }
+    }
+
+    private async Task MarkForImmediateRepairAsync(Guid fileId, string reason)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
+            var davItem = await db.Items.FirstOrDefaultAsync(x => x.Id == fileId).ConfigureAwait(false);
+            if (davItem == null) return;
+
+            davItem.IsCorrupted = true;
+            davItem.CorruptionReason = reason;
+            davItem.NextHealthCheck = DateTimeOffset.MinValue;
+            await db.SaveChangesAsync().ConfigureAwait(false);
+
+            var healthCheckService = scope.ServiceProvider.GetService<HealthCheckService>();
+            healthCheckService?.TriggerRepairInBackground(davItem.Path, reason, "ANALYSIS", "AnalysisRepair");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[NzbAnalysisService] Failed to queue immediate repair for analysis failure on {Id}", fileId);
         }
     }
 

@@ -12,7 +12,7 @@ namespace NzbWebDAV.Api.Controllers.AnalysisHistory;
 public class AnalysisHistoryController(DavDatabaseContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<List<AnalysisHistoryResponseItem>>> GetHistory([FromQuery] int page = 0, [FromQuery] int pageSize = 100, [FromQuery] string? search = null, [FromQuery] bool showFailedOnly = false, [FromQuery] string? type = null, [FromQuery] bool showActionNeededOnly = false)
+    public async Task<ActionResult<AnalysisHistoryResponse>> GetHistory([FromQuery] int page = 0, [FromQuery] int pageSize = 100, [FromQuery] string? search = null, [FromQuery] bool showFailedOnly = false, [FromQuery] string? type = null, [FromQuery] bool showActionNeededOnly = false)
     {
         var apiKey = HttpContext.GetRequestApiKey();
         if (apiKey == null || apiKey != EnvironmentUtil.GetVariable("FRONTEND_BACKEND_API_KEY"))
@@ -47,6 +47,8 @@ public class AnalysisHistoryController(DavDatabaseContext db) : ControllerBase
         {
             query = ApplyTypeFilter(query, normalizedType);
         }
+
+        var totalCount = await query.CountAsync();
 
         var items = await query
             .OrderByDescending(x => x.CreatedAt)
@@ -93,7 +95,11 @@ public class AnalysisHistoryController(DavDatabaseContext db) : ControllerBase
             };
         }).ToList();
 
-        return Ok(response);
+        return Ok(new AnalysisHistoryResponse
+        {
+            Items = response,
+            TotalCount = totalCount
+        });
     }
 
     private static IQueryable<AnalysisHistoryItem> ApplyTypeFilter(IQueryable<AnalysisHistoryItem> query, string type)
@@ -147,6 +153,12 @@ public class AnalysisHistoryController(DavDatabaseContext db) : ControllerBase
         if (lower.Contains("segment")) return "NZB Analysis";
         return "Analysis";
     }
+}
+
+public class AnalysisHistoryResponse
+{
+    public List<AnalysisHistoryResponseItem> Items { get; set; } = [];
+    public int TotalCount { get; set; }
 }
 
 public class AnalysisHistoryResponseItem

@@ -5,7 +5,9 @@ import { formatDateTime } from "~/utils/datetime";
 
 interface Props {
     items: AnalysisHistoryItem[];
+    totalCount: number;
     page: number;
+    pageSize: number;
     search: string;
     showFailedOnly: boolean;
     showActionNeededOnly: boolean;
@@ -19,7 +21,9 @@ interface Props {
     onItemClick: (item: AnalysisHistoryItem) => void;
 }
 
-export function AnalysisHistoryTable({ items, page, search, showFailedOnly, showActionNeededOnly, typeFilter, onPageChange, onSearchChange, onShowFailedOnlyChange, onShowActionNeededOnlyChange, onTypeFilterChange, onAnalyze, onItemClick }: Props) {
+export function AnalysisHistoryTable({ items, totalCount, page, pageSize, search, showFailedOnly, showActionNeededOnly, typeFilter, onPageChange, onSearchChange, onShowFailedOnlyChange, onShowActionNeededOnlyChange, onTypeFilterChange, onAnalyze, onItemClick }: Props) {
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
     return (
         <div>
             <div className="d-flex justify-content-between align-items-center mb-3">
@@ -61,20 +65,13 @@ export function AnalysisHistoryTable({ items, page, search, showFailedOnly, show
                     />
                 </div>
                 <div className="d-flex gap-2">
-                    <Button
-                        variant="secondary"
-                        disabled={page === 0}
-                        onClick={() => onPageChange(Math.max(0, page - 1))}
-                    >
-                        Previous
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        disabled={items.length < 100} // Assuming 100 page size
-                        onClick={() => onPageChange(page + 1)}
-                    >
-                        Next
-                    </Button>
+                    <Pagination size="sm" className="m-0">
+                        <Pagination.First onClick={() => onPageChange(0)} disabled={page === 0} />
+                        <Pagination.Prev onClick={() => onPageChange(page - 1)} disabled={page === 0} />
+                        <Pagination.Item active>{page + 1} / {totalPages}</Pagination.Item>
+                        <Pagination.Next onClick={() => onPageChange(page + 1)} disabled={page >= totalPages - 1} />
+                        <Pagination.Last onClick={() => onPageChange(totalPages - 1)} disabled={page >= totalPages - 1} />
+                    </Pagination>
                 </div>
             </div>
 

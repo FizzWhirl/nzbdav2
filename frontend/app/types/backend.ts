@@ -167,3 +167,8 @@ export type AnalysisHistoryItem = {
     isRemoved?: boolean;
     isActionNeeded?: boolean;
 }
+
+export type AnalysisHistoryResponse = {
+    items: AnalysisHistoryItem[];
+    totalCount: number;
+}

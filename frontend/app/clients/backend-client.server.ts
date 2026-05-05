@@ -6,7 +6,7 @@ import type {
     DirectoryItem, SearchResult, ConfigItem,
     HealthCheckQueueResponse, HealthCheckQueueItem,
     HealthCheckHistoryResponse, HealthCheckStats,
-    AnalysisItem, AnalysisHistoryItem, FileDetails, ProviderStatistic,
+    AnalysisItem, AnalysisHistoryResponse, FileDetails, ProviderStatistic,
     HealthCheckInfoType, DashboardSummary
 } from "~/types/backend";
 import type { DashboardData } from "~/types/dashboard";
@@ -435,7 +435,7 @@ class BackendClient {
         return response.json();
     }
 
-    public async getAnalysisHistory(page: number = 0, pageSize: number = 100, search: string = "", showFailedOnly: boolean = false, type: string = "all", showActionNeededOnly: boolean = false): Promise<AnalysisHistoryItem[]> {
+    public async getAnalysisHistory(page: number = 0, pageSize: number = 100, search: string = "", showFailedOnly: boolean = false, type: string = "all", showActionNeededOnly: boolean = false): Promise<AnalysisHistoryResponse> {
         const url = process.env.BACKEND_URL + `/api/analysis-history?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(search)}&showFailedOnly=${showFailedOnly}&type=${encodeURIComponent(type)}&showActionNeededOnly=${showActionNeededOnly}`;
         const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
         const response = await this.fetchWithTimeout(url, { headers: { "x-api-key": apiKey } });

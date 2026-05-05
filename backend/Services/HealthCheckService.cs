@@ -25,6 +25,7 @@ public class HealthCheckService
     private readonly UsenetStreamingClient _usenetClient;
     private readonly WebsocketManager _websocketManager;
     private const int ConservativeStatSegmentsPerMinutePerConnection = 30;
+    private const int ConservativeLargeFileMinutesPerGiB = 2;
     private const int AdaptiveTimeoutBufferMinutes = 10;
 
     private readonly IServiceScopeFactory _serviceScopeFactory;
@@ -484,15 +485,16 @@ public class HealthCheckService
             var progress = progressHook.ToPercentage(segments.Count);
             var isImported = OrganizedLinksUtil.GetLink(davItem, _configManager, allowScan: false) != null;
             using var healthCheckCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            var timeoutMinutes = GetHealthCheckTimeoutMinutes(segments.Count, concurrency);
+            var timeoutMinutes = GetHealthCheckTimeoutMinutes(segments.Count, concurrency, davItem.FileSize);
             healthCheckCts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
             // Normalize AffinityKey from parent directory (matches WebDav file patterns)
             var rawAffinityKey2 = Path.GetFileName(Path.GetDirectoryName(davItem.Path));
             var normalizedAffinityKey2 = FilenameNormalizer.NormalizeName(rawAffinityKey2);
             using var contextScope = healthCheckCts.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.HealthCheck, new ConnectionUsageDetails { Text = davItem.Path, JobName = davItem.Name, AffinityKey = normalizedAffinityKey2, IsImported = isImported, DavItemId = davItem.Id }));
-            Log.Information("[HealthCheck] Verifying {SegmentCount} segments for {Name} using {Operation}. Timeout: {Timeout}m. Concurrency: {Concurrency}",
-                segments.Count, davItem.Name, requestedOperation, timeoutMinutes, concurrency);
-            var sizes = await _usenetClient.CheckAllSegmentsAsync(segments, concurrency, progress, healthCheckCts.Token, useHead).ConfigureAwait(false);
+            Log.Information("[HealthCheck] Verifying {SegmentCount} segments ({FileSizeGiB:F1} GiB) for {Name} using {Operation}. Timeout: {Timeout}m. Concurrency: {Concurrency}",
+                segments.Count, GetGiB(davItem.FileSize), davItem.Name, requestedOperation, timeoutMinutes, concurrency);
+            string? headFallbackReason = null;
+            var sizes = await _usenetClient.CheckAllSegmentsAsync(segments, concurrency, progress, healthCheckCts.Token, useHead, reason => headFallbackReason = reason).ConfigureAwait(false);
             var actualOperation = useHead
                 ? sizes != null ? "HEAD" : "STAT_FALLBACK"
                 : "STAT";
@@ -556,7 +558,7 @@ public class HealthCheckService
                 CreatedAt = DateTimeOffset.UtcNow,
                 Result = HealthCheckResult.HealthResult.Healthy,
                 RepairStatus = HealthCheckResult.RepairAction.None,
-                Message = GetSuccessfulHealthCheckMessage(actualOperation),
+                Message = GetSuccessfulHealthCheckMessage(actualOperation, headFallbackReason),
                 Operation = actualOperation
             }));
             await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -607,22 +609,31 @@ public class HealthCheckService
         }
     }
 
-    private int GetHealthCheckTimeoutMinutes(int segmentCount, int concurrency)
+    private int GetHealthCheckTimeoutMinutes(int segmentCount, int concurrency, long? fileSizeBytes)
     {
         var baseTimeoutMinutes = _configManager.GetHealthCheckTimeoutMinutes();
         var effectiveConcurrency = Math.Max(1, concurrency);
-        var adaptiveTimeoutMinutes = (int)Math.Ceiling(segmentCount / (double)(ConservativeStatSegmentsPerMinutePerConnection * effectiveConcurrency))
-                                     + AdaptiveTimeoutBufferMinutes;
+        var segmentTimeoutMinutes = (int)Math.Ceiling(segmentCount / (double)(ConservativeStatSegmentsPerMinutePerConnection * effectiveConcurrency))
+                                    + AdaptiveTimeoutBufferMinutes;
+        var sizeTimeoutMinutes = (int)Math.Ceiling(GetGiB(fileSizeBytes) * ConservativeLargeFileMinutesPerGiB)
+                                 + AdaptiveTimeoutBufferMinutes;
 
-        return Math.Max(baseTimeoutMinutes, adaptiveTimeoutMinutes);
+        return Math.Max(baseTimeoutMinutes, Math.Max(segmentTimeoutMinutes, sizeTimeoutMinutes));
     }
 
-    private static string GetSuccessfulHealthCheckMessage(string operation)
+    private static double GetGiB(long? bytes)
+    {
+        return bytes.GetValueOrDefault() <= 0
+            ? 0
+            : bytes.Value / 1024d / 1024d / 1024d;
+    }
+
+    private static string GetSuccessfulHealthCheckMessage(string operation, string? fallbackReason)
     {
         return operation switch
         {
             "HEAD" => "HEAD health check completed: smart article-header checks confirmed the required articles were available. Stale missing-article diagnostics for this item were cleared.",
-            "STAT_FALLBACK" => "HEAD health check was inconclusive; fallback STAT health check completed: all required article metadata was available, but historical streaming/body errors may still need a HEAD check to clear.",
+            "STAT_FALLBACK" => $"HEAD health check was inconclusive ({fallbackReason ?? "smart header analysis could not safely infer segment sizes"}); fallback STAT health check completed: all required article metadata was available, but historical streaming/body errors may still need a HEAD check to clear.",
             "STAT" => "STAT health check completed: all required article metadata was available. This confirms article presence, but does not clear historical streaming/body errors.",
             _ => "Health check completed: all required articles were available."
         };
@@ -666,31 +677,37 @@ public class HealthCheckService
     }
 
     public void TriggerManualRepairInBackground(string filePath)
+        => TriggerRepairInBackground(filePath, "Manual repair triggered by user", "UNKNOWN", "ManualRepair");
+
+    public void TriggerRepairInBackground(string filePath, string failureDetails, string operation = "UNKNOWN", string source = "Repair")
     {
-        var queued = _backgroundTaskQueue.TryQueue($"Manual repair for {filePath}", async ct =>
+        var queued = _backgroundTaskQueue.TryQueue($"{source} for {filePath}", async ct =>
         {
             try
             {
                 using var scope = _serviceScopeFactory.CreateScope();
                 var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
                 
-                await TriggerManualRepairAsync(filePath, dbClient, ct).ConfigureAwait(false);
+                await TriggerRepairAsync(filePath, dbClient, ct, failureDetails, operation).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"[ManualRepair] Failed to execute manual repair for file: {filePath}");
+                Log.Error(ex, "[{Source}] Failed to execute repair for file: {FilePath}", source, filePath);
             }
         });
 
         if (!queued)
         {
-            Log.Warning("[ManualRepair] Failed to queue manual repair for file: {FilePath}", filePath);
+            Log.Warning("[{Source}] Failed to queue repair for file: {FilePath}", source, filePath);
         }
     }
 
     public async Task TriggerManualRepairAsync(string filePath, DavDatabaseClient dbClient, CancellationToken ct)
+        => await TriggerRepairAsync(filePath, dbClient, ct, "Manual repair triggered by user", "UNKNOWN").ConfigureAwait(false);
+
+    public async Task TriggerRepairAsync(string filePath, DavDatabaseClient dbClient, CancellationToken ct, string failureDetails, string operation = "UNKNOWN")
     {
-        Log.Information("Manual repair triggered for file: {FilePath}", filePath);
+        Log.Information("Repair triggered for file: {FilePath}. Operation: {Operation}. Reason: {Reason}", filePath, operation, failureDetails);
 
         // 1. Try exact match
         var davItem = await dbClient.Ctx.Items.AsNoTracking().FirstOrDefaultAsync(x => x.Path == filePath, ct).ConfigureAwait(false);
@@ -729,7 +746,7 @@ public class HealthCheckService
         var rawAffinityKey = Path.GetFileName(Path.GetDirectoryName(davItem.Path));
         var normalizedAffinityKey = FilenameNormalizer.NormalizeName(rawAffinityKey);
         using var _ = cts.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.Repair, new ConnectionUsageDetails { Text = davItem.Path, JobName = davItem.Name, AffinityKey = normalizedAffinityKey, DavItemId = davItem.Id }));
-        await Repair(davItem, dbClient, cts.Token, "Manual repair triggered by user").ConfigureAwait(false);
+        await Repair(davItem, dbClient, cts.Token, failureDetails, operation).ConfigureAwait(false);
     }
 
     private async Task Repair(DavItem davItem, DavDatabaseClient dbClient, CancellationToken ct, string? failureDetails = null, string operation = "UNKNOWN")
@@ -739,6 +756,8 @@ public class HealthCheckService
             var providerCount = _configManager.GetUsenetProviderConfig().Providers.Count;
             var operationPrefix = string.Equals(operation, "UNKNOWN", StringComparison.OrdinalIgnoreCase)
                 ? "Health check"
+                : string.Equals(operation, "ANALYSIS", StringComparison.OrdinalIgnoreCase)
+                    ? "NZB analysis"
                 : $"{operation} health check";
             var failureReason = $"{operationPrefix} found missing articles - Checked all {providerCount} providers" + (failureDetails != null ? $" ({failureDetails})" : "") + ".";
 
@@ -781,12 +800,21 @@ public class HealthCheckService
             var wasStreamTruncated = davItem.IsCorrupted
                                      && !string.IsNullOrEmpty(davItem.CorruptionReason)
                                      && davItem.CorruptionReason.StartsWith("Stream truncated:", StringComparison.Ordinal);
+            var wasConfirmedTakedown = (davItem.IsCorrupted
+                                        && !string.IsNullOrEmpty(davItem.CorruptionReason)
+                                        && davItem.CorruptionReason.Contains("DMCA/takedown pattern", StringComparison.OrdinalIgnoreCase))
+                                       || (failureDetails?.Contains("DMCA/takedown pattern", StringComparison.OrdinalIgnoreCase) ?? false);
             if (wasStreamTruncated)
             {
                 Log.Information("[HealthCheck] Item {Name} was hard-truncated by streaming layer ({Reason}). Bypassing 24h arr-import grace and proceeding to repair.",
                     davItem.Name, davItem.CorruptionReason);
             }
-            else
+            if (wasConfirmedTakedown)
+            {
+                Log.Information("[HealthCheck] Item {Name} has a confirmed DMCA/takedown pattern ({Reason}). Bypassing 24h arr-import grace and proceeding to repair.",
+                    davItem.Name, davItem.CorruptionReason ?? failureDetails);
+            }
+            if (!wasStreamTruncated && !wasConfirmedTakedown)
             {
                 await using var historyCheckCtx = new DavDatabaseContext();
                 var importGraceCutoff = DateTime.UtcNow.AddHours(-24);

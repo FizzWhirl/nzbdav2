@@ -232,7 +232,7 @@ public class UsenetStreamingClient
         if (!allowFullScan)
         {
             throw new SmartAnalysisInconclusiveException(
-                $"Smart header analysis could not infer uniform segment sizes for {segmentIds.Length} segments.");
+                $"Smart header analysis could not infer uniform segment sizes for {segmentIds.Length} segments because the first/second/last yEnc headers did not prove a uniform post.");
         }
 
         var sizes = new long[segmentIds.Length];
@@ -270,7 +270,8 @@ public class UsenetStreamingClient
         int concurrency,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default,
-        bool useHead = true
+        bool useHead = true,
+        Action<string>? headFallbackReason = null
     )
     {
         var segmentArray = segmentIds as string[] ?? segmentIds.ToArray();
@@ -287,7 +288,22 @@ public class UsenetStreamingClient
             }
             catch (SmartAnalysisInconclusiveException ex)
             {
+                headFallbackReason?.Invoke(ex.Message);
                 Log.Warning(ex, "[HealthCheck] Smart HEAD analysis was inconclusive for {SegmentCount} segments. Falling back to quick STAT existence checks instead of a full BODY header scan.", segmentArray.Length);
+                return await CheckAllSegmentsAsync(segmentArray, concurrency, progress, cancellationToken, useHead: false).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                const string reason = "Smart HEAD analysis timed out while probing sample segments.";
+                headFallbackReason?.Invoke(reason);
+                Log.Warning(ex, "[HealthCheck] {Reason} Falling back to quick STAT existence checks for {SegmentCount} segments.", reason, segmentArray.Length);
+                return await CheckAllSegmentsAsync(segmentArray, concurrency, progress, cancellationToken, useHead: false).ConfigureAwait(false);
+            }
+            catch (TimeoutException ex)
+            {
+                var reason = $"Smart HEAD analysis timed out while probing sample segments: {ex.Message}";
+                headFallbackReason?.Invoke(reason);
+                Log.Warning(ex, "[HealthCheck] {Reason} Falling back to quick STAT existence checks for {SegmentCount} segments.", reason, segmentArray.Length);
                 return await CheckAllSegmentsAsync(segmentArray, concurrency, progress, cancellationToken, useHead: false).ConfigureAwait(false);
             }
         }

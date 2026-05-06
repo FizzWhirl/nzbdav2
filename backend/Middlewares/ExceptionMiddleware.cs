@@ -67,7 +67,8 @@ public class ExceptionMiddleware(RequestDelegate next)
                             // background triggers around the same playback window.
                             if (healthCheckService.GetActiveHealthCheckItemIds().Contains(davItemId))
                             {
-                                Log.Information("[HealthCheckTrigger] Skipping immediate-priority update for `{DavItemName}` because a health check is already active.", davItemName);
+                                Log.Information("[HealthCheckTrigger] Source={Source} Item={ItemId} Applied={Applied} Reason={Reason}",
+                                    "ExceptionMiddleware.ArticleNotFound", davItemId, false, "Active health check already running");
                                 break;
                             }
 
@@ -86,10 +87,8 @@ public class ExceptionMiddleware(RequestDelegate next)
                                 .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.NextHealthCheck, DateTimeOffset.MinValue), ct)
                                 .ConfigureAwait(false);
 
-                            if (rows > 0)
-                                Log.Information($"[HealthCheckTrigger] Item `{davItemName}` priority set to immediate health check/repair due to missing articles.");
-                            else
-                                Log.Information($"[HealthCheckTrigger] Item `{davItemName}` already urgent or recently checked; skipping duplicate immediate trigger.");
+                            Log.Information("[HealthCheckTrigger] Source={Source} Item={ItemId} Name={Name} Applied={Applied} CooldownMinutes={CooldownMinutes}",
+                                "ExceptionMiddleware.ArticleNotFound", davItemId, davItemName, rows > 0, 10);
                             break; // Success
                         }
                         catch (Exception ex) when (i < maxRetries - 1 && ex.Message.Contains("database is locked"))

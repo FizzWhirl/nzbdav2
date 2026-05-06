@@ -74,7 +74,7 @@ class Program
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
               Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-06-HEALTH-TRIGGER-COOLDOWN");
-              Log.Warning("  FIX: Deduplicated rapid immediate health-check triggers to reduce repeated back-to-back HEAD/STAT runs.");
+              Log.Warning("  FIX: Debounced repeated immediate health triggers (middleware + streaming) and added trigger summary logs.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

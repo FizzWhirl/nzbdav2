@@ -133,6 +133,8 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## v0.6.Z (2026-05-06)
 *   **Fix**: Added dedupe/cooldown guards to missing-article immediate health-check triggers so repeated request failures in a short window do not repeatedly re-arm the same file for back-to-back urgent checks.
+*   **Fix**: Applied the same cooldown behavior to streaming-side urgent trigger paths, preventing repeated immediate rechecks when multiple segment failures occur close together.
+*   **Logging**: Added structured per-file health-trigger summary logs (`Source`, `Item`, `Applied`, cooldown context) to make re-trigger behavior and suppression decisions observable.
 *   **Health**: Health Check Queue and File Details continue to show the latest health result per file; full per-run details remain in Analysis History.
 
 ## v0.6.Z (2026-05-06)

@@ -1755,9 +1755,16 @@ public class BufferedSegmentStream : Stream
                         if (item != null) {
                             item.IsCorrupted = true;
                             item.CorruptionReason = reason;
-                            item.NextHealthCheck = DateTimeOffset.MinValue;
+                            var cooldownThreshold = DateTimeOffset.UtcNow.AddMinutes(-10);
+                            var wasEligibleForImmediate = item.NextHealthCheck != DateTimeOffset.MinValue
+                                && (item.LastHealthCheck == null || item.LastHealthCheck < cooldownThreshold);
+                            if (wasEligibleForImmediate)
+                            {
+                                item.NextHealthCheck = DateTimeOffset.MinValue;
+                            }
                             await db.SaveChangesAsync();
-                            Log.Information("[BufferedStream] Marked item {ItemId} as corrupted (graceful-degradation limit exceeded): {Reason}", davItemId, reason);
+                            Log.Information("[HealthCheckTrigger] Source={Source} Item={ItemId} Applied={Applied} LastHealthCheck={LastHealthCheck} NextHealthCheck={NextHealthCheck} Reason={Reason}",
+                                "BufferedStream.GracefulDegradationLimit", davItemId, wasEligibleForImmediate, item.LastHealthCheck, item.NextHealthCheck, reason);
                         }
                     } catch (Exception dbEx) {
                         Log.Error(dbEx, "[BufferedStream] Failed to update item corruption status after graceful-degradation limit.");
@@ -1847,9 +1854,17 @@ public class BufferedSegmentStream : Stream
                             Log.Warning("[BufferedStream] Transient failure for item {ItemId} (not marking as corrupted): {Error}. HadTransientFailure={HadTransient}, LastExceptionType={ExType}. Scheduling urgent health check.",
                                 davItemId, lastException?.Message, hadTransientFailure, lastException?.GetType().Name);
                         }
-                        // Always trigger immediate urgent health check regardless of failure type
-                        item.NextHealthCheck = DateTimeOffset.MinValue;
+                        // Always request urgent check, but debounce repeated immediate re-triggers.
+                        var cooldownThreshold = DateTimeOffset.UtcNow.AddMinutes(-10);
+                        var wasEligibleForImmediate = item.NextHealthCheck != DateTimeOffset.MinValue
+                            && (item.LastHealthCheck == null || item.LastHealthCheck < cooldownThreshold);
+                        if (wasEligibleForImmediate)
+                        {
+                            item.NextHealthCheck = DateTimeOffset.MinValue;
+                        }
                         await db.SaveChangesAsync();
+                        Log.Information("[HealthCheckTrigger] Source={Source} Item={ItemId} Applied={Applied} PermanentFailure={PermanentFailure} LastHealthCheck={LastHealthCheck} NextHealthCheck={NextHealthCheck}",
+                            "BufferedStream.SegmentFailure", davItemId, wasEligibleForImmediate, isPermanentFailure, item.LastHealthCheck, item.NextHealthCheck);
                     }
                 } catch (Exception dbEx) {
                     Log.Error(dbEx, "[BufferedStream] Failed to update item corruption status in database.");

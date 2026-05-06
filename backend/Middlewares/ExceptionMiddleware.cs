@@ -48,6 +48,7 @@ public class ExceptionMiddleware(RequestDelegate next)
                 // We cannot use context.RequestServices inside the task because the request might be finished (disposed) by then.
                 var scopeFactory = context.RequestServices.GetRequiredService<IServiceScopeFactory>();
                 var backgroundTaskQueue = context.RequestServices.GetRequiredService<BackgroundTaskQueue>();
+                var healthCheckService = context.RequestServices.GetRequiredService<HealthCheckService>();
                 var davItemId = davItem.Id;
                 var davItemName = davItem.Name;
 
@@ -61,6 +62,17 @@ public class ExceptionMiddleware(RequestDelegate next)
                             using var scope = scopeFactory.CreateScope();
                             var dbContext = scope.ServiceProvider.GetRequiredService<DavDatabaseContext>();
 
+                            // Avoid repeatedly re-arming immediate checks from stale/duplicate trigger jobs.
+                            // This commonly happens when multiple request failures enqueue near-identical
+                            // background triggers around the same playback window.
+                            if (healthCheckService.GetActiveHealthCheckItemIds().Contains(davItemId))
+                            {
+                                Log.Information("[HealthCheckTrigger] Skipping immediate-priority update for `{DavItemName}` because a health check is already active.", davItemName);
+                                break;
+                            }
+
+                            var triggerCooldown = DateTimeOffset.UtcNow.AddMinutes(-10);
+
                             await dbContext.HealthCheckResults
                                 .Where(h => h.DavItemId == davItemId && h.RepairStatus == HealthCheckResult.RepairAction.ActionNeeded)
                                 .ExecuteDeleteAsync(ct)
@@ -68,14 +80,16 @@ public class ExceptionMiddleware(RequestDelegate next)
 
                             // Set priority to immediate health check
                             var rows = await dbContext.Items
-                                .Where(x => x.Id == davItemId && x.NextHealthCheck != DateTimeOffset.MinValue)
+                                .Where(x => x.Id == davItemId
+                                            && x.NextHealthCheck != DateTimeOffset.MinValue
+                                            && (x.LastHealthCheck == null || x.LastHealthCheck < triggerCooldown))
                                 .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.NextHealthCheck, DateTimeOffset.MinValue), ct)
                                 .ConfigureAwait(false);
 
                             if (rows > 0)
                                 Log.Information($"[HealthCheckTrigger] Item `{davItemName}` priority set to immediate health check/repair due to missing articles.");
                             else
-                                Log.Information($"[HealthCheckTrigger] Item `{davItemName}` already at highest priority for health check due to missing articles.");
+                                Log.Information($"[HealthCheckTrigger] Item `{davItemName}` already urgent or recently checked; skipping duplicate immediate trigger.");
                             break; // Success
                         }
                         catch (Exception ex) when (i < maxRetries - 1 && ex.Message.Contains("database is locked"))

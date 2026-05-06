@@ -132,6 +132,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 ## Changelog
 
 ## v0.6.Z (2026-05-06)
+*   **Fix**: Added dedupe/cooldown guards to missing-article immediate health-check triggers so repeated request failures in a short window do not repeatedly re-arm the same file for back-to-back urgent checks.
+*   **Health**: Health Check Queue and File Details continue to show the latest health result per file; full per-run details remain in Analysis History.
+
+## v0.6.Z (2026-05-06)
 *   **Feature**: Added an optional **Full HEAD Scan** setting (Settings > Repairs). When enabled, files with non-uniform segment sizes that would otherwise fall back to a STAT existence-only check instead have every segment's yEnc header read individually, giving true per-segment verification. Disabled by default; adds ~5–15 s per file depending on provider latency.
 
 

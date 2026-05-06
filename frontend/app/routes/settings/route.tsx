@@ -60,6 +60,7 @@ const defaultConfig = {
     "repair.health-check-timeout-minutes": "",
     "repair.enable": "false",
     "repair.min-check-interval-days": "",
+    "repair.head-full-scan": "false",
     "stats.enable": "false",
     "analysis.enable": "true",
     "analysis.max-concurrent": "3",

@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-              Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-06-HEALTH-TRIGGER-COOLDOWN");
-              Log.Warning("  FIX: Debounced repeated immediate health triggers (middleware + streaming) and added trigger summary logs.");
+              Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-06-HEAD-SCAN-PERSIST");
+              Log.Warning("  FIX: Persisted Repairs Full-HEAD-Scan setting and retained health-trigger debounce/summary logging.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

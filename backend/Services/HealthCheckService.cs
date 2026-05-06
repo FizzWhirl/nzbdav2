@@ -412,30 +412,12 @@ public class HealthCheckService
         var requestedOperation = useHead ? "HEAD" : "STAT";
         try
         {
-            // Check if item is mapped (exists in LocalLinks table)
+            // Keep checking even when LocalLinks has no mapping yet.
+            // Unmapped files can still be unhealthy and should not be silently skipped.
             var isMapped = await dbClient.Ctx.LocalLinks.AnyAsync(x => x.DavItemId == davItem.Id, ct).ConfigureAwait(false);
             if (!isMapped)
             {
-                Log.Warning("[HealthCheck] Item {Name} ({Id}) is not mapped (not found in LocalLinks). Skipping health check.", davItem.Name, davItem.Id);
-
-                davItem.LastHealthCheck = DateTimeOffset.UtcNow;
-                davItem.NextHealthCheck = davItem.LastHealthCheck.Value.AddDays(7);
-                davItem.IsCorrupted = false;
-                davItem.CorruptionReason = null;
-
-                dbClient.Ctx.HealthCheckResults.Add(SendStatus(new HealthCheckResult()
-                {
-                    Id = Guid.NewGuid(),
-                    DavItemId = davItem.Id,
-                    Path = davItem.Path,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    Result = HealthCheckResult.HealthResult.Skipped,
-                    RepairStatus = HealthCheckResult.RepairAction.None,
-                    Message = $"{requestedOperation} health check skipped: file is not mapped in the organized library.",
-                    Operation = requestedOperation
-                }));
-                await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
-                return;
+                Log.Information("[HealthCheck] Item {Name} ({Id}) is not mapped in LocalLinks. Continuing with {Operation} health check anyway.", davItem.Name, davItem.Id, requestedOperation);
             }
 
             // update the release date, if null

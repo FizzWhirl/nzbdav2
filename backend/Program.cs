@@ -73,7 +73,7 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-05-DMCA-REPAIR-PAGINATION");
+            Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-05-HEALTH-QUEUE-TRUTH");
             Log.Warning("  HEALTH: STAT/HEAD results and missing-article diagnostics now distinguish current checks from historical stream failures.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 

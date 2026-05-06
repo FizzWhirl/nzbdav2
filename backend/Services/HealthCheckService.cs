@@ -377,14 +377,17 @@ public class HealthCheckService
     public static IQueryable<DavItem> GetHealthCheckQueueItemsQuery(DavDatabaseClient dbClient, List<string>? categories = null)
     {
         // Items with a non-null HistoryItemId are still linked to an active history entry
-        // (not yet imported by Radarr/Sonarr). Skip them to avoid health-checking files
-        // that are still being processed.
+        // (not yet imported by Radarr/Sonarr). Skip ordinary files to avoid health-checking
+        // files that are still being processed, but keep urgent/corrupted items visible and
+        // runnable so streaming/analysis corruption does not disappear from the ASAP queue.
         var query = dbClient.Ctx.Items
             .AsNoTracking()
             .Where(x => (x.Type == DavItem.ItemType.NzbFile
                          || x.Type == DavItem.ItemType.RarFile
                          || x.Type == DavItem.ItemType.MultipartFile)
-                        && x.HistoryItemId == null);
+                        && (x.HistoryItemId == null
+                            || x.IsCorrupted
+                            || x.NextHealthCheck == DateTimeOffset.MinValue));
 
         // Filter by categories if configured (e.g., only health-check "movies,tv")
         if (categories is { Count: > 0 })

@@ -38,13 +38,14 @@ public class GetHealthCheckQueueController(DavDatabaseClient dbClient, HealthChe
         }
 
         var now = DateTimeOffset.UtcNow;
-        var pendingCount = await query.Where(x => x.NextHealthCheck == null || x.NextHealthCheck <= now).CountAsync().ConfigureAwait(false);
+        int pendingCount;
 
         int totalCount;
         List<DavItem> pagedItems;
 
         if (request.ShowAll)
         {
+            pendingCount = await query.Where(x => x.NextHealthCheck == null || x.NextHealthCheck <= now).CountAsync().ConfigureAwait(false);
             totalCount = await query.CountAsync().ConfigureAwait(false);
             pagedItems = await query
                 .Skip(request.Page * request.PageSize)
@@ -58,9 +59,10 @@ public class GetHealthCheckQueueController(DavDatabaseClient dbClient, HealthChe
             var rawItems = await query.Take(2000).ToListAsync().ConfigureAwait(false);
 
             var filteredItems = rawItems
-                .Where(x => FilenameUtil.IsVideoFile(x.Name))
+                .Where(ShouldShowInDefaultQueue)
                 .ToList();
 
+            pendingCount = filteredItems.Count(x => x.NextHealthCheck == null || x.NextHealthCheck <= now);
             totalCount = filteredItems.Count;
 
             pagedItems = filteredItems
@@ -96,7 +98,7 @@ public class GetHealthCheckQueueController(DavDatabaseClient dbClient, HealthChe
                     Path = x.Path,
                     JobName = Path.GetFileName(Path.GetDirectoryName(x.Path)),
                     ReleaseDate = x.ReleaseDate,
-                    LastHealthCheck = x.LastHealthCheck,
+                    LastHealthCheck = result?.CreatedAt,
                     NextHealthCheck = x.NextHealthCheck == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : x.NextHealthCheck,
                     OperationType = x.NextHealthCheck == DateTimeOffset.MinValue ? "HEAD" : "STAT", // Urgent checks use HEAD, routine use STAT
                     Progress = activeItemIds.Contains(x.Id) ? -1 : 0, // Active progress is refined via WebSocket during health checks
@@ -111,5 +113,12 @@ public class GetHealthCheckQueueController(DavDatabaseClient dbClient, HealthChe
         var request = new GetHealthCheckQueueRequest(HttpContext);
         var response = await GetHealthCheckQueue(request).ConfigureAwait(false);
         return Ok(response);
+    }
+
+    private static bool ShouldShowInDefaultQueue(DavItem item)
+    {
+        return FilenameUtil.IsMediaFile(item.Name)
+               || item.IsCorrupted
+               || item.NextHealthCheck == DateTimeOffset.MinValue;
     }
 }

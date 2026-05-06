@@ -221,7 +221,7 @@ public class GetFileDetailsController(
             ItemType = davItem.Type,
             ItemTypeString = davItem.Type.ToString(),
             CreatedAt = davItem.ReleaseDate,
-            LastHealthCheck = davItem.LastHealthCheck,
+            LastHealthCheck = latestHealthCheck?.CreatedAt,
             NextHealthCheck = davItem.NextHealthCheck,
             MediaInfo = davItem.MediaInfo,
             IsCorrupted = davItem.IsCorrupted,

@@ -440,7 +440,7 @@ public class QueueItemProcessor(
                     probeFailures, fileSegments.Count, queueItem.JobName);
                 triggerMediaAnalysis = true;
             }
-            else if (!triggerMediaAnalysis)
+            else if (!triggerMediaAnalysis && fileSegments.Count > 0)
             {
                 checkedFullHealth = true;
             }
@@ -667,31 +667,34 @@ public class QueueItemProcessor(
                 }
             }
 
-            // After Step 5 verification, mark all surviving items as health-checked.
-            // This prevents them from appearing as "pending" in the health queue,
-            // since Step 5's ffprobe + decode is more thorough than a STAT health check.
-            var utcNow = DateTimeOffset.UtcNow;
-            var survivingItems = await dbContext.Items
-                .Where(i => i.ParentId == mountFolderId && i.Type != DavItem.ItemType.Directory)
-                .ToListAsync(queueCt).ConfigureAwait(false);
-
-            foreach (var item in survivingItems)
+            // Only record a health-check result when Step 3 really performed a complete
+            // article-header probe. ffprobe media analysis is not a health check, so it
+            // must not stamp LastHealthCheck on files that lack health-check details.
+            if (checkedFullHealth)
             {
-                item.LastHealthCheck = utcNow;
-                if (item.ReleaseDate != null)
-                {
-                    item.NextHealthCheck = item.ReleaseDate.Value + 2 * (utcNow - item.ReleaseDate.Value);
-                }
-            }
-
-            if (survivingItems.Count > 0)
-            {
-                await dbContext.SaveChangesAsync(queueCt).ConfigureAwait(false);
-                Log.Information("[QueueItemProcessor] Step 5: Updated health check timestamps on {Count} surviving items for {JobName}",
-                    survivingItems.Count, queueItem.JobName);
+                await RecordImportArticleProbeHealthResultsAsync(dbContext, mountFolder, queueCt).ConfigureAwait(false);
             }
 
             // If we had media files but none survived Step 5, the NZB has no playable content — fail it
+            var survivingItemsQuery = dbContext.Items
+                .AsNoTracking()
+                .Where(i => i.Type != DavItem.ItemType.Directory);
+            if (mountFolder != null && !string.IsNullOrWhiteSpace(mountFolder.Path))
+            {
+                var mountPathPrefix = mountFolder.Path.EndsWith("/", StringComparison.Ordinal)
+                    ? mountFolder.Path
+                    : mountFolder.Path + "/";
+                survivingItemsQuery = survivingItemsQuery.Where(i => i.Path.StartsWith(mountPathPrefix));
+            }
+            else
+            {
+                survivingItemsQuery = survivingItemsQuery.Where(i => i.ParentId == mountFolderId);
+            }
+            var survivingItems = await survivingItemsQuery
+                .Select(i => new { i.Name })
+                .ToListAsync(queueCt)
+                .ConfigureAwait(false);
+
             if (mediaFiles.Count > 0)
             {
                 var survivingMediaCount = survivingItems.Count(i => FilenameUtil.IsMediaFile(i.Name));
@@ -941,7 +944,6 @@ public class QueueItemProcessor(
     private static void TriggerVfsForgetForStep5DeletedItems(DavItem? mountFolder, IEnumerable<string> fileNames)
     {
         if (mountFolder == null) return;
-
         var dirsToForget = new HashSet<string>();
         if (!string.IsNullOrWhiteSpace(mountFolder.Path))
         {
@@ -962,6 +964,60 @@ public class QueueItemProcessor(
         }
 
         DavDatabaseContext.TriggerVfsForget(dirsToForget.ToArray());
+    }
+
+    private async Task RecordImportArticleProbeHealthResultsAsync(DavDatabaseContext dbContext, DavItem? mountFolder, CancellationToken cancellationToken)
+    {
+        if (mountFolder == null || string.IsNullOrWhiteSpace(mountFolder.Path)) return;
+
+        var mountPathPrefix = mountFolder.Path.EndsWith("/", StringComparison.Ordinal)
+            ? mountFolder.Path
+            : mountFolder.Path + "/";
+
+        var verifiedItems = await dbContext.Items
+            .AsNoTracking()
+            .Where(i => i.Path.StartsWith(mountPathPrefix)
+                        && (i.Type == DavItem.ItemType.NzbFile
+                            || i.Type == DavItem.ItemType.RarFile
+                            || i.Type == DavItem.ItemType.MultipartFile)
+                        && i.LastHealthCheck != null)
+            .Select(i => new { i.Id, i.Path, i.LastHealthCheck })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (verifiedItems.Count == 0) return;
+
+        var verifiedItemIds = verifiedItems.Select(i => i.Id).ToList();
+        var existingResultIds = await dbContext.HealthCheckResults
+            .AsNoTracking()
+            .Where(r => verifiedItemIds.Contains(r.DavItemId))
+            .Select(r => r.DavItemId)
+            .Distinct()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var existingResultIdSet = existingResultIds.ToHashSet();
+
+        var healthResults = verifiedItems
+            .Where(i => !existingResultIdSet.Contains(i.Id))
+            .Select(i => new HealthCheckResult
+            {
+                Id = Guid.NewGuid(),
+                DavItemId = i.Id,
+                Path = i.Path,
+                CreatedAt = i.LastHealthCheck!.Value,
+                Result = HealthCheckResult.HealthResult.Healthy,
+                RepairStatus = HealthCheckResult.RepairAction.None,
+                Operation = "HEAD",
+                Message = "Import article probe completed: HEAD/yEnc header checks verified article availability during queue processing, so the segment-size cache and initial health status are up to date."
+            })
+            .ToList();
+
+        if (healthResults.Count == 0) return;
+
+        dbContext.HealthCheckResults.AddRange(healthResults);
+        await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        Log.Information("[QueueItemProcessor] Step 5: Recorded import article-probe health results for {Count} item(s) in {JobName}",
+            healthResults.Count, queueItem.JobName);
     }
 
     private async Task MarkQueueItemCompleted

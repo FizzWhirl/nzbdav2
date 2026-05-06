@@ -127,6 +127,22 @@ export function RepairsSettings({ config, setNewConfig }: RepairsSettingsProps) 
             </Form.Group>
             <hr />
             <Form.Group>
+                    <Form.Check
+                        className={styles.input}
+                        type="checkbox"
+                        id="head-full-scan-checkbox"
+                        aria-describedby="head-full-scan-help"
+                        label={`Enable Full HEAD Scan for Non-Uniform Posts`}
+                        checked={config["repair.head-full-scan"] === "true"}
+                        onChange={e => setNewConfig({ ...config, "repair.head-full-scan": "" + e.target.checked })} />
+                    <Form.Text id="head-full-scan-help" muted>
+                        When a HEAD check cannot infer segment sizes from the first/second/last headers (non-uniform post), read every segment header individually instead of falling back to a STAT existence-only check.
+                        More accurate but slower — typically 5–15 seconds extra per file depending on segment count and provider latency.
+                        Leave off unless you frequently see "Smart HEAD analysis inconclusive" in your health check results.
+                    </Form.Text>
+                </Form.Group>
+                <hr />
+                <Form.Group>
                 <Form.Check
                     className={styles.input}
                     type="checkbox"
@@ -151,6 +167,7 @@ export function isRepairsSettingsUpdated(config: Record<string, string>, newConf
         || config["repair.min-check-interval-days"] !== newConfig["repair.min-check-interval-days"]
         || config["media.library-dir"] !== newConfig["media.library-dir"]
         || config["api.health-check-categories"] !== newConfig["api.health-check-categories"]
+        || config["repair.head-full-scan"] !== newConfig["repair.head-full-scan"]
         || config["api.startup-vacuum"] !== newConfig["api.startup-vacuum"];
 }
 

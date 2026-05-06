@@ -278,10 +278,8 @@ public class UsenetStreamingClient
 
         if (useHead)
         {
-            // HEAD health checks are expensive because we must read each article body just
-            // far enough to parse the yEnc header. Use the same smart header path as NZB
-            // analysis first (first/second/last + spot checks for uniform posts) and only
-            // fall back to STAT existence checks if the post is genuinely non-uniform.
+            // HEAD checks use smart sampling first (first/second/last + spot checks).
+            // If inconclusive, optionally do a full header scan, otherwise fall back to STAT.
             try
             {
                 return await AnalyzeNzbAsync(segmentArray, concurrency, progress, cancellationToken, useSmartAnalysis: true, allowFullScan: false).ConfigureAwait(false);
@@ -289,6 +287,12 @@ public class UsenetStreamingClient
             catch (SmartAnalysisInconclusiveException ex)
             {
                 headFallbackReason?.Invoke(ex.Message);
+                if (_configManager.IsHeadCheckFullScanEnabled())
+                {
+                    Log.Information("[HealthCheck] Smart HEAD inconclusive for {SegmentCount} segments (non-uniform sizes). Full HEAD scan enabled - reading all yEnc headers.", segmentArray.Length);
+                    return await AnalyzeNzbAsync(segmentArray, concurrency, progress, cancellationToken, useSmartAnalysis: false, allowFullScan: true).ConfigureAwait(false);
+                }
+
                 Log.Warning(ex, "[HealthCheck] Smart HEAD analysis was inconclusive for {SegmentCount} segments. Falling back to quick STAT existence checks instead of a full BODY header scan.", segmentArray.Length);
                 return await CheckAllSegmentsAsync(segmentArray, concurrency, progress, cancellationToken, useHead: false).ConfigureAwait(false);
             }

@@ -131,6 +131,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.Z (2026-05-06)
+*   **Feature**: Added an optional **Full HEAD Scan** setting (Settings > Repairs). When enabled, files with non-uniform segment sizes that would otherwise fall back to a STAT existence-only check instead have every segment's yEnc header read individually, giving true per-segment verification. Disabled by default; adds ~5–15 s per file depending on provider latency.
+
+
 ## v0.6.Z (2026-05-02)
 *   **Stats / Dashboard**: Added overall current bandwidth to the dashboard Active Streaming section and the Stats page Real-time Provider Status section. Provider Stats have moved off the Queue page and into Stats, where they are merged with the previous Bandwidth Usage data so each provider row shows period download volume, current speed, segment operations, success rate, and average speed together. The Stats range selector now includes **All**, and the dashboard time-window selector supports all-time totals; provider usage, provider stats, and bandwidth totals now follow the selected period where the stored samples support it.
 *   **UI**: Refined the mobile navigation and Health page after the responsive overhaul. Mobile sub-menu rows now retain an exact 50px left text inset, and the Health overview cards are hidden on mobile for non-Health sub-tabs so Queue / Analysis / History content starts higher on small screens.

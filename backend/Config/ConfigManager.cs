@@ -400,6 +400,13 @@ public class ConfigManager
         return configValue != null ? int.Parse(configValue) : defaultValue;
     }
 
+    public bool IsHeadCheckFullScanEnabled()
+    {
+        var defaultValue = false;
+        var configValue = StringUtil.EmptyToNull(GetConfigValue("repair.head-full-scan"));
+        return (configValue != null ? bool.Parse(configValue) : defaultValue);
+    }
+
     public bool IsAnalysisEnabled()
     {
         var defaultValue = true;

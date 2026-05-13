@@ -936,7 +936,7 @@ public class HealthCheckService
                             Path = davItem.Path,
                             CreatedAt = DateTimeOffset.UtcNow,
                             Result = HealthCheckResult.HealthResult.Unhealthy,
-                            RepairStatus = HealthCheckResult.RepairAction.Repaired,
+                            RepairStatus = HealthCheckResult.RepairAction.Deleted,
                             Message = string.Join(" ", [
                                 failureReason,
                                 $"Corresponding {linkType} found within Library Dir.",

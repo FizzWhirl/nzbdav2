@@ -131,7 +131,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
-## v0.6.Z (2026-05-06)
+## v0.6.75 (2026-05-14)
+*   **Fix**: Health-check removals that successfully trigger Arr replacement searches are now recorded as deleted file events so they appear in Deleted Files stats.
+*   **Maintenance**: Added a database migration to reclassify existing matching health-check removal records into the deleted-files history.
+
+## v0.6.74 (2026-05-06)
 *   **Fix**: Added dedupe/cooldown guards to missing-article immediate health-check triggers so repeated request failures in a short window do not repeatedly re-arm the same file for back-to-back urgent checks.
 *   **Fix**: Applied the same cooldown behavior to streaming-side urgent trigger paths, preventing repeated immediate rechecks when multiple segment failures occur close together.
 *   **Fix**: Persisted the Repairs setting for **Full HEAD Scan for Non-Uniform Posts** by wiring `repair.head-full-scan` into the settings config key list so saved values reload correctly.
@@ -139,11 +143,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Logging**: Added structured per-file health-trigger summary logs (`Source`, `Item`, `Applied`, cooldown context) to make re-trigger behavior and suppression decisions observable.
 *   **Health**: Health Check Queue and File Details continue to show the latest health result per file; full per-run details remain in Analysis History.
 
-## v0.6.Z (2026-05-06)
+## v0.6.73 (2026-05-06)
 *   **Feature**: Added an optional **Full HEAD Scan** setting (Settings > Repairs). When enabled, files with non-uniform segment sizes that would otherwise fall back to a STAT existence-only check instead have every segment's yEnc header read individually, giving true per-segment verification. Disabled by default; adds ~5–15 s per file depending on provider latency.
 
 
-## v0.6.Z (2026-05-02)
+## v0.6.72 (2026-05-02)
 *   **Stats / Dashboard**: Added overall current bandwidth to the dashboard Active Streaming section and the Stats page Real-time Provider Status section. Provider Stats have moved off the Queue page and into Stats, where they are merged with the previous Bandwidth Usage data so each provider row shows period download volume, current speed, segment operations, success rate, and average speed together. The Stats range selector now includes **All**, and the dashboard time-window selector supports all-time totals; provider usage, provider stats, and bandwidth totals now follow the selected period where the stored samples support it.
 *   **UI**: Refined the mobile navigation and Health page after the responsive overhaul. Mobile sub-menu rows now retain an exact 50px left text inset, and the Health overview cards are hidden on mobile for non-Health sub-tabs so Queue / Analysis / History content starts higher on small screens.
 *   **UI**: Table headers now keep section titles on one line and table wrappers scroll horizontally when columns cannot fit, rather than squeezing or wrapping header text on narrow screens.
@@ -179,28 +183,28 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **UI / Logging**: Sidebar sub-menu rows and the logout action now use the same edge-to-edge touch target treatment as primary menu items while keeping sub-menu text aligned with the primary label text. The Stats desktop tabs now match the Health / Settings tab styling, the Queue History header is top-aligned against its filters, System Logs render oldest-to-newest and auto-scroll to the latest entry by default, and container console logs are emitted as JSON with a lowercase `level` field for Dozzle-style log categorisation.
 *   **Fix (SABnzbd queue compatibility)**: Treat `mode=queue&limit=0` (and matching history/page-size requests) as "no limit" instead of `Take(0)`, so Sonarr/Radarr can see the full pending queue rather than only the active item plus completed history.
 
-## v0.6.Z (2026-05-02)
+## v0.6.71 (2026-05-02)
 *   **Reliability (RAR/multipart ranged GET hardening)**: Follow-up to the rclone v1.74.0 ranged-GET fix. Archive-backed streams could still bypass the new retry / graceful-degradation path when a bounded `GET /.ids/...` landed inside a small RAR/multipart part whose segment count was lower than the configured stream worker count. Those part streams fell back to the raw segment `CombinedStream`, so yEnc CRC failures could still surface as unhandled `InvalidDataException` through [`DavMultipartFileStream`](backend/Streams/DavMultipartFileStream.cs) / [`RarDeobfuscationStream`](backend/Streams/RarDeobfuscationStream.cs). Bounded streaming reads now use the small direct [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) reliability fallback even for small archive parts. [`LimitedLengthStream`](backend/Streams/LimitedLengthStream.cs) is also seekable when its wrapped stream is seekable, allowing multipart range seeks to jump directly to the requested byte instead of reading and discarding earlier bytes in the same archive part.
 
-## v0.6.Z (2026-05-02)
+## v0.6.70 (2026-05-02)
 *   **Reliability (rclone ranged GET hardening)**: After the rclone v1.74.0 PROPFIND fixes restored directory listings, rclone started issuing many bounded `GET /.ids/...` range reads and exposed a second reliability gap: if the scarce full-stream `BufferedSegmentStream` slots were already occupied, bounded range reads fell back to the legacy raw `CombinedStream` path, bypassing segment retry / graceful-degradation handling. Corrupt yEnc segments could then bubble up as unhandled `InvalidDataException` with `YENC CRC32 validation failed`, producing `500` responses and noisy Kestrel `Response Content-Length mismatch` / `application never completed` logs. Bounded rclone range reads now keep a small direct [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) reliability fallback even when the full-stream slot cap is reached, capped at four workers / sixteen buffer segments to avoid memory blowups. CRC-corrupt segments can also zero-fill using the parsed yEnc header part size when no successful segment size has been seen yet, preserving downstream byte offsets. Finally, [`ExceptionMiddleware`](backend/Middlewares/ExceptionMiddleware.cs) now aborts already-started streaming responses on failures so Kestrel does not log misleading Content-Length mismatch noise after a corrupt stream dies mid-response.
 
-## v0.6.Z (2026-05-02)
+## v0.6.69 (2026-05-02)
 *   **Fix (rclone v1.74.0 compatibility — part 2 of 2: 404 propstat blocks)**: Even after the Host-header fix below, rclone v1.74.0 still produced empty listings with the debug message `Ignoring item with bad status ["HTTP/1.1 404 Not Found" "HTTP/1.1 200 OK"]` for every root collection (`.ids`, `completed-symlinks`, `content`, `nzbs`). Root cause: NWebDav (correctly per RFC 4918 §9.1) emits one `<D:response>` per resource that can contain multiple `<D:propstat>` blocks — one for properties found (200) and one for properties NOT found (404). File-only properties like `getcontentlength` / `getcontenttype` legitimately don't apply to collections, so they're returned in a 404 propstat. rclone v1.74.0 became strict and now treats any 404 propstat as a reason to discard the entire item; v1.73.x ignored them. Fix: new [`PropFindResponseCleanupMiddleware`](backend/Middlewares/PropFindResponseCleanupMiddleware.cs) (registered just before `app.UseNWebDav()`) buffers PROPFIND XML responses and strips `<D:propstat>...<D:status>HTTP/1.1 404...</D:status>...</D:propstat>` blocks before sending to the client. The remaining 200 propstat is fully spec-compliant and accepted by rclone v1.74.0+, older rclone, Plex, Jellyfin, Finder, and Windows Explorer. Only PROPFIND requests are intercepted; all other methods (GET / HEAD / PUT / DELETE / PROPPATCH / MOVE) pass through with no buffering and no behavioural change.
 *   **Fix (rclone v1.74.0 compatibility — part 1 of 2: Host header)**: PROPFIND directory listings appeared empty in rclone v1.74.0 even though the server returned `207 Multi-Status` with a full body. Root cause: the frontend Express proxy in [`frontend/server/app.ts`](frontend/server/app.ts) used `changeOrigin: true`, which made `http-proxy-middleware` rewrite the outbound `Host` header to `localhost:8080` (the backend's internal address). NWebDav builds its `<D:href>` response URLs from `Request.Host`, so every PROPFIND response contained absolute hrefs like `http://localhost:8080/.ids` instead of the public-facing host the client connected to. Older rclone (≤ v1.73.x) ignored the host portion of hrefs and worked by accident; v1.74.0 became strict about validating href hosts against the connected host, which caused listings to be silently dropped. Fix: set `changeOrigin: false` so the original `Host` header is preserved end-to-end. Kestrel does not validate the Host header so this is safe. Diagnosed by curling the WebDAV root directly and observing `<D:href>http://localhost:8080/...</D:href>` in the response. Note: this had nothing to do with today's GD-cap or modal-tier work — those commits were temporarily reverted during bisect (see four `Revert` entries below) and then restored.
 
-## v0.6.Z (2026-04-28)
+## v0.6.68 (2026-04-28)
 *   **Fix**: The "Max Graceful Degradation Segments" field on Settings > WebDAV no longer shows error styling when left empty. The field is documented as optional (the backend falls back to the default of `3`), so an empty input is now treated as a valid state. Implemented via a new `isValidOptionalNonNegativeInt` helper used only on this field.
 *   **Logging**: Suppress NWebDav's `Property {Prop} is not supported on item {Name}` warnings. These fire whenever a WebDAV client (rclone, Plex, Jellyfin, Finder) issues a `PROPFIND` against a collection node asking for `getcontentlength` / `getcontenttype` — collections legitimately don't carry those file-only properties, but the warning fires once per (collection × property × request) and floods the log during normal browsing. Filtered out via Serilog's `Filter.ByExcluding`; any other NWebDav warnings still pass through.
 
-## v0.6.Z (2026-04-28)
+## v0.6.67 (2026-04-28)
 *   **Reliability**: [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) now lazily backfills the `__nzbdav_mp4_layout` annotation for MP4-family files that were analyzed before the layout-probe feature shipped. On the first user-facing streaming request for any such file, a one-shot HTTP probe runs in the background, fetches the first 512 bytes via the existing analysis-mode WebDAV path, parses the box atoms, and writes the resolved layout (`faststart` / `moov-at-end` / `fragmented` / `unknown`) into the file's `MediaInfo` JSON. From the next stream onwards the file uses its correctly-tiered effective GD cap. Recursion is prevented by gating on `ConnectionUsageType.Streaming` (so the inner probe stream — which uses `QueueAnalysis` — never re-fires) and by deduplicating concurrent backfills via a static in-flight set keyed by `DavItemId`.
 *   **Reliability**: [`HealthCheckService`](backend/Services/HealthCheckService.cs) now bypasses the 24-hour Sonarr/Radarr-import grace gate when the item was already hard-truncated by the streaming layer (i.e. `IsCorrupted == true && CorruptionReason starts with "Stream truncated:"`). The cached truncation evidence already proves the file can't satisfy a play, so making Sonarr/Radarr wait 24 h before triggering a repair / re-grab is needless delay.
 
-## v0.6.Z (2026-04-28)
+## v0.6.66 (2026-04-28)
 *   **UI**: The file-details modal now surfaces the **Streaming tier** for every analyzed file (Resilient / Standard / Unknown), plus the resolved **MP4 layout** (`faststart` / `moov-at-end` / `fragmented`) when applicable, so users can see at a glance why a file was tiered the way it was. Resolution mirrors [`BufferedSegmentStream.ResolveContainerFragilityTier`](backend/Streams/BufferedSegmentStream.cs) — Matroska/WebM/MPEG-TS and fragmented MP4 → Resilient (full configured cap), faststart MP4 / MOV / AVI / WMV / FLV → Standard (cap ≤ 2), moov-at-end MP4 → Unknown (cap = 0, truncate on first failure).
 
-## v0.6.Z (2026-04-28)
+## v0.6.65 (2026-04-28)
 *   **Reliability**: Detect moov-at-end MP4 / MOV files during media analysis and downgrade them to the Unknown GD-cap tier (cap = `0`, truncate on the very first permanent segment failure). [`MediaAnalysisService`](backend/Services/MediaAnalysisService.cs) now performs a 512-byte HTTP `Range` probe of the file after a successful ffprobe, walks the top-level MP4 box atoms, and injects a top-level `__nzbdav_mp4_layout` field (`faststart` / `moov-at-end` / `fragmented` / `unknown`) into the stored `MediaInfo` JSON. No DB migration required. [`BufferedSegmentStream.ResolveContainerFragilityTier`](backend/Streams/BufferedSegmentStream.cs) reads this field and:
     *   `moov-at-end` → Unknown tier (cap = `0`) — losing any segment risks losing the moov box, which makes the entire file unplayable.
     *   `fragmented` (real `moof` boxes) → Resilient tier (cap = configured) — fragmented MP4 is highly resync-tolerant.
@@ -208,7 +212,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Logging**: [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) now logs the resolved effective GD cap (configured + effective values) at every stream construction so operators can audit which container tier a file landed in without waiting for an actual GD failure.
 *   **UI**: Settings > WebDAV help text updated to document moov-at-end detection and the fragmented-MP4 promotion.
 
-## v0.6.Z (2026-04-28)
+## v0.6.64 (2026-04-28)
 *   **Reliability**: The graceful-degradation cap is now **container-aware**. The user-configured value (Settings > WebDAV → "Max Graceful Degradation Segments") still applies as the *maximum*, but [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) refines it per file from the ffprobe-populated `MediaInfo.format_name` (cached per stream after the first GD failure):
     *   **Resilient** containers (MKV / WebM / MPEG-TS / fragmented MP4) — use the configured cap unchanged. These containers have strong resync semantics (cluster boundaries / packet sync bytes / fragment boxes), so zero-fill substitution is more likely to be skipped by a tolerant decoder.
     *   **Standard** containers (MP4 / MOV / AVI / WMV / FLV / 3GP / ASF) — hard-capped at `min(configured, 2)`. Their structural metadata (moov / index boxes) is sensitive to byte-offset corruption.
@@ -216,44 +220,44 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **UI**: The Settings > WebDAV help text now documents what the configured cap applies to and which behaviours are fixed (per the per-container override above).
 *   **UI**: The [Missing Articles](frontend/app/routes/stats/components/MissingArticlesTable.tsx) table now shows a "Truncated" badge (with hover-tooltip explaining the count) on rows that have any `STREAM_TRUNCATED` events recorded in `OperationCountsJson` — i.e. files whose stream was forcibly truncated by the GD cap. This makes it easy to distinguish GD-cap truncations from genuine `ARTICLE_RETRIEVAL` failures at a glance.
 
-## v0.6.Z (2026-04-28)
+## v0.6.63 (2026-04-28)
 *   **UI**: Added a "Max Graceful Degradation Segments" control to [Settings > WebDAV](frontend/app/routes/settings/webdav/webdav.tsx) so the GD-cap can be tuned without env vars or DB edits. Empty / unset is treated as the default (`3`).
 *   **Reliability**: When the GD-cap fires, [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) now also dumps every entry in `_corruptedSegments` (one event per segment per provider, tagged `STREAM_TRUNCATED`) into the `MissingArticleEvents` ledger. This guarantees that segments that failed for non-`ArticleNotFound` reasons (timeouts, connection errors) still appear on the Missing Articles page once the stream is truncated, and that the per-segment provider bitmask correctly shows the segment as failed across every provider. Wiring is via two new static hooks (`SetMissingArticleLedgerHooks`) populated from `Program.cs` once the DI container is alive.
 
-## v0.6.Z (2026-04-28)
+## v0.6.62 (2026-04-28)
 *   **Reliability**: Cap zero-fill graceful degradation at N segments per stream (default `3`, configurable via DB key `usenet.max-graceful-degradation-segments` or env `MAX_GRACEFUL_DEGRADATION_SEGMENTS`). When the cap is exceeded, [`BufferedSegmentStream`](backend/Streams/BufferedSegmentStream.cs) throws `PermanentSegmentFailureException` instead of continuing to inject zeros — players see a clean EOF and stop playback gracefully instead of stalling on garbage decoded from the zero-filled bytes. The DavItem is also flipped to `IsCorrupted=true` immediately (regardless of the transient/permanent classification) so the next health-check cycle can repair or remove the file. Set the value to `int.MaxValue` to restore legacy "always zero-fill" behaviour, or `0` to truncate on the very first failure.
 
-## v0.6.Z (2026-04-28)
+## v0.6.61 (2026-04-28)
 *   **UI**: Rows in the [Missing Articles](frontend/app/routes/stats/components/MissingArticlesTable.tsx) tab are now clickable and open the shared file-details modal (the same one used on the Mapped Files tab and the Health page) when a `davItemId` is available. Action-cell controls (Repair, Delete, the row checkbox) stop propagation so they continue to work without opening the modal.
 
-## v0.6.Z (2026-04-28)
+## v0.6.60 (2026-04-28)
 *   **Fix**: Apply Unicode NFC normalization in [`ProviderErrorService.NormalizeFilenameForGrouping`](backend/Services/ProviderErrorService.cs) so the same logical filename arriving in different Unicode composition forms (e.g. composed `é` U+00E9 vs decomposed `e` + U+0301, common when macOS clients are involved) is grouped into a single `MissingArticleSummary` row. Without this the per-segment provider evidence bitsets would never converge across the duplicated rows. Inspired by SAB 5.0 fix “Improved handling of non-NFC unicode filenames”.
 
-## v0.6.Z (2026-04-28)
+## v0.6.59 (2026-04-28)
 *   **Fix**: PAR2 files (`*.par2`, `*.vol*+*.par2`) are no longer marked as `HasBlockingMissingArticles` in [`ProviderErrorService`](backend/Services/ProviderErrorService.cs) when they go missing across all providers. PAR2 in nzbdav is only used as a filename / metadata oracle (no Reed-Solomon recovery is performed), so a missing PAR2 never blocks streaming and should not show up as critical/blocking in the missing-articles UI. Inspired by SAB 5.0 fix “If only par2 files were missing, jobs could get incorrectly aborted”.
 
-## v0.6.Z (2026-04-28)
+## v0.6.58 (2026-04-28)
 *   **Revert**: Roll back the two ArrayPool buffer-pooling changes — [`SharedStreamEntry.PumpLoop`](backend/Streams/SharedStreamEntry.cs) and [`GetAndHeadHandlerPatch.CopyToAsync`](backend/WebDav/Base/GetAndHeadHandlerPatch.cs) — and restore the original per-call buffer allocations.
 
-## v0.6.Z (2026-04-28)
+## v0.6.57 (2026-04-28)
 *   **Logging**: `MultiProviderNntpClient` now emits a single `Warning` when every configured provider returns `ArticleNotFound` for the same segment, including the segment id, file name, operation and the wall-clock duration of the provider walk. Previously this surfaced only as many `Debug`-level "Trying another provider" lines, which made it hard to see why a streaming worker had stalled.
 
-## v0.6.Z (2026-04-28)
+## v0.6.56 (2026-04-28)
 *   **Fix**: Queue pagination on the dashboard / queue page no longer pins the currently-downloading item to the top of every page — it is now shown only on page 1 and subsequent pages return their natural order. New NZBs arriving via WebSocket also no longer get appended to the bottom of whichever page is being viewed; the current page is refreshed from the server instead so pagination and total count stay accurate.
 
-## v0.6.Z (2026-04-28)
+## v0.6.55 (2026-04-28)
 *   **Performance**: `SharedStreamEntry.PumpLoop` now rents its 256KB pump buffer from `ArrayPool<byte>.Shared` and returns it on exit, removing the per-entry unpooled long-lived allocation that previously persisted for the duration of every shared playback stream.
 
-## v0.6.Z (2026-04-28)
+## v0.6.54 (2026-04-28)
 *   **Performance**: WebDAV GET/HEAD copy buffer in `GetAndHeadHandlerPatch` is now rented from `ArrayPool<byte>.Shared` instead of allocating a fresh 256KB array per request, removing per-request large-object-heap churn under concurrent ranged reads.
 
-## v0.6.Z (2026-04-28)
+## v0.6.53 (2026-04-28)
 *   **Performance**: Removed the post-import ffmpeg decode-integrity sampling at 10% and 90% in `MediaAnalysisService` (and the now-unused `MediaAnalysisResult.TransientError` enum value and its dead switch case in `QueueItemProcessor`). Media analysis now stops after the ffprobe metadata probe, eliminating two extra ffmpeg seeks (and their associated WebDAV reads, segment fetches, and false-positive transient failures) per imported file. ffprobe metadata remains the corruption signal.
 
-## v0.6.Z (2026-04-28)
+## v0.6.52 (2026-04-28)
 *   **Docs**: Added an integrated, code-validated v2 of the memory usage improvement report (`docs/memory-usage-improvement-report-v2-2026-04-28.md`) and removed the superseded v1 draft.
 
-## v0.6.Z (2026-04-27)
+## v0.6.51 (2026-04-27)
 *   **UI**: Removed the misleading `Connections Per Stream` control from Settings → WebDAV because normal playback currently draws elastically from the shared `Total Streaming Connections` pool rather than enforcing a hard per-stream cap.
 *   **UI**: Simplified WebDAV streaming validation and connection-pool guidance to focus on pooled provider capacity, total streaming permits, max buffered stream pumps, and streaming reserve.
 *   **Fix**: Dashboard active-streaming WebSocket updates now read the provider index from the correct message field, preventing live connection counts from being displayed as fake providers such as `Provider 45`.
@@ -262,7 +266,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **UI**: Removed the Stats page Live Metrics tab entirely; legacy `?tab=metrics` links now fall back to the normal Statistics tab.
 *   **Docs**: Added a memory usage improvement report outlining low-risk ways to reduce buffer, shared-stream, background-task, and NZB materialisation memory without reducing streaming speed.
 
-## v0.6.Z (2026-04-26)
+## v0.6.50 (2026-04-26)
 *   **Docs**: Added a comprehensive codebase streaming reliability, speed, and health review covering backend streaming, queue processing, health/repair, database consistency, frontend proxy/WebSocket behavior, and operational tooling, with a prioritized remediation plan.
 *   **Fix**: Provider connection-pool reset/force-release now releases semaphore capacity when doomed active connections are returned, preventing silent pool shrinkage after active connection resets.
 *   **Fix**: Streaming connection permits now use tracked disposable leases in buffered workers, avoiding legacy permit tracking drift and preventing the stuck-permit sweeper from double-releasing already-returned permits. Runtime resizing is deferred until active permits drain safely.
@@ -289,7 +293,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Tooling**: Removed deprecated TypeScript `baseUrl` usage from the frontend Vite tsconfig while keeping the `~/*` path alias intact for TypeScript 7 readiness.
 *   **Fix**: Added the missing EF migration metadata for `SegmentProviderEvidenceJson` so existing databases discover and apply the compact provider-evidence schema update during startup migration.
 
-## v0.6.Z (2026-04-25)
+## v0.6.49 (2026-04-25)
 *   **Fix**: `/metrics` endpoint was returning 401 Unauthorized through the frontend proxy because `UseWebdavBasicAuthentication` + `UseNWebDav` middleware ran before the endpoint dispatcher and challenged the unauthenticated request. Switched from endpoint-based `app.MapMetrics("/metrics")` to middleware-based `app.UseMetricServer("/metrics")` placed *before* the auth middleware so the request short-circuits. The Live Metrics tab on the Stats page can now actually load data.
 *   **UI**: Reorganized Settings → WebDAV tab into four labelled sections (`Authentication` / `Streaming Connection Pool` / `Streaming Behavior` / `WebDAV Behavior`) and removed the duplicate `Stream Buffer Size` field that previously appeared on both the Usenet and WebDAV tabs.
 *   **UI**: Surfaced six previously-hidden streaming knobs on the WebDAV tab with React Bootstrap forms and per-field descriptions: `Connections Per Stream`, `Max Concurrent Buffered Streams`, `Streaming Reserve`, `Streaming Priority Odds`, `Use Buffered Streaming Pump`, `Shared Stream Buffer Size (MB)`, `Shared Stream Grace Period (seconds)`.
@@ -297,7 +301,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **UI**: Extended the WebDAV `ConnectionPoolTip` warning to also flag the streaming budget constraint `total-streaming-connections >= connections-per-stream * max-concurrent-buffered-streams + streaming-reserve`. The Save button is disabled with `Invalid WebDAV settings` until the user resolves the conflict.
 *   **UI**: Added an `Invalid Usenet settings` save-button state for cases where `analysis.max-concurrent` or `usenet.operation-timeout` are non-positive.
 
-## v0.6.Z (2026-04-24)
+## v0.6.48 (2026-04-24)
 *   **UI**: New "Live Metrics" tab on the System Monitor (`/stats`) page. Polls `/metrics` every 3s and renders shared-stream hit ratio (cumulative + rolling chart, last 3 minutes), miss-reason breakdown, per-pool live/idle/active/max + free-slot counts with circuit-breaker badges, and seek-latency p50/p95/p99 per kind (`cold` / `warm` / `noop` / `fresh`). Frontend Express layer also proxies `/metrics` through to the backend so authenticated UI users can fetch it.
 *   **Observability**: Added Prometheus `/metrics` endpoint (via `prometheus-net.AspNetCore`). Exposes shared-stream `nzbdav_shared_stream_hits_total` / `_misses_total{reason}` / `_active_entries`, per-pool `nzbdav_pool_{live,idle,active,max,remaining_semaphore_slots}_connections{pool}` plus `nzbdav_pool_consecutive_connection_failures{pool}` and `nzbdav_pool_circuit_breaker_tripped{pool}`, and an `nzbdav_seek_latency_seconds{kind=cold|warm|noop|fresh}` histogram. Pool gauges refresh every 5s via `PoolMetricsCollector` hosted service. Existing log-level conventions and request flow are unchanged.
 *   **Logging**: Demoted benign cancellation noise. `ConnectionPool` now logs `Connection ... was canceled` at Debug instead of Warning when the caller's `CancellationToken` is the trigger (HTTP client disconnect for `BufferedStreaming`, per-file deadline for `QueueAnalysis`, queue cancellation, etc.). True connection failures still log at Warning/Error and trip the circuit breaker as before. `[CancellationTokenContext]` nested-scope removals (where an inner `SetScopedContext` already cleared the entry) are also Debug now.
@@ -311,7 +315,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Performance**: Skip the shared-stream pump for requests with a closed `bytes=X-Y` range — discrete bounded reads now take the direct bounded-prefetch path instead of attaching to a streaming pump that would prefetch to EOF for downstream readers.
 *   **Reliability**: Open-ended (`bytes=X-`) and unbounded GETs are unchanged — Plex/Jellyfin/rclone full-file streaming continues to use the shared streaming pump with full read-ahead.
 
-## v0.6.Z (2026-04-23)
+## v0.6.47 (2026-04-23)
 *   **Fix**: Resolve "NOT NULL constraint failed: DavItems.SubType" error when migrating from v1 databases. The compat layer now recreates the DavItems table with nullable SubType column to allow new item creation during queue processing.
 *   **Fix**: Corrected `DavItems` schema compatibility rebuild to avoid creating an unintended foreign key from `DavItems.HistoryItemId` to `HistoryItems.Id`, which caused queue item saves to fail with `FOREIGN KEY constraint failed`.
 *   **Reliability**: Added pre-migration drift handling for `20260408180402_ChangeQueueItemsFileNameIndexToCategoryFileName` so pre-existing `IX_QueueItems_Category_FileName` no longer crashes startup migrations.
@@ -323,106 +327,106 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Reliability**: Queue delete requests from the web UI now use strict mode so backend removal failures are returned as errors instead of being silently reported as success, preventing items from disappearing and then reappearing after refresh.
 *   **Fix**: Hardened WebSocket message parsing in the queue UI to ignore malformed/non-JSON frames instead of throwing client-side runtime errors in production chunks, improving real-time queue stability.
 
-## v0.7.22 (2026-04-23)
+## v0.6.46 (2026-04-23)
 *   **Fix**: Added v1-compatible `DavItems` type normalization for databases that use `Type=2` + `SubType` (`201/202/203`) so files are no longer misclassified as folders in UI/WebDAV/rclone mounts.
 *   **Fix**: Added queue recovery from legacy blob files at startup (`/config/blobs/{firstTwo}/{nextTwo}/{guid}`) to repopulate `QueueNzbContents` before orphan cleanup.
 *   **Reliability**: Extended startup migration self-healing to handle mixed-schema upgrades where both old and new type encodings may coexist.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-23-V1-MIGRATION-FILETYPE-QUEUE-RECOVERY`.
 
-## v0.7.21 (2026-04-22)
+## v0.6.45 (2026-04-22)
 *   **Fix**: Added pre-migration index compatibility checks that recreate legacy indexes before EF migration runs, preventing failures such as `no such index: IX_DavItems_Type_NextHealthCheck_ReleaseDate_Id` on drifted v1 databases.
 *   **Reliability**: Migration bootstrap now safely pre-creates `IX_DavItems_Type_NextHealthCheck_ReleaseDate_Id` and `IX_QueueItems_FileName` only when required tables and columns exist.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-MIGRATION-INDEX-COMPAT`.
 
-## v0.7.20 (2026-04-22)
+## v0.6.44 (2026-04-22)
 *   **Fix**: Added runtime queue migration self-healing to backfill `QueueNzbContents` from legacy `QueueItems.NzbContents` when available and remove orphan queue rows that would otherwise stall processing with "no NZB contents" warnings.
 *   **Fix**: Added runtime normalization for legacy `DavItems` rows incorrectly marked as directories even though they map to file tables (`DavNzbFiles`, `DavRarFiles`, `DavMultipartFiles`).
 *   **Reliability**: Startup compatibility pass now repairs schema/data drift for v1-to-v2 migrations before background services run.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-MIGRATION-COMPAT-PATCHES`.
 
-## v0.7.19 (2026-04-22)
+## v0.6.43 (2026-04-22)
 *   **Fix**: Added runtime schema compatibility checks that automatically add missing `DownloadDirId` columns to `HistoryItems` and `HistoryCleanupItems` when upgrading from legacy databases with migration drift.
 *   **Reliability**: Added startup self-healing index creation for `IX_HistoryItems_Category_DownloadDirId` to keep history cleanup and health-check queries stable after migration from v1.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-SCHEMA-COMPAT-HISTORY`.
 
-## v0.7.18 (2026-04-22)
+## v0.6.42 (2026-04-22)
 *   **Tooling**: Kept Docker publishing repository-derived so GitHub Actions publishes to the current fork owner automatically.
 *   **UI**: Updated in-app GitHub and changelog links to point to FizzWhirl/nzbdav2.
 *   **Docs**: Updated the Quick Start image reference to `ghcr.io/fizzwhirl/nzbdav2:latest`.
 
-## v0.7.17 (2026-04-22)
+## v0.6.41 (2026-04-22)
 *   **Optimization**: Reduced media-analysis decode sample duration from 5 seconds to 2 seconds for Step 5 decode checks to lower analysis data usage.
 *   **Logic**: Disabled buffered segment streaming only for `X-Analysis-Mode` requests, so analysis no longer prefetches extra Usenet data while regular playback keeps existing buffering behavior.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-LOW-DATA`.
 
-## v0.7.16 (2026-04-22)
+## v0.6.40 (2026-04-22)
 *   **Fix**: Step 5 media analysis now keeps files (instead of marking them corrupt) when decode check failures are caused by transient provider errors — 5XX responses, NNTP protocol errors, premature EOF, or decode timeouts. Only genuine codec errors (invalid data, CRC failures) result in corruption marking.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-TRANSIENT-DECODE-FIX`.
 
-## v0.7.15 (2026-04-22)
+## v0.6.39 (2026-04-22)
 *   **Reliability**: Hardened `NzbProviderAffinity` stats persistence by preventing overlapping timer writes and reducing write cadence from 5s to 15s.
 *   **Fix**: Added retry handling for transient SQLite write errors (`disk I/O error`, `database is locked`) during affinity stats persistence.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-AFFINITY-PERSIST-FIX`.
 
-## v0.7.14 (2026-04-22)
+## v0.6.38 (2026-04-22)
 *   **Reliability**: Raised default `analysis.max-concurrent` from `1` to `3` in backend and frontend defaults to avoid severe queue-analysis bottlenecks on large packs.
 *   **Logic**: Kept unified analysis fan-out model where both Queue Step 3 smart probe and Step 5 media analysis follow `analysis.max-concurrent`.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-DEFAULTS-3`.
 
-## v0.7.13 (2026-04-22)
+## v0.6.37 (2026-04-22)
 *   **Logic**: Queue Step 5 media analysis (`ffprobe` + decode checks) now uses `analysis.max-concurrent` instead of a separate hardcoded parallelism value.
 *   **Logic**: Queue Steps 3 and 5 now share the same frontend-exposed analysis concurrency setting.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-UNIFIED-ANALYSIS-CONCURRENCY`.
 
-## v0.7.12 (2026-04-22)
+## v0.6.36 (2026-04-22)
 *   **Logic**: Queue Step 5 media probing (`ffprobe` + decode checks) now runs only when `api.ensure-article-existence=true`.
 *   **Logic**: Queue Step 3 smart article probe now skips sample files when `usenet.hide-samples=true`.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-PROBE-GATING-SAMPLES`.
 
-## v0.7.11 (2026-04-22)
+## v0.6.35 (2026-04-22)
 *   **Logic**: Removed the smart article probe safety clamp so Queue Step 3 now uses `analysis.max-concurrent` directly.
 *   **Reliability**: Keeps probe concurrency behavior fully aligned with the single analysis tuning setting.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-PROBE-UNCAPPED`.
 
-## v0.7.10 (2026-04-22)
+## v0.6.34 (2026-04-22)
 *   **Logic**: Queue Step 3 smart article probe parallelism now follows `analysis.max-concurrent` instead of a separate hardcoded value.
 *   **Reliability**: Applied safety clamp (`1..8`) to probe parallelism to avoid runaway fan-out while still allowing tuning through a single setting.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-ANALYSIS-PROBE-LINK`.
 
-## v0.7.9 (2026-04-22)
+## v0.6.33 (2026-04-22)
 *   **Fix**: Reduced queue Step 3 per-file smart article probe parallelism from 8 to 4 (`Parallel.ForEachAsync MaxDegreeOfParallelism`) to lower concurrent `QueueAnalysis` pressure during large queue processing.
 *   **Reliability**: Helps reduce memory pressure spikes when many files are probed simultaneously in the same NZB job.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-22-QUEUE-PROBE-CAP-4`.
 
-## v0.7.8 (2026-04-21)
+## v0.6.32 (2026-04-21)
 *   **Fix**: Changed media decode integrity sampling points from 75%/90% to 10%/90% so corruption near the start of files is validated earlier.
 *   **Reliability**: Hardened Settings defaults by setting `analysis.max-concurrent` to `1` in the frontend defaults/fallback to match backend safe defaults and reduce OOM risk during mass analysis.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-OOM-HARDENING-PASS2`.
 
-## v0.7.7 (2026-04-21)
+## v0.6.31 (2026-04-21)
 *   **Fix**: Reverted configurable `usenet.cleanup-timeout-ms` setting and restored fixed 500ms NNTP cleanup timeout behavior.
 *   **UI**: Removed "Connection Cleanup Timeout (ms)" from Settings → Usenet.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-ROLLBACK-CLEANUP-TIMEOUT`.
 
-## v0.7.6 (2026-04-21)
+## v0.6.30 (2026-04-21)
 *   **UI**: Updated Queue page Provider Stats card styling to use Bootstrap theme variables so text/background contrast renders correctly in dark mode.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-CLEANUP-TIMEOUT-QUEUE-DARKMODE` for deployment verification.
 
-## v0.7.5 (2026-04-21)
+## v0.6.29 (2026-04-21)
 *   **Feature**: Added configurable `usenet.cleanup-timeout-ms` setting to control how long NNTP connection cleanup waits before force-replacing a draining connection.
 *   **Reliability**: Wired cleanup timeout configuration into both stream-dispose and background cleanup paths to reduce false cleanup cancellation churn on slower providers.
 *   **UI**: Added "Connection Cleanup Timeout (ms)" field to Settings → Usenet with validation and save tracking.
 
-## v0.7.4 (2026-04-21)
+## v0.6.28 (2026-04-21)
 *   **Fix**: Reduced default `analysis.max-concurrent` from 3 to 1, and `usenet.max-concurrent-buffered-streams` from 4 to 2, to prevent OOM crashes under memory pressure when multiple ffprobe analyses and buffered streams run simultaneously.
 *   **Reliability**: Each ffprobe analysis opens a `NzbFileStream` with a 20-segment prefetch buffer; reducing concurrent analyses from 3 to 1 cuts peak streaming RAM by ~60% for containers with limited memory.
 
-## v0.7.3 (2026-04-21)
+## v0.6.27 (2026-04-21)
 *   **Fix**: Added queue-time sample file filtering when `usenet.hide-samples=true`, so sample releases are removed before importable-media validation and ffprobe analysis.
 *   **Reliability**: Replaced narrow `".sample."` matching with centralized filename token detection, improving sample filtering across WebDAV content and completed-symlink views.
 *   **Logging**: Updated backend startup build banner to `BUILD v2026-04-21-SAMPLE-FILTER-HARDENING` for clearer deployment verification.
 
-## v0.7.2 (2026-04-21)
+## v0.6.26 (2026-04-21)
 *   **Fix**: Preview endpoints now reject non-file DavItem IDs up front (directories/roots), preventing HLS/remux requests from targeting invalid `/view` paths.
 *   **Reliability**: HLS and remux preview streaming no longer return empty HTTP 200 responses when `ffmpeg` exits with an error before emitting data; zero-output failures now return explicit 502 errors.
 *   **Maintenance**: Rebased feature/media-analysis-optimization onto latest `origin/main` and retained branch functionality on top of upstream queue/concurrency changes.
@@ -431,7 +435,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Performance**: Refactored queue Step 5 analysis history persistence from per-item locked `SaveChanges()` to batched post-loop async persistence.
 *   **Docs**: Added deep review report plus performance/security addendum in `docs/superpowers/plans/deep-review-report-2026-04-21.md`.
 
-## v0.7.1 (2026-04-13)
+## v0.6.25 (2026-04-13)
 *   **Feature**: Hybrid connection pool — replace hard-partitioned connection semaphores with priority-based shared pool (`PrioritizedSemaphore`). Queue processing uses full connection capacity when not streaming; streaming gets guaranteed reserve slots (configurable via `usenet.streaming-reserve`, default 5) and priority scheduling (configurable via `usenet.streaming-priority`, default 80%).
 *   **Feature**: Buffered multi-connection streaming during RAR header parsing via new `QueueRarProcessing` context — RAR end-of-archive seeks now pre-fetch segments instead of one-at-a-time lazy fetches.
 *   **Feature**: Per-queue-item article caching — segments fetched in Step 1 (first-segment identification) are cached to temp files and reused in Step 2 (RAR header parsing) without additional network round-trips.
@@ -439,7 +443,7 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Config**: New settings: `usenet.streaming-reserve` (default 5), `usenet.streaming-priority` (default 80), `usenet.max-download-connections` (default min(totalPooled, 15)).
 *   **Config**: `api.max-queue-connections` deprecated — logs warning if explicitly set; no longer controls a semaphore.
 
-## v0.7.0 (2026-04-12)
+## v0.6.24 (2026-04-12)
 *   **Feature**: Shared stream system — multiple concurrent HTTP requests for the same file now share a single `BufferedSegmentStream` instead of each creating their own. When Stremio sends parallel probe + streaming requests, only the first creates the underlying Usenet stream; subsequent requests attach as readers to the same ring buffer. Includes configurable grace period (default 10s) to keep the stream alive between reader transitions, and configurable buffer size (default 32MB).
 *   **Feature**: Concurrent stream cap — limits how many `BufferedSegmentStream` instances can exist simultaneously (configurable via `usenet.max-concurrent-buffered-streams`, default 2). Prevents retry storms from spawning unbounded streams that exhaust memory.
 *   **Feature**: GC tuning for memory-constrained deployments — Dockerfile now sets `DOTNET_GCConserveMemory=9` and `DOTNET_GCHeapHardLimit` to keep the .NET GC aggressive about reclaiming memory in Docker containers.

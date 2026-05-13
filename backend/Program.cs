@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-              Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-06-UNMAPPED-HEALTHCHECK");
-              Log.Warning("  FIX: Health checks no longer skip files that are not yet mapped in LocalLinks.");
+              Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-14-HEALTH-DELETED-STATS");
+              Log.Warning("  FIX: Health-check Arr removals are now counted in deleted-file stats.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

@@ -532,7 +532,7 @@ public class QueueItemProcessor(
 
             var allItems = await dbContext.Items
                 .Where(i => i.ParentId == mountFolderId && i.Type != DavItem.ItemType.Directory)
-                .Select(i => new { i.Id, i.Name })
+                .Select(i => new Step5FileItem(i.Id, i.Name, i.Path))
                 .ToListAsync().ConfigureAwait(false);
 
             // Only run ffprobe on media files not confirmed DMCA'd or probe-failed
@@ -546,9 +546,12 @@ public class QueueItemProcessor(
                 var dmcaItems = allItems.Where(i => dmcaNameSet.Contains(i.Name)).ToList();
                 if (dmcaItems.Count > 0)
                 {
-                    var dmcaDeleted = await dbContext.Items
-                        .Where(i => dmcaItems.Select(x => x.Id).Contains(i.Id))
-                        .ExecuteDeleteAsync().ConfigureAwait(false);
+                    var dmcaDeleted = await DeleteStep5ItemsAndRecordHealthResultsAsync(
+                        dbContext,
+                        dmcaItems,
+                        "IMPORT_PROBE",
+                        "Import article probe found a confirmed DMCA/takedown pattern. Deleted file before import.",
+                        queueCt).ConfigureAwait(false);
                     TriggerVfsForgetForStep5DeletedItems(mountFolder, dmcaItems.Select(x => x.Name));
                     Log.Information("[QueueItemProcessor] Step 5: Removed {Deleted} DMCA/takedown files from {JobName}",
                         dmcaDeleted, queueItem.JobName);
@@ -561,9 +564,12 @@ public class QueueItemProcessor(
                 var failedItems = mediaFiles.Where(i => failedProbeSet.Contains(i.Name)).ToList();
                 if (failedItems.Count > 0)
                 {
-                    var probeFailedDeleted = await dbContext.Items
-                        .Where(i => failedItems.Select(x => x.Id).Contains(i.Id))
-                        .ExecuteDeleteAsync().ConfigureAwait(false);
+                    var probeFailedDeleted = await DeleteStep5ItemsAndRecordHealthResultsAsync(
+                        dbContext,
+                        failedItems,
+                        "IMPORT_PROBE",
+                        "Import article probe found missing or unavailable articles. Deleted file before import.",
+                        queueCt).ConfigureAwait(false);
                     TriggerVfsForgetForStep5DeletedItems(mountFolder, failedItems.Select(x => x.Name));
                     Log.Information("[QueueItemProcessor] Step 5: Removed {Deleted} probe-failed files (missing articles) from {JobName}",
                         probeFailedDeleted, queueItem.JobName);
@@ -652,10 +658,14 @@ public class QueueItemProcessor(
                 if (!corruptIds.IsEmpty)
                 {
                     var corruptIdList = corruptIds.ToList();
-                    var corruptNames = filesToCheck.Where(i => corruptIdList.Contains(i.Id)).Select(i => i.Name).ToList();
-                    var deleted = await dbContext.Items
-                        .Where(i => corruptIdList.Contains(i.Id))
-                        .ExecuteDeleteAsync().ConfigureAwait(false);
+                    var corruptItems = filesToCheck.Where(i => corruptIdList.Contains(i.Id)).ToList();
+                    var corruptNames = corruptItems.Select(i => i.Name).ToList();
+                    var deleted = await DeleteStep5ItemsAndRecordHealthResultsAsync(
+                        dbContext,
+                        corruptItems,
+                        "MEDIA_ANALYSIS",
+                        "Media analysis failed: ffprobe could not read playable media streams. Deleted file before import.",
+                        queueCt).ConfigureAwait(false);
                     TriggerVfsForgetForStep5DeletedItems(mountFolder, corruptNames);
                     Log.Information("[QueueItemProcessor] Step 5 complete: Removed {Deleted} corrupt files from {JobName}. {Healthy}/{Total} media files remain.",
                         deleted, queueItem.JobName, filesToCheck.Count - corruptIdList.Count, filesToCheck.Count);
@@ -965,6 +975,45 @@ public class QueueItemProcessor(
 
         DavDatabaseContext.TriggerVfsForget(dirsToForget.ToArray());
     }
+
+    private static async Task<int> DeleteStep5ItemsAndRecordHealthResultsAsync(
+        DavDatabaseContext dbContext,
+        IReadOnlyCollection<Step5FileItem> items,
+        string operation,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        if (items.Count == 0) return 0;
+
+        var itemIds = items.Select(x => x.Id).ToList();
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var deleted = await dbContext.Items
+            .Where(i => itemIds.Contains(i.Id))
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (deleted > 0)
+        {
+            var utcNow = DateTimeOffset.UtcNow;
+            dbContext.HealthCheckResults.AddRange(items.Select(item => new HealthCheckResult
+            {
+                Id = Guid.NewGuid(),
+                DavItemId = item.Id,
+                Path = item.Path,
+                CreatedAt = utcNow,
+                Result = HealthCheckResult.HealthResult.Unhealthy,
+                RepairStatus = HealthCheckResult.RepairAction.Deleted,
+                Operation = operation,
+                Message = message
+            }));
+            await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return deleted;
+    }
+
+    private sealed record Step5FileItem(Guid Id, string Name, string Path);
 
     private async Task RecordImportArticleProbeHealthResultsAsync(DavDatabaseContext dbContext, DavItem? mountFolder, CancellationToken cancellationToken)
     {

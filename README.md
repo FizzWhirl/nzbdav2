@@ -131,6 +131,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.76 (2026-05-14)
+*   **Fix**: Queue/import validation removals for confirmed DMCA/takedown files, failed article probes, and corrupt media-analysis results now write deleted health-result rows so Deleted Files stats include those automated removals.
+*   **Reliability**: Bulk item deletion and deleted-file stat insertion now run in one transaction for import-validation cleanup paths.
+
 ## v0.6.75 (2026-05-14)
 *   **Fix**: Health-check removals that successfully trigger Arr replacement searches are now recorded as deleted file events so they appear in Deleted Files stats.
 *   **Maintenance**: Added a database migration to reclassify existing matching health-check removal records into the deleted-files history.

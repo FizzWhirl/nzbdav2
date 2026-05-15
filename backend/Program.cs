@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-              Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-14-HEALTH-DELETED-STATS");
-              Log.Warning("  FIX: Health-check Arr removals are now counted in deleted-file stats.");
+              Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-14-DELETED-STATS-COVERAGE");
+              Log.Warning("  FIX: Health-check and import-validation removals are counted in deleted-file stats.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

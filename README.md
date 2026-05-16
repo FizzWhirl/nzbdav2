@@ -131,6 +131,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.80 (2026-05-17)
+*   **Fix**: Failed queue items are no longer exposed as still-downloading SAB queue entries after they have already been moved to failed history, allowing Sonarr/Radarr to detect the failed history state and remove it according to their download-client settings.
+*   **Fix**: Whole-download failure notifications now refresh Arr monitored downloads instead of directly deleting Arr queue records, so Sonarr/Radarr remain the authority for blocklist, removal, and replacement-search behavior.
+
 ## v0.6.79 (2026-05-16)
 *   **Fix**: Queue Step 3 smart article probes no longer escalate inconclusive files into high-concurrency full segment scans; they now defer those files to media analysis, preventing large cleanup waits under provider connection failures.
 *   **Reliability**: Smart-probe logging now reports the separate file parallelism and segment scan cap so provider pressure is easier to diagnose.

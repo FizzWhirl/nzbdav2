@@ -358,13 +358,15 @@ public class QueueItemProcessor(
             // 180s overall backstop, 15s per-file timeout.
             // Probe parallelism follows analysis.max-concurrent directly.
             var smartProbeParallelism = configManager.GetMaxConcurrentAnalyses();
+            var smartProbeSegmentConcurrency = Math.Max(1, Math.Min(10, smartProbeParallelism * 2));
             using var overallProbeCts = CancellationTokenSource.CreateLinkedTokenSource(queueCt);
             overallProbeCts.CancelAfter(TimeSpan.FromSeconds(180));
             // Propagate QueueAnalysis context for article probes (lighter limits than full Queue)
             var probeContext = new ConnectionUsageContext(ConnectionUsageType.QueueAnalysis, queueItem.JobName);
             using var _probeCtx = overallProbeCts.Token.SetScopedContext(probeContext);
 
-            Log.Information("[QueueItemProcessor] Step 3: Smart article probe parallelism set to {Parallelism} from analysis.max-concurrent", smartProbeParallelism);
+            Log.Information("[QueueItemProcessor] Step 3: Smart article probe parallelism set to {Parallelism} from analysis.max-concurrent; segment scan cap {SegmentConcurrency}",
+                smartProbeParallelism, smartProbeSegmentConcurrency);
 
             try
             {
@@ -382,7 +384,13 @@ public class QueueItemProcessor(
 
                             try
                             {
-                                var segmentSizes = await usenetClient.AnalyzeNzbAsync(file.SegmentIds, concurrency, null, fileCts.Token, useSmartAnalysis: true).ConfigureAwait(false);
+                                var segmentSizes = await usenetClient.AnalyzeNzbAsync(
+                                    file.SegmentIds,
+                                    smartProbeSegmentConcurrency,
+                                    null,
+                                    fileCts.Token,
+                                    useSmartAnalysis: true,
+                                    allowFullScan: false).ConfigureAwait(false);
                                 file.ApplySegmentSizes(segmentSizes);
                                 probePassedNames.Add(file.FileName);
                                 break; // Success — exit retry loop

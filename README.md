@@ -131,6 +131,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.79 (2026-05-16)
+*   **Fix**: Queue Step 3 smart article probes no longer escalate inconclusive files into high-concurrency full segment scans; they now defer those files to media analysis, preventing large cleanup waits under provider connection failures.
+*   **Reliability**: Smart-probe logging now reports the separate file parallelism and segment scan cap so provider pressure is easier to diagnose.
+
 ## v0.6.78 (2026-05-16)
 *   **Fix**: RAR header timeouts and provider-side cancellations during queue import now abort the archive scan quickly and pause the queue item for retry instead of grinding through every remaining RAR part.
 *   **Logging**: RAR header cancellations are now logged as warning-level timeout/cancel events rather than error-level archive parsing failures.

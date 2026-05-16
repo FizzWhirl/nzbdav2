@@ -35,6 +35,7 @@ public class RarProcessor(
         Log.Information("[RarProcessor] Starting parallel RAR processing for {Count} parts", fileInfos.Count);
 
         var sortedInfos = fileInfos.OrderBy(f => GetPartNumber(f.FileName)).ToList();
+        using var processorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         // Keep RAR header extraction bounded globally. Each active part may use multiple
         // buffered segment workers, so part concurrency must be capped by the shared header
@@ -63,7 +64,14 @@ public class RarProcessor(
 
                 try
                 {
-                    return await ProcessPartAsync(fileInfo).ConfigureAwait(false);
+                    return await ProcessPartAsync(fileInfo, processorCts.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested && IsRarHeaderTimeoutOrCancellation(ex))
+                {
+                    try { await processorCts.CancelAsync().ConfigureAwait(false); } catch (ObjectDisposedException) { }
+                    Log.Warning(ex, "[RarProcessor] Aborting RAR processing after header read timeout/cancellation for {FileName}. Queue item will retry instead of scanning remaining parts.",
+                        fileInfo.FileName);
+                    throw new RetryableDownloadException($"Timed out reading RAR headers for {fileInfo.FileName}. Will retry.");
                 }
                 catch (Exception ex)
                 {
@@ -91,9 +99,9 @@ public class RarProcessor(
         };
     }
 
-    private async Task<List<StoredFileSegment>> ProcessPartAsync(GetFileInfosStep.FileInfo fileInfo)
+    private async Task<List<StoredFileSegment>> ProcessPartAsync(GetFileInfosStep.FileInfo fileInfo, CancellationToken processorToken)
     {
-        using var headerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var headerCts = CancellationTokenSource.CreateLinkedTokenSource(processorToken);
         headerCts.CancelAfter(TimeSpan.FromSeconds(60));
 
         var segments = fileInfo.NzbFile.GetSegmentIds();
@@ -136,7 +144,7 @@ public class RarProcessor(
                     // Seek to the start of file data
                     stream.Position = x.GetDataStartPosition() + offset;
                     var sigBuffer = new byte[4];
-                    var sigRead = await stream.ReadAsync(sigBuffer, 0, 4, ct).ConfigureAwait(false);
+                    var sigRead = await stream.ReadAsync(sigBuffer, 0, 4, processorToken).ConfigureAwait(false);
 
                     if (sigRead == 4 && sigBuffer[0] == 0xAA && sigBuffer[1] == 0x04 && sigBuffer[2] == 0x1D && sigBuffer[3] == 0x6D)
                     {
@@ -172,6 +180,9 @@ public class RarProcessor(
 
         return results;
     }
+
+    private static bool IsRarHeaderTimeoutOrCancellation(Exception exception) =>
+        exception.GetBaseException() is OperationCanceledException or TaskCanceledException or TimeoutException;
 
     private string GetArchiveName(GetFileInfosStep.FileInfo fileInfo)
     {

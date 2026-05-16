@@ -56,6 +56,13 @@ public class QueueItemProcessor(
             Log.Information("[QueueItemProcessor] Successfully completed processing for {JobName}", queueItem.JobName);
         }
 
+        // Provider/header timeouts can surface as cancellation exceptions even though the
+        // queue item was not manually cancelled. Keep those items retryable.
+        catch (Exception e) when ((e.GetBaseException() is OperationCanceledException or TaskCanceledException) && !ct.IsCancellationRequested)
+        {
+            await PauseQueueItemForRetryAsync(e, "Internal processing timeout/cancellation").ConfigureAwait(false);
+        }
+
         // When a queue-item is removed while processing,
         // then we need to clear any db changes and finish early.
         catch (Exception e) when (e.GetBaseException() is OperationCanceledException or TaskCanceledException)
@@ -88,37 +95,7 @@ public class QueueItemProcessor(
         // log the error and retry in a minute.
         catch (Exception e) when (e.IsRetryableDownloadException())
         {
-            try
-            {
-                Log.Warning("[QueueItemProcessor] Retryable error processing job {JobName} ({Id}): {Message}. Will retry in 1 minute.",
-                    queueItem.JobName, queueItem.Id, e.Message);
-                using var scope = scopeFactory.CreateScope();
-                var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
-                
-                // We need to attach queueItem to the new context because it was tracked by the old (now gone) context?
-                // Actually queueItem object comes from QueueManager loop context which is disposed?
-                // No, QueueManager loop keeps context alive.
-                // BUT QueueItemProcessor now doesn't have that context.
-                // So we must attach it or fetch it again.
-                
-                // Fetching fresh is safer.
-                var item = await dbClient.Ctx.QueueItems.FirstOrDefaultAsync(x => x.Id == queueItem.Id, ct);
-                if (item != null)
-                {
-                    item.PauseUntil = DateTime.Now.AddMinutes(1);
-                    await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
-                    Log.Debug("[QueueItemProcessor] Set PauseUntil to {PauseUntil} for retryable error", item.PauseUntil);
-                }
-                else
-                {
-                    Log.Warning("[QueueItemProcessor] Could not find queue item {Id} to set PauseUntil", queueItem.Id);
-                }
-                _ = websocketManager.SendMessage(WebsocketTopic.QueueItemStatus, $"{queueItem.Id}|Queued");
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "[QueueItemProcessor] Error handling retryable exception: {Error}", ex.Message);
-            }
+            await PauseQueueItemForRetryAsync(e, "Retryable download error").ConfigureAwait(false);
         }
 
         // when any other error is encountered,
@@ -152,6 +129,35 @@ public class QueueItemProcessor(
                 queueItem.JobName,
                 e.Message,
                 ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task PauseQueueItemForRetryAsync(Exception exception, string category)
+    {
+        try
+        {
+            Log.Warning("[QueueItemProcessor] {Category} processing job {JobName} ({Id}): {Message}. Will retry in 1 minute.",
+                category, queueItem.JobName, queueItem.Id, exception.GetBaseException().Message);
+            using var scope = scopeFactory.CreateScope();
+            var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
+
+            var item = await dbClient.Ctx.QueueItems.FirstOrDefaultAsync(x => x.Id == queueItem.Id, CancellationToken.None).ConfigureAwait(false);
+            if (item != null)
+            {
+                item.PauseUntil = DateTime.Now.AddMinutes(1);
+                await dbClient.Ctx.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
+                Log.Debug("[QueueItemProcessor] Set PauseUntil to {PauseUntil} for retryable error", item.PauseUntil);
+            }
+            else
+            {
+                Log.Warning("[QueueItemProcessor] Could not find queue item {Id} to set PauseUntil", queueItem.Id);
+            }
+
+            _ = websocketManager.SendMessage(WebsocketTopic.QueueItemStatus, $"{queueItem.Id}|Queued");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[QueueItemProcessor] Error handling retryable exception: {Error}", ex.Message);
         }
     }
 

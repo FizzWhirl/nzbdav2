@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-                Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-16-ARR-REPLACEMENT-SEARCH");
-                Log.Warning("  FIX: Queue and health-check failures actively trigger Arr replacement searches.");
+                Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-16-RAR-HEADER-RETRY");
+                Log.Warning("  FIX: RAR header timeouts retry queue items instead of stalling.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

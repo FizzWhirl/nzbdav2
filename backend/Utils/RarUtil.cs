@@ -129,6 +129,12 @@ public static class RarUtil
             Serilog.Log.Warning("[RarUtil] Missing article exception caught: {Message}", missingArticleException!.Message);
             throw missingArticleException!;
         }
+        catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
+        {
+            Serilog.Log.Warning("[RarUtil] RAR header read was canceled at stream position {Position}: {Message}",
+                stream.Position, ex.Message);
+            throw;
+        }
         catch (Exception ex)
         {
             Serilog.Log.Error(ex, "[RarUtil] Exception in GetRarHeaders at stream position {Position}: {Message}",

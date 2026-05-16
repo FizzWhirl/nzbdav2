@@ -131,6 +131,10 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.78 (2026-05-16)
+*   **Fix**: RAR header timeouts and provider-side cancellations during queue import now abort the archive scan quickly and pause the queue item for retry instead of grinding through every remaining RAR part.
+*   **Logging**: RAR header cancellations are now logged as warning-level timeout/cancel events rather than error-level archive parsing failures.
+
 ## v0.6.77 (2026-05-16)
 *   **Fix**: Queue-time article probes and media analysis now actively notify Sonarr/Radarr when a download fails or individual media files are removed, triggering replacement searches instead of relying only on SAB-style history polling.
 *   **Fix**: Sonarr season-pack handling now resolves deleted queue files back to specific episode IDs where possible, so a failed episode inside an otherwise usable pack can be searched individually.

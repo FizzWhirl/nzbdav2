@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-              Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-14-DELETED-STATS-COVERAGE");
-              Log.Warning("  FIX: Health-check and import-validation removals are counted in deleted-file stats.");
+                Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-16-ARR-REPLACEMENT-SEARCH");
+                Log.Warning("  FIX: Queue and health-check failures actively trigger Arr replacement searches.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -264,6 +264,7 @@ class Program
             .AddSingleton<UsenetStreamingClient>()
             .AddSingleton<QueueManager>()
             .AddSingleton<ArrMonitoringService>()
+            .AddSingleton<ArrReplacementSearchService>()
             .AddSingleton<HealthCheckService>()
             .AddSingleton<NzbAnalysisService>()
             .AddSingleton<MediaAnalysisService>()

@@ -33,6 +33,7 @@ public class QueueItemProcessor(
     ConfigManager configManager,
     WebsocketManager websocketManager,
     HealthCheckService healthCheckService,
+    ArrReplacementSearchService arrReplacementSearchService,
     RcloneRcService rcloneRcService,
     IProgress<int> progress,
     CancellationToken ct
@@ -145,6 +146,12 @@ public class QueueItemProcessor(
                 Log.Error(ex, "[QueueItemProcessor] Failed to mark queue item {JobName} as completed: {Error}",
                     queueItem.JobName, ex.Message);
             }
+
+            await arrReplacementSearchService.NotifyQueueItemFailedAsync(
+                queueItem.Id,
+                queueItem.JobName,
+                e.Message,
+                ct).ConfigureAwait(false);
         }
     }
 
@@ -539,6 +546,7 @@ public class QueueItemProcessor(
             var dmcaNameSet = new HashSet<string>(dmcaFileNames, StringComparer.OrdinalIgnoreCase);
             var failedProbeSet = new HashSet<string>(probeFailedNames, StringComparer.OrdinalIgnoreCase);
             var mediaFiles = allItems.Where(i => FilenameUtil.IsMediaFile(i.Name)).ToList();
+            var queueCheckDeletedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Remove DMCA'd files from the database — they're confirmed dead
             if (dmcaNameSet.Count > 0)
@@ -552,6 +560,8 @@ public class QueueItemProcessor(
                         "IMPORT_PROBE",
                         "Import article probe found a confirmed DMCA/takedown pattern. Deleted file before import.",
                         queueCt).ConfigureAwait(false);
+                    foreach (var item in dmcaItems.Where(x => FilenameUtil.IsMediaFile(x.Name)))
+                        queueCheckDeletedFileNames.Add(item.Name);
                     TriggerVfsForgetForStep5DeletedItems(mountFolder, dmcaItems.Select(x => x.Name));
                     Log.Information("[QueueItemProcessor] Step 5: Removed {Deleted} DMCA/takedown files from {JobName}",
                         dmcaDeleted, queueItem.JobName);
@@ -570,6 +580,8 @@ public class QueueItemProcessor(
                         "IMPORT_PROBE",
                         "Import article probe found missing or unavailable articles. Deleted file before import.",
                         queueCt).ConfigureAwait(false);
+                    foreach (var item in failedItems)
+                        queueCheckDeletedFileNames.Add(item.Name);
                     TriggerVfsForgetForStep5DeletedItems(mountFolder, failedItems.Select(x => x.Name));
                     Log.Information("[QueueItemProcessor] Step 5: Removed {Deleted} probe-failed files (missing articles) from {JobName}",
                         probeFailedDeleted, queueItem.JobName);
@@ -666,6 +678,8 @@ public class QueueItemProcessor(
                         "MEDIA_ANALYSIS",
                         "Media analysis failed: ffprobe could not read playable media streams. Deleted file before import.",
                         queueCt).ConfigureAwait(false);
+                    foreach (var name in corruptNames)
+                        queueCheckDeletedFileNames.Add(name);
                     TriggerVfsForgetForStep5DeletedItems(mountFolder, corruptNames);
                     Log.Information("[QueueItemProcessor] Step 5 complete: Removed {Deleted} corrupt files from {JobName}. {Healthy}/{Total} media files remain.",
                         deleted, queueItem.JobName, filesToCheck.Count - corruptIdList.Count, filesToCheck.Count);
@@ -713,6 +727,16 @@ public class QueueItemProcessor(
                     Log.Error("[QueueItemProcessor] Step 5: All {MediaCount} media files were removed for {JobName}. Marking as failed.",
                         mediaFiles.Count, queueItem.JobName);
                     throw new NonRetryableDownloadException($"No playable media files remain after analysis — all {mediaFiles.Count} media file(s) were corrupt or unavailable");
+                }
+
+                if (queueCheckDeletedFileNames.Count > 0)
+                {
+                    await arrReplacementSearchService.NotifyQueueFilesDeletedAsync(
+                        queueItem.Id,
+                        queueItem.JobName,
+                        queueCheckDeletedFileNames.ToList(),
+                        "Queue import validation removed one or more media files before Arr import.",
+                        queueCt).ConfigureAwait(false);
                 }
             }
         }

@@ -131,6 +131,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.77 (2026-05-16)
+*   **Fix**: Queue-time article probes and media analysis now actively notify Sonarr/Radarr when a download fails or individual media files are removed, triggering replacement searches instead of relying only on SAB-style history polling.
+*   **Fix**: Sonarr season-pack handling now resolves deleted queue files back to specific episode IDs where possible, so a failed episode inside an otherwise usable pack can be searched individually.
+*   **Reliability**: Health-check deletions now fall back to the original history/download ID when path-based Arr remove/search cannot match the library file, and Arr file-delete calls accept any successful 2xx response.
+
 ## v0.6.76 (2026-05-14)
 *   **Fix**: Queue/import validation removals for confirmed DMCA/takedown files, failed article probes, and corrupt media-analysis results now write deleted health-result rows so Deleted Files stats include those automated removals.
 *   **Reliability**: Bulk item deletion and deleted-file stat insertion now run in one transaction for import-validation cleanup paths.

@@ -131,6 +131,13 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.84 (2026-05-17)
+*   **Reliability**: Frontend backend-client calls now validate key response shapes and preserve non-JSON backend error details instead of masking them with JSON parse failures.
+*   **Reliability**: Browser and server WebSocket handlers now share a typed topic-message guard for malformed payloads.
+*   **Fix**: Settings updates now reject missing, malformed, or non-string config payloads with client errors before forwarding them to the backend.
+*   **Reliability**: NZB uploads now enforce configurable content-shape limits for file count, segment count, path length, and message ID length before queue insertion.
+*   **Reliability**: Frontend responses now include conservative browser security headers while keeping the existing strict session cookie behavior.
+
 ## v0.6.83 (2026-05-17)
 *   **Reliability**: VFS forget callbacks are now observed, normalized, and retried so rclone cache invalidation failures are logged instead of silently disappearing.
 *   **Reliability**: EF migration lock cleanup is now an explicit recovery action via `CLEAR_EF_MIGRATIONS_LOCK=true` or `--clear-migration-lock` instead of running on every migration startup.

@@ -12,6 +12,57 @@ import type {
 import type { DashboardData } from "~/types/dashboard";
 import type { ProviderStatsResponse } from "~/types/provider-stats";
 
+type JsonRecord = Record<string, unknown>;
+
+async function assertResponseOk(response: Response, action: string): Promise<void> {
+    if (response.ok) return;
+    const message = await readResponseError(response);
+    throw new Error(`Failed to ${action}: ${message}`);
+}
+
+async function readResponseJson(response: Response, action: string): Promise<unknown> {
+    try {
+        return await response.json();
+    } catch (error) {
+        throw new Error(`Failed to ${action}: response was not valid JSON`);
+    }
+}
+
+async function readResponseError(response: Response): Promise<string> {
+    const contentType = response.headers.get("content-type") ?? "";
+    const text = await response.text();
+    if (contentType.includes("application/json") && text.trim().length > 0) {
+        try {
+            const data = JSON.parse(text);
+            if (isRecord(data) && typeof data.error === "string" && data.error.length > 0) return data.error;
+            if (isRecord(data) && typeof data.message === "string" && data.message.length > 0) return data.message;
+        } catch {
+            // Fall back to response text below.
+        }
+    }
+
+    return text.trim() || `${response.status} ${response.statusText}`;
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function expectRecord(value: unknown, context: string): JsonRecord {
+    if (isRecord(value)) return value;
+    throw new Error(`${context} response had unexpected shape`);
+}
+
+function expectArray<T>(value: unknown, context: string): T[] {
+    if (Array.isArray(value)) return value as T[];
+    throw new Error(`${context} response had unexpected shape`);
+}
+
+function expectBoolean(value: unknown, context: string): boolean {
+    if (typeof value === "boolean") return value;
+    throw new Error(`${context} response had unexpected shape`);
+}
+
 class BackendClient {
     private async fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
         return fetch(url, {
@@ -31,12 +82,9 @@ class BackendClient {
             }
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to fetch onboarding status: ${(await response.json()).error}`);
-        }
-
-        const data = await response.json();
-        return data.isOnboarding;
+        await assertResponseOk(response, "fetch onboarding status");
+        const data = expectRecord(await readResponseJson(response, "fetch onboarding status"), "Onboarding status");
+        return expectBoolean(data.isOnboarding, "Onboarding status");
     }
 
     public async createAccount(username: string, password: string): Promise<boolean> {
@@ -56,12 +104,9 @@ class BackendClient {
             })()
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to create account: ${(await response.json()).error}`);
-        }
-
-        const data = await response.json();
-        return data.status;
+        await assertResponseOk(response, "create account");
+        const data = expectRecord(await readResponseJson(response, "create account"), "Create account");
+        return expectBoolean(data.status, "Create account");
     }
 
     public async authenticate(username: string, password: string): Promise<boolean> {
@@ -80,12 +125,9 @@ class BackendClient {
             })()
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to authenticate: ${(await response.json()).error}`);
-        }
-
-        const data = await response.json();
-        return data.authenticated;
+        await assertResponseOk(response, "authenticate");
+        const data = expectRecord(await readResponseJson(response, "authenticate"), "Authenticate");
+        return expectBoolean(data.authenticated, "Authenticate");
     }
 
     public async getQueue(limit: number): Promise<QueueResponse> {
@@ -93,12 +135,9 @@ class BackendClient {
 
         const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
         const response = await this.fetchWithTimeout(url, { headers: { "x-api-key": apiKey } });
-        if (!response.ok) {
-            throw new Error(`Failed to get queue: ${(await response.json()).error}`);
-        }
-
-        const data = await response.json();
-        return data.queue;
+        await assertResponseOk(response, "get queue");
+        const data = expectRecord(await readResponseJson(response, "get queue"), "Queue");
+        return expectRecord(data.queue, "Queue") as QueueResponse;
     }
 
     public async getHistory(limit: number, showHidden: boolean = false): Promise<HistoryResponse> {
@@ -107,12 +146,9 @@ class BackendClient {
 
         const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
         const response = await this.fetchWithTimeout(url, { headers: { "x-api-key": apiKey } });
-        if (!response.ok) {
-            throw new Error(`Failed to get history: ${(await response.json()).error}`);
-        }
-
-        const data = await response.json();
-        return data.history;
+        await assertResponseOk(response, "get history");
+        const data = expectRecord(await readResponseJson(response, "get history"), "History");
+        return expectRecord(data.history, "History") as HistoryResponse;
     }
 
     public async addNzb(nzbFile: File): Promise<string> {
@@ -131,14 +167,13 @@ class BackendClient {
             })()
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to add nzb file: ${(await response.json()).error}`);
-        }
-        const data = await response.json();
-        if (!data.nzo_ids || data.nzo_ids.length != 1) {
+        await assertResponseOk(response, "add nzb file");
+        const data = expectRecord(await readResponseJson(response, "add nzb file"), "Add NZB");
+        const nzoIds = expectArray<unknown>(data.nzo_ids, "Add NZB nzo_ids");
+        if (nzoIds.length !== 1 || typeof nzoIds[0] !== "string") {
             throw new Error(`Failed to add nzb file: unexpected response format`);
         }
-        return data.nzo_ids[0];
+        return nzoIds[0];
     }
 
     public async listWebdavDirectory(directory: string): Promise<DirectoryItem[]> {
@@ -155,11 +190,9 @@ class BackendClient {
             })()
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to list webdav directory: ${(await response.json()).error}`);
-        }
-        const data = await response.json();
-        return data.items;
+        await assertResponseOk(response, "list webdav directory");
+        const data = expectRecord(await readResponseJson(response, "list webdav directory"), "WebDAV directory");
+        return expectArray<DirectoryItem>(data.items, "WebDAV directory items");
     }
 
     public async searchWebdav(query: string, directory: string): Promise<SearchResult[]> {
@@ -177,11 +210,9 @@ class BackendClient {
             })()
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to search webdav: ${(await response.json()).error}`);
-        }
-        const data = await response.json();
-        return data.results;
+        await assertResponseOk(response, "search webdav");
+        const data = expectRecord(await readResponseJson(response, "search webdav"), "WebDAV search");
+        return expectArray<SearchResult>(data.results, "WebDAV search results");
     }
 
     public async getConfig(keys: string[]): Promise<ConfigItem[]> {
@@ -200,11 +231,11 @@ class BackendClient {
             })()
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to get config items: ${(await response.json()).error}`);
-        }
-        const data = await response.json();
-        return data.configItems || [];
+        await assertResponseOk(response, "get config items");
+        const data = expectRecord(await readResponseJson(response, "get config items"), "Config items");
+        return data.configItems === undefined
+            ? []
+            : expectArray<ConfigItem>(data.configItems, "Config items");
     }
 
     public async updateConfig(configItems: ConfigItem[]): Promise<boolean> {
@@ -223,11 +254,9 @@ class BackendClient {
             })()
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to update config items: ${(await response.json()).error}`);
-        }
-        const data = await response.json();
-        return data.status;
+        await assertResponseOk(response, "update config items");
+        const data = expectRecord(await readResponseJson(response, "update config items"), "Update config");
+        return expectBoolean(data.status, "Update config");
     }
 
     public async getHealthCheckQueue(
@@ -254,11 +283,8 @@ class BackendClient {
             headers: { "x-api-key": apiKey }
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to get health check queue: ${(await response.json()).error}`);
-        }
-        const data = await response.json();
-        return data;
+        await assertResponseOk(response, "get health check queue");
+        return expectRecord(await readResponseJson(response, "get health check queue"), "Health check queue") as HealthCheckQueueResponse;
     }
 
     public async getHealthCheckHistory(pageSize?: number): Promise<HealthCheckHistoryResponse> {
@@ -274,11 +300,8 @@ class BackendClient {
             headers: { "x-api-key": apiKey }
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to get health check history: ${(await response.json()).error}`);
-        }
-        const data = await response.json();
-        return data;
+        await assertResponseOk(response, "get health check history");
+        return expectRecord(await readResponseJson(response, "get health check history"), "Health check history") as HealthCheckHistoryResponse;
     }
 
     public async getActiveConnections(): Promise<Record<number, ConnectionUsageContext[]>> {
@@ -474,12 +497,11 @@ class BackendClient {
             body: JSON.stringify({ davItemIds })
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to reset health status: ${(await response.json()).error}`);
-        }
-
-        const data = await response.json();
-        return data.resetCount;
+        await assertResponseOk(response, "reset health status");
+        const data = expectRecord(await readResponseJson(response, "reset health status"), "Reset health status");
+        const resetCount = data.resetCount;
+        if (typeof resetCount !== "number") throw new Error("Reset health status response had unexpected shape");
+        return resetCount;
     }
 
     public async getProviderStats(range: string = "all"): Promise<ProviderStatsResponse> {
@@ -491,11 +513,8 @@ class BackendClient {
             headers: { "x-api-key": apiKey }
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to get provider stats: ${(await response.json()).error}`);
-        }
-        const data = await response.json();
-        return data;
+        await assertResponseOk(response, "get provider stats");
+        return expectRecord(await readResponseJson(response, "get provider stats"), "Provider stats") as ProviderStatsResponse;
     }
 }
 

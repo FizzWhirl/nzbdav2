@@ -21,6 +21,12 @@ public class AddFileController(
     WebsocketManager websocketManager
 ) : SabApiController.BaseController(httpContext, configManager)
 {
+    private const long DefaultMaxNzbFiles = 5000;
+    private const long DefaultMaxNzbSegmentsPerFile = 250000;
+    private const long DefaultMaxNzbTotalSegments = 1000000;
+    private const long DefaultMaxNzbPathLength = 1024;
+    private const long DefaultMaxNzbMessageIdLength = 512;
+
     public async Task<AddFileResponse> AddFileAsync(AddFileRequest request)
     {
         // load the document
@@ -28,6 +34,7 @@ public class AddFileController(
         var documentBytes = Encoding.UTF8.GetBytes(nzbFileContents);
         using var memoryStream = new MemoryStream(documentBytes);
         var document = await NzbDocument.LoadAsync(memoryStream).ConfigureAwait(false);
+        ValidateNzbDocumentShape(document);
 
         // add the queueItem to the database
         var queueItem = new QueueItem
@@ -76,5 +83,44 @@ public class AddFileController(
         return nzbContents
             .Replace("https://www.newzbin.com/DTD/2003/nzb", "http://www.newzbin.com/DTD/2003/nzb")
             .Replace("date=\"\"", "date=\"0\"");
+    }
+
+    private static void ValidateNzbDocumentShape(NzbDocument document)
+    {
+        var maxFiles = GetNzbShapeLimit("MAX_NZB_FILES", DefaultMaxNzbFiles);
+        var maxSegmentsPerFile = GetNzbShapeLimit("MAX_NZB_SEGMENTS_PER_FILE", DefaultMaxNzbSegmentsPerFile);
+        var maxTotalSegments = GetNzbShapeLimit("MAX_NZB_TOTAL_SEGMENTS", DefaultMaxNzbTotalSegments);
+        var maxPathLength = GetNzbShapeLimit("MAX_NZB_PATH_LENGTH", DefaultMaxNzbPathLength);
+        var maxMessageIdLength = GetNzbShapeLimit("MAX_NZB_MESSAGE_ID_LENGTH", DefaultMaxNzbMessageIdLength);
+
+        if (document.Files.Count == 0) throw new BadHttpRequestException("NZB contains no files");
+        if (document.Files.Count > maxFiles) throw new BadHttpRequestException($"NZB contains too many files ({document.Files.Count} > {maxFiles})");
+
+        long totalSegments = 0;
+        foreach (var file in document.Files)
+        {
+            if (file.FileName.Length > maxPathLength)
+                throw new BadHttpRequestException($"NZB file path exceeds maximum length ({file.FileName.Length} > {maxPathLength})");
+
+            if (file.Segments.Count > maxSegmentsPerFile)
+                throw new BadHttpRequestException($"NZB file contains too many segments ({file.Segments.Count} > {maxSegmentsPerFile})");
+
+            foreach (var segment in file.Segments)
+            {
+                var messageId = segment.MessageId?.Value ?? string.Empty;
+                if (messageId.Length > maxMessageIdLength)
+                    throw new BadHttpRequestException($"NZB segment message ID exceeds maximum length ({messageId.Length} > {maxMessageIdLength})");
+            }
+
+            totalSegments += file.Segments.Count;
+            if (totalSegments > maxTotalSegments)
+                throw new BadHttpRequestException($"NZB contains too many total segments ({totalSegments} > {maxTotalSegments})");
+        }
+    }
+
+    private static long GetNzbShapeLimit(string name, long defaultValue)
+    {
+        var value = EnvironmentUtil.GetLongVariable(name);
+        return value is > 0 ? value.Value : defaultValue;
     }
 }

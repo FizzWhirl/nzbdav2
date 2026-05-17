@@ -3,17 +3,7 @@ import { isAuthenticated } from "../app/auth/authentication.server";
 import type { IncomingMessage } from 'http';
 import { errorDetails, logJson } from './logger.server.js';
 import { runtimeConfig } from './runtime-config.server.js';
-
-type BackendTopicMessage = {
-    Topic: string;
-    Message: unknown;
-};
-
-function isBackendTopicMessage(value: unknown): value is BackendTopicMessage {
-    if (!value || typeof value !== 'object') return false;
-    const candidate = value as Record<string, unknown>;
-    return typeof candidate.Topic === 'string' && 'Message' in candidate;
-}
+import { isWebsocketTopicMessage } from '../app/types/websocket.js';
 
 function initializeWebsocketServer(wss: WebSocketServer) {
     // keep track of socket subscriptions
@@ -101,7 +91,7 @@ export function initializeWebsocketClient(subscriptions: Map<string, Set<WebSock
                 return;
             }
 
-            if (!isBackendTopicMessage(topicMessage)) {
+            if (!isWebsocketTopicMessage(topicMessage)) {
                 logJson("warn", "Dropped backend WebSocket message with unexpected shape", {
                     byteLength: Buffer.byteLength(rawMessage)
                 });

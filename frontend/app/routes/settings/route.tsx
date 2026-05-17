@@ -12,61 +12,13 @@ import { isRepairsSettingsUpdated, isRepairsSettingsValid, RepairsSettings } fro
 import { GeneralSettings, isGeneralSettingsUpdated } from "./general/general";
 import { DebugSettings } from "./debug/debug";
 import { useSearchParams } from "react-router";
+import { defaultConfig } from "./settings-config";
 
 export function meta({}: Route.MetaArgs) {
   return [
     { title: "Settings | NzbDav" },
     { name: "description", content: "Configure NzbDav Settings" },
   ];
-}
-
-const defaultConfig = {
-    "general.base-url": "",
-    "general.log-level": "Information",
-    "api.key": "",
-    "api.categories": "",
-    "api.manual-category": "uncategorized",
-    "api.max-queue-connections": "",
-    "api.ensure-importable-video": "true",
-    "api.ensure-article-existence": "false",
-    "api.ignore-history-limit": "true",
-    "api.download-extension-blacklist": ".nfo, .par2, .sfv",
-    "api.duplicate-nzb-behavior": "increment",
-    "api.import-strategy": "symlinks",
-    "api.completed-downloads-dir": "",
-    "api.history-retention-hours": "",
-    "usenet.providers": "",
-    "usenet.total-streaming-connections": "20",
-    "usenet.max-concurrent-buffered-streams": "2",
-    "usenet.streaming-reserve": "5",
-    "usenet.streaming-priority": "80",
-    "usenet.use-buffered-streaming": "true",
-    "usenet.shared-stream-buffer-size": "32",
-    "usenet.shared-stream-grace-period": "10",
-    "usenet.stream-buffer-size": "100",
-    "usenet.hide-samples": "false",
-    "usenet.operation-timeout": "90",
-    "webdav.user": "admin",
-    "webdav.pass": "",
-    "webdav.show-hidden-files": "false",
-    "webdav.enforce-readonly": "true",
-    "webdav.preview-par2-files": "false",
-    "rclone.mount-dir": "",
-    "rclone.rc": "{}",
-    "media.library-dir": "",
-    "arr.instances": "{\"RadarrInstances\":[],\"SonarrInstances\":[],\"QueueRules\":[]}",
-    "repair.connections": "",
-    "repair.concurrent-checks": "",
-    "repair.health-check-timeout-minutes": "",
-    "repair.enable": "false",
-    "repair.min-check-interval-days": "",
-    "repair.head-full-scan": "false",
-    "stats.enable": "false",
-    "analysis.enable": "true",
-    "analysis.max-concurrent": "3",
-    "provider-affinity.enable": "true",
-    "api.startup-vacuum": "false",
-    "api.health-check-categories": "",
 }
 
 export async function loader({ request }: Route.LoaderArgs) {

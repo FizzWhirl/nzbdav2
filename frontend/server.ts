@@ -17,6 +17,13 @@ logJson("info", "Frontend runtime configuration loaded", { backendUrl: runtimeCo
 const app = express();
 app.use(compression());
 app.disable("x-powered-by");
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  next();
+});
 
 // Initialize the websocket server as soon as both it and the server-module are ready
 let _serverModule: any = null;

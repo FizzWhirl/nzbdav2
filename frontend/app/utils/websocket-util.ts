@@ -1,3 +1,5 @@
+import { isWebsocketTopicMessage } from "~/types/websocket";
+
 export function receiveMessage(
     onMessage: (topic: string, message: string) => void
 ): (event: MessageEvent) => void {
@@ -8,7 +10,7 @@ export function receiveMessage(
             }
 
             const parsed = JSON.parse(event.data);
-            if (!parsed || typeof parsed.Topic !== 'string') {
+            if (!isWebsocketTopicMessage(parsed)) {
                 return;
             }
 

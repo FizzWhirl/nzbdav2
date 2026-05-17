@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-LIFECYCLE-RELIABILITY");
-        Log.Warning("  FIX: VFS forget retries, safer migration locks, and Arr diagnostics.");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-CONTRACT-VALIDATION");
+        Log.Warning("  FIX: Runtime payload validation and NZB shape limits.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

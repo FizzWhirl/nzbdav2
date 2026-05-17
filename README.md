@@ -131,6 +131,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.85 (2026-05-17)
+*   **Tooling**: Docker publish CI now runs backend restore/build, frontend contract tests, frontend typecheck, and shell syntax checks before publishing images.
+*   **Tooling**: Added a frontend WebSocket contract test covering valid and malformed topic-message payloads.
+*   **Docs**: Documented the Phase 4 validation guardrails, remaining high-value test targets, and the Docker publish patch-offset behavior.
+
 ## v0.6.84 (2026-05-17)
 *   **Reliability**: Frontend backend-client calls now validate key response shapes and preserve non-JSON backend error details instead of masking them with JSON parse failures.
 *   **Reliability**: Browser and server WebSocket handlers now share a typed topic-message guard for malformed payloads.

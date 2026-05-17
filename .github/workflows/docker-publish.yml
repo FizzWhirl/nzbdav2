@@ -24,6 +24,36 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Validate shell entrypoints
+        run: |
+          sh -n entrypoint.sh
+          sh -n backend/entrypoint.sh
+
+      - name: Validate backend build
+        working-directory: backend
+        run: |
+          dotnet restore
+          dotnet build --configuration Release --no-restore
+
+      - name: Validate frontend contracts and types
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run test:contracts
+          npm run typecheck
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -44,6 +74,9 @@ jobs:
         run: |
           MAJOR=0
           MINOR=6
+          # PATCH tracks the GitHub Actions run number minus the repository's
+          # historical offset. Update this only when intentionally realigning
+          # published Docker tags with README changelog entries.
           PATCH=$(( ${{ github.run_number }} - 71 ))
 
           # Sanitize branch name for use as a Docker tag (replace / with -)

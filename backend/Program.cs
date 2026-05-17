@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-ARR-FAILED-HISTORY");
-        Log.Warning("  FIX: Failed downloads stay visible to Arr history cleanup.");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-LIFECYCLE-CLEANUP");
+        Log.Warning("  FIX: Hidden history cleanup and Arr cache lifecycle.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

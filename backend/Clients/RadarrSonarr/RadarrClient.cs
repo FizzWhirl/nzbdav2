@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Collections.Concurrent;
+using System.Net;
 using System.Linq;
 using Serilog;
 using NzbWebDAV.Clients.RadarrSonarr.BaseModels;
@@ -8,7 +9,7 @@ namespace NzbWebDAV.Clients.RadarrSonarr;
 
 public class RadarrClient(string host, string apiKey) : ArrClient(host, apiKey)
 {
-    private static readonly Dictionary<string, int> SymlinkOrStrmToMovieIdCache = new();
+    private static readonly ConcurrentDictionary<(string Host, string Path), int> SymlinkOrStrmToMovieIdCache = new();
 
     public Task<RadarrMovie> GetMovieAsync(int id) =>
         Get<RadarrMovie>($"/movie/{id}");
@@ -102,7 +103,7 @@ public class RadarrClient(string host, string apiKey) : ArrClient(host, apiKey)
     {
         // if we already have the movie-id cached
         // then let's use it to find and return the corresponding movie-file-id
-        if (SymlinkOrStrmToMovieIdCache.TryGetValue(symlinkOrStrmPath, out var movieId))
+        if (SymlinkOrStrmToMovieIdCache.TryGetValue((Host, symlinkOrStrmPath), out var movieId))
         {
             var movie = await GetMovieAsync(movieId);
             if (movie.MovieFile?.Path == symlinkOrStrmPath)
@@ -122,7 +123,7 @@ public class RadarrClient(string host, string apiKey) : ArrClient(host, apiKey)
             var movieFile = movie.MovieFile;
             if (movieFile?.Path != null)
             {
-                SymlinkOrStrmToMovieIdCache[movieFile.Path] = movie.Id;
+                SymlinkOrStrmToMovieIdCache[(Host, movieFile.Path)] = movie.Id;
                 
                 if (movieFile.Path == symlinkOrStrmPath)
                 {

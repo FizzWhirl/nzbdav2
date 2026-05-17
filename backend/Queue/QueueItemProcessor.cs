@@ -1164,30 +1164,6 @@ public class QueueItemProcessor(
         // All history items (including failed) are now retained for 1 hour via ArrMonitoringService cleanup
     }
 
-    private async Task RemoveFailedHistoryItemAfterDelay(Guid id, TimeSpan delay)
-    {
-        try
-        {
-            Log.Information("[QueueItemProcessor] Scheduling auto-removal of failed item {Id} in {Minutes} minutes", id, delay.TotalMinutes);
-            await Task.Delay(delay, CancellationToken.None).ConfigureAwait(false);
-
-            using var scope = scopeFactory.CreateScope();
-            var dbClient = scope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
-            Log.Information("[QueueItemProcessor] Auto-removing failed item {Id}", id);
-            
-            // Remove the item
-            await dbClient.RemoveHistoryItemsAsync([id], true, CancellationToken.None).ConfigureAwait(false);
-            await dbClient.SaveChanges(CancellationToken.None).ConfigureAwait(false);
-            
-            // Notify frontend
-            _ = websocketManager.SendMessage(WebsocketTopic.HistoryItemRemoved, id.ToString());
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "[QueueItemProcessor] Failed to auto-remove history item {Id}", id);
-        }
-    }
-
     private async Task RefreshMonitoredDownloads()
     {
         var tasks = configManager

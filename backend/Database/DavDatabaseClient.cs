@@ -230,22 +230,30 @@ public sealed class DavDatabaseClient(DavDatabaseContext ctx)
         // Get old hidden history items to clean up
         var oldHiddenItems = await Ctx.HistoryItems
             .Where(h => h.IsHidden && h.HiddenAt != null && h.HiddenAt < cutoffDate)
-            .Select(h => h.Id)
+            .Select(h => new { h.Id, h.DownloadDirId })
             .ToListAsync(ct).ConfigureAwait(false);
 
         if (oldHiddenItems.Count == 0) return;
 
+        await using var transaction = await Ctx.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+
         // Queue cleanup items for HistoryCleanupService to handle DavItem deletion
-        Ctx.HistoryCleanupItems.AddRange(oldHiddenItems.Select(id => new Models.HistoryCleanupItem
+        Ctx.HistoryCleanupItems.AddRange(oldHiddenItems.Select(item => new Models.HistoryCleanupItem
         {
-            Id = id,
-            DeleteMountedFiles = true
+            Id = item.Id,
+            DeleteMountedFiles = true,
+            DownloadDirId = item.DownloadDirId
         }));
 
+        await Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+
         // Delete old hidden history items
+        var oldHiddenItemIds = oldHiddenItems.Select(x => x.Id).ToList();
         await Ctx.HistoryItems
-            .Where(h => oldHiddenItems.Contains(h.Id))
+            .Where(h => oldHiddenItemIds.Contains(h.Id))
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
     }
 
     private class FileSizeResult

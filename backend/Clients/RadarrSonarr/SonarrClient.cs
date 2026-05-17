@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Collections.Concurrent;
+using System.Net;
 using Serilog;
 using NzbWebDAV.Clients.RadarrSonarr.BaseModels;
 using NzbWebDAV.Clients.RadarrSonarr.SonarrModels;
@@ -8,8 +9,8 @@ namespace NzbWebDAV.Clients.RadarrSonarr;
 
 public class SonarrClient(string host, string apiKey) : ArrClient(host, apiKey)
 {
-    private static readonly Dictionary<string, int> SeriesPathToSeriesIdCache = new();
-    private static readonly Dictionary<string, int> SymlinkOrStrmToEpisodeFileIdCache = new();
+    private static readonly ConcurrentDictionary<(string Host, string Path), int> SeriesPathToSeriesIdCache = new();
+    private static readonly ConcurrentDictionary<(string Host, string Path), int> SymlinkOrStrmToEpisodeFileIdCache = new();
 
     public Task<SonarrQueue> GetSonarrQueueAsync() =>
         Get<SonarrQueue>($"/queue?protocol=usenet&pageSize=5000");
@@ -146,7 +147,7 @@ public class SonarrClient(string host, string apiKey) : ArrClient(host, apiKey)
     public async Task<int?> GetEpisodeFileId(string symlinkOrStrmPath)
     {
         // if episode-file-id is found in the cache, verify it and return it
-        if (SymlinkOrStrmToEpisodeFileIdCache.TryGetValue(symlinkOrStrmPath, out var episodeFileId))
+        if (SymlinkOrStrmToEpisodeFileIdCache.TryGetValue((Host, symlinkOrStrmPath), out var episodeFileId))
         {
             var episodeFile = await GetEpisodeFile(episodeFileId);
             if (episodeFile.Path == symlinkOrStrmPath) return episodeFileId;
@@ -164,11 +165,11 @@ public class SonarrClient(string host, string apiKey) : ArrClient(host, apiKey)
 
         foreach (var series in matchingSeries)
         {
-            SeriesPathToSeriesIdCache[series.Path!] = series.Id;
+            SeriesPathToSeriesIdCache[(Host, series.Path!)] = series.Id;
             foreach (var episodeFile in await GetAllEpisodeFiles(series.Id))
             {
                 if (episodeFile.Path != null)
-                    SymlinkOrStrmToEpisodeFileIdCache[episodeFile.Path] = episodeFile.Id;
+                    SymlinkOrStrmToEpisodeFileIdCache[(Host, episodeFile.Path)] = episodeFile.Id;
                 if (episodeFile.Path == symlinkOrStrmPath)
                     return episodeFile.Id;
             }
@@ -180,11 +181,15 @@ public class SonarrClient(string host, string apiKey) : ArrClient(host, apiKey)
     public async Task<int?> GetSeriesId(string symlinkOrStrmPath)
     {
         // get series-id from cache
-        var cachedSeriesId = PathUtil.GetAllParentDirectories(symlinkOrStrmPath)
-            .Where(x => SeriesPathToSeriesIdCache.ContainsKey(x))
-            .Select(x => SeriesPathToSeriesIdCache[x])
-            .Select(x => (int?)x)
-            .FirstOrDefault();
+        int? cachedSeriesId = null;
+        foreach (var parentDirectory in PathUtil.GetAllParentDirectories(symlinkOrStrmPath))
+        {
+            if (SeriesPathToSeriesIdCache.TryGetValue((Host, parentDirectory), out var seriesId))
+            {
+                cachedSeriesId = seriesId;
+                break;
+            }
+        }
 
         // if found, verify and return it
         if (cachedSeriesId != null)
@@ -203,7 +208,7 @@ public class SonarrClient(string host, string apiKey) : ArrClient(host, apiKey)
         {
             if (series.Path != null)
             {
-                SeriesPathToSeriesIdCache[series.Path] = series.Id;
+                SeriesPathToSeriesIdCache[(Host, series.Path)] = series.Id;
                 if (symlinkOrStrmPath.StartsWith(series.Path))
                 {
                     result = series.Id;

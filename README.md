@@ -131,6 +131,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.81 (2026-05-17)
+*   **Fix**: Persist old hidden-history cleanup queue entries before deleting history rows, preserving mounted-file cleanup and VFS invalidation.
+*   **Fix**: Removed stale failed-history and direct Arr queue-deletion code paths so whole-download failures remain Arr-authoritative.
+*   **Reliability**: Made Sonarr/Radarr path lookup caches thread-safe and scoped by Arr host to avoid cross-instance cache contamination.
+
 ## v0.6.80 (2026-05-17)
 *   **Fix**: Failed queue items are no longer exposed as still-downloading SAB queue entries after they have already been moved to failed history, allowing Sonarr/Radarr to detect the failed history state and remove it according to their download-client settings.
 *   **Fix**: Whole-download failure notifications now refresh Arr monitored downloads instead of directly deleting Arr queue records, so Sonarr/Radarr remain the authority for blocklist, removal, and replacement-search behavior.

@@ -74,35 +74,6 @@ public partial class ArrReplacementSearchService(ConfigManager configManager)
         }
     }
 
-    private async Task<bool> NotifySonarrQueueItemFailedAsync(SonarrClient client, Guid queueItemId, string jobName)
-    {
-        var queueRecord = await FindSonarrQueueRecordAsync(client, queueItemId, jobName).ConfigureAwait(false);
-        if (queueRecord != null && await DeleteArrQueueRecordAsync(client, queueRecord, jobName).ConfigureAwait(false))
-        {
-            Log.Information("[ArrReplacement] Sonarr {Host} removed/blocklisted failed queue item {JobName} and requested a replacement search.",
-                client.Host, jobName);
-            return true;
-        }
-
-        var historyRecords = await GetMatchingHistoryRecordsAsync(client, queueItemId, jobName).ConfigureAwait(false);
-        var episodeIds = historyRecords
-            .Select(x => x.EpisodeId)
-            .Where(x => x > 0)
-            .Distinct()
-            .ToList();
-
-        if (episodeIds.Count == 0 && queueRecord != null)
-            episodeIds = await ResolveSonarrQueueEpisodeIdsAsync(client, queueRecord, []).ConfigureAwait(false);
-
-        if (episodeIds.Count == 0) return false;
-
-        await MarkHistoryRecordsFailedAsync(client, historyRecords, jobName).ConfigureAwait(false);
-        await client.SearchEpisodesAsync(episodeIds).ConfigureAwait(false);
-        Log.Information("[ArrReplacement] Sonarr {Host} searched {Count} episode(s) after failed queue item {JobName}.",
-            client.Host, episodeIds.Count, jobName);
-        return true;
-    }
-
     private async Task<bool> NotifySonarrQueueFilesDeletedAsync(SonarrClient client, Guid queueItemId, string jobName, IReadOnlyCollection<string> fileNames)
     {
         var queueRecord = await FindSonarrQueueRecordAsync(client, queueItemId, jobName).ConfigureAwait(false);
@@ -139,28 +110,6 @@ public partial class ArrReplacementSearchService(ConfigManager configManager)
         return true;
     }
 
-    private async Task<bool> NotifyRadarrQueueItemFailedAsync(RadarrClient client, Guid queueItemId, string jobName)
-    {
-        var queueRecord = await FindRadarrQueueRecordAsync(client, queueItemId, jobName).ConfigureAwait(false);
-        if (queueRecord != null && await DeleteArrQueueRecordAsync(client, queueRecord, jobName).ConfigureAwait(false))
-        {
-            Log.Information("[ArrReplacement] Radarr {Host} removed/blocklisted failed queue item {JobName} and requested a replacement search.",
-                client.Host, jobName);
-            return true;
-        }
-
-        var historyRecords = await GetMatchingHistoryRecordsAsync(client, queueItemId, jobName).ConfigureAwait(false);
-        var movieId = historyRecords.Select(x => x.MovieId).FirstOrDefault(x => x > 0);
-        if (movieId <= 0 && queueRecord is { MovieId: > 0 }) movieId = queueRecord.MovieId;
-        if (movieId <= 0) return false;
-
-        await MarkHistoryRecordsFailedAsync(client, historyRecords, jobName).ConfigureAwait(false);
-        await client.SearchMovieAsync(movieId).ConfigureAwait(false);
-        Log.Information("[ArrReplacement] Radarr {Host} searched movie {MovieId} after failed queue item {JobName}.",
-            client.Host, movieId, jobName);
-        return true;
-    }
-
     private async Task<bool> NotifyRadarrQueueFilesDeletedAsync(RadarrClient client, Guid queueItemId, string jobName)
     {
         var historyRecords = await GetMatchingHistoryRecordsAsync(client, queueItemId, jobName).ConfigureAwait(false);
@@ -178,16 +127,6 @@ public partial class ArrReplacementSearchService(ConfigManager configManager)
         Log.Information("[ArrReplacement] Radarr {Host} searched movie {MovieId} after queue validation deleted file(s) from {JobName}.",
             client.Host, movieId, jobName);
         return true;
-    }
-
-    private static async Task<bool> DeleteArrQueueRecordAsync(ArrClient client, ArrQueueRecord record, string jobName)
-    {
-        var status = await client.DeleteQueueRecord(record.Id, ArrConfig.QueueAction.RemoveAndBlocklistAndSearch).ConfigureAwait(false);
-        if ((int)status is >= 200 and < 300) return true;
-
-        Log.Warning("[ArrReplacement] Arr instance {Host} returned {Status} when deleting queue record {RecordId} for {JobName}.",
-            client.Host, status, record.Id, jobName);
-        return false;
     }
 
     private static async Task<SonarrQueueRecord?> FindSonarrQueueRecordAsync(SonarrClient client, Guid queueItemId, string jobName)

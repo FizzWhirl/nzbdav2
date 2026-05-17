@@ -86,8 +86,14 @@ public class GetHistoryRequest
             NzoIds = nzoIdsParam
                 .Split(',')
                 .Select(nzoId => nzoId.Trim())
-                .Select(Guid.Parse)
+                .Select(ParseNzoId)
                 .ToList();
         }
+    }
+
+    private static Guid ParseNzoId(string value)
+    {
+        if (Guid.TryParse(value, out var id)) return id;
+        throw new BadHttpRequestException($"Invalid nzo_ids value: {value}");
     }
 }

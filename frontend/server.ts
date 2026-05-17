@@ -4,11 +4,14 @@ import morgan from "morgan";
 import http from "http";
 import { WebSocketServer } from "ws";
 import { logJson } from "./server/logger.server.js";
+import { runtimeConfig } from "./server/runtime-config.server.js";
 
 // Short-circuit the type-checking of the built output.
 const BUILD_PATH = "../build/server/index.js";
 const DEVELOPMENT = process.env.NODE_ENV === "development";
 const PORT = Number.parseInt(process.env.PORT || "3000");
+
+logJson("info", "Frontend runtime configuration loaded", { backendUrl: runtimeConfig.backendUrl });
 
 // Initialize the express app
 const app = express();

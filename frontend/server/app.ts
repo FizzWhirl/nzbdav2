@@ -5,6 +5,8 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import { websocketServer } from "./websocket.server";
 import { isAuthenticated } from "~/auth/authentication.server";
 import { authMiddleware } from "~/auth/auth-middleware.server";
+import { runtimeConfig } from "./runtime-config.server.js";
+import { errorDetails, logJson } from "./logger.server.js";
 
 declare module "react-router" {
   interface AppLoadContext {
@@ -28,8 +30,27 @@ export const initializeWebsocketServer = websocketServer.initialize;
 // original `Host` header (`changeOrigin: false`) makes NWebDav emit hrefs with the
 // correct public host. Kestrel does not validate the Host header, so this is safe.
 const forwardToBackend = createProxyMiddleware({
-  target: process.env.BACKEND_URL,
+  target: runtimeConfig.backendUrl,
   changeOrigin: false,
+  timeout: 30000,
+  proxyTimeout: 30000,
+  on: {
+    error(error, req, res) {
+      logJson("error", "Backend proxy request failed", {
+        error: errorDetails(error),
+        method: req.method,
+        url: req.url
+      });
+
+      if ("writeHead" in res && !res.headersSent) {
+        res.writeHead(502, { "Content-Type": "application/json" });
+      }
+
+      if ("end" in res && !res.writableEnded) {
+        res.end(JSON.stringify({ status: false, error: "Backend proxy request failed" }));
+      }
+    }
+  }
 });
 
 const setApiKeyForAuthenticatedRequests = async (req: express.Request) => {
@@ -46,7 +67,7 @@ const setApiKeyForAuthenticatedRequests = async (req: express.Request) => {
   if (!authenticated) return;
 
   // otherwise, set the api key header
-  req.headers["x-api-key"] = process.env.FRONTEND_BACKEND_API_KEY || "";
+  req.headers["x-api-key"] = runtimeConfig.frontendBackendApiKey;
 }
 
 app.use(async (req, res, next) => {

@@ -131,6 +131,15 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.82 (2026-05-17)
+*   **Fix**: Container startup now exits immediately if the database migration command fails, preventing backend/frontend startup against an unsafe schema state.
+*   **Fix**: SAB queue/history delete requests and history ID filters now return a client error for malformed item IDs instead of surfacing invalid GUIDs as server errors.
+*   **Reliability**: Frontend startup now validates the backend URL and internal backend API key before serving requests, turning misconfiguration into an early clear failure.
+*   **Reliability**: Frontend backend proxy requests now have explicit timeouts and structured error responses when the backend is unreachable.
+*   **Reliability**: Container startup now verifies the configured config directory exists, is owned correctly, and is writable before running migrations.
+*   **Reliability**: Hardened the frontend backend-WebSocket relay so malformed backend frames are logged and dropped instead of breaking the relay loop.
+*   **Tooling**: Included the frontend runtime configuration module in the Node server TypeScript build project.
+
 ## v0.6.81 (2026-05-17)
 *   **Fix**: Persist old hidden-history cleanup queue entries before deleting history rows, preserving mounted-file cleanup and VFS invalidation.
 *   **Fix**: Removed stale failed-history and direct Arr queue-deletion code paths so whole-download failures remain Arr-authoritative.

@@ -73,6 +73,10 @@ if ! id appuser >/dev/null 2>&1; then
 fi
 
 # Set environment variables
+if [ -z "${CONFIG_PATH}" ]; then
+    export CONFIG_PATH="/config"
+fi
+
 if [ -z "${BACKEND_URL}" ]; then
     export BACKEND_URL="http://localhost:8080"
 fi
@@ -81,14 +85,31 @@ if [ -z "${FRONTEND_BACKEND_API_KEY}" ]; then
     export FRONTEND_BACKEND_API_KEY=$(head -c 32 /dev/urandom | hexdump -ve '1/1 "%.2x"')
 fi
 
-# Change permissions on /config directory to the given PUID and PGID
-chown $PUID:$PGID /config
+# Validate and prepare the config directory before migrations touch SQLite
+if ! mkdir -p "$CONFIG_PATH"; then
+    log_json error "Failed to create CONFIG_PATH directory: $CONFIG_PATH"
+    exit 1
+fi
+
+# Change permissions on config directory to the given PUID and PGID
+if ! chown "$PUID:$PGID" "$CONFIG_PATH"; then
+    log_json error "Failed to chown CONFIG_PATH directory: $CONFIG_PATH"
+    exit 1
+fi
+
+if ! su-exec appuser sh -c 'test -w "$CONFIG_PATH" && test_file="$CONFIG_PATH/.nzbdav-write-test" && : > "$test_file" && rm -f "$test_file"'; then
+    log_json error "CONFIG_PATH is not writable by appuser: $CONFIG_PATH"
+    exit 1
+fi
 
 cd /app/backend
 
 # Run database migration with PRAGMA optimizations (5-10x faster)
 log_json info "Starting database migration..."
-su-exec appuser ./NzbWebDAV --db-migration
+if ! su-exec appuser ./NzbWebDAV --db-migration; then
+    log_json error "Database migration failed. Exiting before starting services."
+    exit 1
+fi
 log_json info "Database migration completed."
 
 # Run backend as appuser in background

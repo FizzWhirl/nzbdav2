@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-LIFECYCLE-CLEANUP");
-        Log.Warning("  FIX: Hidden history cleanup and Arr cache lifecycle.");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-STARTUP-RELAY-HARDENING");
+        Log.Warning("  FIX: Migration startup guard and frontend relay validation.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

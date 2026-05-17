@@ -37,7 +37,13 @@ public class RemoveFromHistoryRequest
 
     private static IEnumerable<Guid> NzoIdsFromQueryParam(HttpContext httpContext)
     {
-        return httpContext.GetQueryParamValues("value").Select(Guid.Parse);
+        return httpContext.GetQueryParamValues("value").Select(ParseNzoId);
+    }
+
+    private static Guid ParseNzoId(string value)
+    {
+        if (Guid.TryParse(value, out var id)) return id;
+        throw new BadHttpRequestException($"Invalid nzo_id value: {value}");
     }
 
     private static async Task<List<Guid>> NzoIdsFromRequestBody(HttpContext httpContext, CancellationToken ct)

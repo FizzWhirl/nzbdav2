@@ -2,6 +2,18 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { isAuthenticated } from "../app/auth/authentication.server";
 import type { IncomingMessage } from 'http';
 import { errorDetails, logJson } from './logger.server.js';
+import { runtimeConfig } from './runtime-config.server.js';
+
+type BackendTopicMessage = {
+    Topic: string;
+    Message: unknown;
+};
+
+function isBackendTopicMessage(value: unknown): value is BackendTopicMessage {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Record<string, unknown>;
+    return typeof candidate.Topic === 'string' && 'Message' in candidate;
+}
 
 function initializeWebsocketServer(wss: WebSocketServer) {
     // keep track of socket subscriptions
@@ -60,7 +72,7 @@ function initializeWebsocketServer(wss: WebSocketServer) {
 export function initializeWebsocketClient(subscriptions: Map<string, Set<WebSocket>>, lastMessage: Map<string, string>) {
     let reconnectTimeout: NodeJS.Timeout | null = null;
     const backoff = createReconnectBackoff();
-    const url = getBackendWebsocketUrl();
+    const url = runtimeConfig.backendWebsocketUrl;
 
     function connect() {
         const socket = new WebSocket(url);
@@ -73,14 +85,31 @@ export function initializeWebsocketClient(subscriptions: Map<string, Set<WebSock
                 reconnectTimeout = null;
             }
 
-            socket.send(Buffer.from(process.env.FRONTEND_BACKEND_API_KEY!, "utf-8"), { binary: false });
+            socket.send(Buffer.from(runtimeConfig.frontendBackendApiKey, "utf-8"), { binary: false });
         };
 
         socket.onmessage = (event: WebSocket.MessageEvent) => {
             var rawMessage = event.data.toString();
-            var topicMessage = JSON.parse(rawMessage);
-            var [topic, message] = [topicMessage.Topic, topicMessage.Message];
-            if (!topic || !message) return;
+            let topicMessage: unknown;
+            try {
+                topicMessage = JSON.parse(rawMessage);
+            } catch (error) {
+                logJson("warn", "Dropped malformed backend WebSocket message", {
+                    error: errorDetails(error),
+                    byteLength: Buffer.byteLength(rawMessage)
+                });
+                return;
+            }
+
+            if (!isBackendTopicMessage(topicMessage)) {
+                logJson("warn", "Dropped backend WebSocket message with unexpected shape", {
+                    byteLength: Buffer.byteLength(rawMessage)
+                });
+                return;
+            }
+
+            var [topic] = [topicMessage.Topic];
+            if (!topic) return;
             lastMessage.set(topic, rawMessage);
             var subscribed = subscriptions.get(topic) || [];
             subscribed.forEach(client => {
@@ -132,11 +161,6 @@ function createReconnectBackoff(initialDelayMs = 1000, maxDelayMs = 30000, jitte
             return Math.min(maxDelayMs, baseDelay + jitter);
         }
     };
-}
-
-function getBackendWebsocketUrl() {
-    const host = process.env.BACKEND_URL!;
-    return `${host.replace(/\/$/, '')}/ws`.replace(/^http/, 'ws');
 }
 
 export const websocketServer = {

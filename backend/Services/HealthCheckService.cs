@@ -665,7 +665,7 @@ public class HealthCheckService
     }
 
     public void TriggerManualRepairInBackground(string filePath)
-        => TriggerRepairInBackground(filePath, "Manual repair triggered by user", "UNKNOWN", "ManualRepair");
+        => TriggerRepairInBackground(filePath, "Manual replacement repair triggered by user", "UNKNOWN", "ManualRepair");
 
     public void TriggerRepairInBackground(string filePath, string failureDetails, string operation = "UNKNOWN", string source = "Repair")
     {
@@ -691,11 +691,11 @@ public class HealthCheckService
     }
 
     public async Task TriggerManualRepairAsync(string filePath, DavDatabaseClient dbClient, CancellationToken ct)
-        => await TriggerRepairAsync(filePath, dbClient, ct, "Manual repair triggered by user", "UNKNOWN").ConfigureAwait(false);
+        => await TriggerRepairAsync(filePath, dbClient, ct, "Manual replacement repair triggered by user", "UNKNOWN").ConfigureAwait(false);
 
     public async Task TriggerRepairAsync(string filePath, DavDatabaseClient dbClient, CancellationToken ct, string failureDetails, string operation = "UNKNOWN")
     {
-        Log.Information("Repair triggered for file: {FilePath}. Operation: {Operation}. Reason: {Reason}", filePath, operation, failureDetails);
+        Log.Information("Replacement repair triggered for file: {FilePath}. Operation: {Operation}. Reason: {Reason}", filePath, operation, failureDetails);
 
         // 1. Try exact match
         var davItem = await dbClient.Ctx.Items.AsNoTracking().FirstOrDefaultAsync(x => x.Path == filePath, ct).ConfigureAwait(false);
@@ -747,7 +747,7 @@ public class HealthCheckService
                 : string.Equals(operation, "ANALYSIS", StringComparison.OrdinalIgnoreCase)
                     ? "NZB analysis"
                 : $"{operation} health check";
-            var failureReason = $"{operationPrefix} found missing articles - Checked all {providerCount} providers" + (failureDetails != null ? $" ({failureDetails})" : "") + ".";
+            var failureReason = $"{operationPrefix} found missing articles after checking all {providerCount} providers" + (failureDetails != null ? $" ({failureDetails})" : "") + ". Starting replacement repair.";
 
             // if the file extension has been marked as ignored,
             // then don't bother trying to repair it. We can simply delete it.
@@ -1019,13 +1019,13 @@ public class HealthCheckService
         }
         catch (HttpRequestException e)
         {
-            Log.Warning($"[HealthCheck] Repair failed for item {davItem.Name}: {e.Message}");
+            Log.Warning($"[HealthCheck] Replacement repair failed for item {davItem.Name}: {e.Message}");
 
             var utcNow = DateTimeOffset.UtcNow;
             davItem.LastHealthCheck = utcNow;
             davItem.NextHealthCheck = utcNow.AddDays(1);
             davItem.IsCorrupted = true;
-            davItem.CorruptionReason = $"Repair failed: {e.Message}";
+            davItem.CorruptionReason = $"Replacement repair failed: {e.Message}";
             dbClient.Ctx.HealthCheckResults.Add(SendStatus(new HealthCheckResult()
             {
                 Id = Guid.NewGuid(),
@@ -1034,20 +1034,20 @@ public class HealthCheckService
                 CreatedAt = utcNow,
                 Result = HealthCheckResult.HealthResult.Unhealthy,
                 RepairStatus = HealthCheckResult.RepairAction.ActionNeeded,
-                Message = $"Error performing file repair: {e.Message}",
+                Message = $"Error performing replacement repair: {e.Message}",
                 Operation = operation
             }));
             await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
         }
         catch (Exception e)
         {
-            // if an error is encountered during repairs,
+            // if an error is encountered during replacement repair,
             // then mark the item as unhealthy
             var utcNow = DateTimeOffset.UtcNow;
             davItem.LastHealthCheck = utcNow;
             davItem.NextHealthCheck = utcNow.AddDays(1);
             davItem.IsCorrupted = true;
-            davItem.CorruptionReason = $"Repair failed: {e.Message}";
+            davItem.CorruptionReason = $"Replacement repair failed: {e.Message}";
             dbClient.Ctx.HealthCheckResults.Add(SendStatus(new HealthCheckResult()
             {
                 Id = Guid.NewGuid(),
@@ -1056,7 +1056,7 @@ public class HealthCheckService
                 CreatedAt = utcNow,
                 Result = HealthCheckResult.HealthResult.Unhealthy,
                 RepairStatus = HealthCheckResult.RepairAction.ActionNeeded,
-                Message = $"Error performing file repair: {e.Message}",
+                Message = $"Error performing replacement repair: {e.Message}",
                 Operation = operation
             }));
             await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -1098,7 +1098,7 @@ public class HealthCheckService
         };
 
         await Task.Run(() => File.Delete(symlinkOrStrmPath)).ConfigureAwait(false);
-        return $"Deleted remaining {linkDescription} after Arr repair.";
+        return $"Deleted remaining {linkDescription} after triggering Arr replacement search.";
     }
 
     private async Task SaveHealthCheckToAnalysisHistoryAsync(Guid davItemId, string fileName, string jobName, string result, string details)

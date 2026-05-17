@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-STARTUP-RELAY-HARDENING");
-        Log.Warning("  FIX: Migration startup guard and frontend relay validation.");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-LIFECYCLE-RELIABILITY");
+        Log.Warning("  FIX: VFS forget retries, safer migration locks, and Arr diagnostics.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -164,16 +164,7 @@ class Program
             Log.Warning("  → Applying PRAGMA mmap_size = 1610612736 (1.5GB)");
             await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA mmap_size = 1610612736;").ConfigureAwait(false); // 1.5GB - covers full DB
 
-            // Clear stale migration locks from previous failed attempts
-            Log.Warning("  → Clearing any stale migration locks...");
-            try
-            {
-                await databaseContext.Database.ExecuteSqlRawAsync("DELETE FROM __EFMigrationsLock WHERE 1=1;").ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // Table might not exist yet, ignore
-            }
+            await ClearEfMigrationLockIfRequestedAsync(databaseContext, args).ConfigureAwait(false);
 
             await EnsureMigrationDropIndexPrerequisitesAsync(databaseContext).ConfigureAwait(false);
             await EnsureAddHistoryCleanupMigrationCompatibilityAsync(databaseContext).ConfigureAwait(false);
@@ -253,7 +244,10 @@ class Program
         builder.Host.UseSerilog();
         builder.Services.AddControllers();
         builder.Services.AddHealthChecks();
-        builder.Services.AddHttpClient("RcloneRc");
+        builder.Services.AddHttpClient("RcloneRc", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
         builder.Services
             .AddWebdavBasicAuthentication(configManager)
             .AddSingleton(configManager)
@@ -295,7 +289,12 @@ class Program
 
         // Wire rclone vfs/forget into DavDatabaseContext SaveChangesAsync
         var rcloneService = app.Services.GetRequiredService<RcloneRcService>();
-        DavDatabaseContext.VfsForgetCallback = paths => rcloneService.ForgetAsync(paths);
+        DavDatabaseContext.VfsForgetCallback = paths =>
+        {
+            var rcloneConfig = configManager.GetRcloneRcConfig();
+            if (!rcloneConfig.Enabled || string.IsNullOrWhiteSpace(rcloneConfig.Url)) return Task.FromResult(true);
+            return rcloneService.ForgetAsync(paths);
+        };
 
         app.Services.GetRequiredService<ArrMonitoringService>();
         app.Services.GetRequiredService<HealthCheckService>();
@@ -391,6 +390,29 @@ class Program
         app.UseNWebDav();
         app.Lifetime.ApplicationStopping.Register(SigtermUtil.Cancel);
         await app.RunAsync().ConfigureAwait(false);
+    }
+
+    private static async Task ClearEfMigrationLockIfRequestedAsync(DavDatabaseContext databaseContext, string[] args)
+    {
+        var shouldClearMigrationLock = args.Contains("--clear-migration-lock")
+                                       || EnvironmentUtil.IsVariableTrue("CLEAR_EF_MIGRATIONS_LOCK");
+
+        if (!shouldClearMigrationLock)
+        {
+            Log.Warning("  → EF migration lock cleanup is disabled. Set CLEAR_EF_MIGRATIONS_LOCK=true or pass --clear-migration-lock only when recovering from a confirmed stale lock.");
+            return;
+        }
+
+        Log.Warning("  → Clearing EF migration locks by explicit recovery request...");
+        try
+        {
+            var deleted = await databaseContext.Database.ExecuteSqlRawAsync("DELETE FROM __EFMigrationsLock WHERE 1=1;").ConfigureAwait(false);
+            Log.Warning("  → Cleared {Count} EF migration lock row(s).", deleted);
+        }
+        catch (Exception ex) when (ex.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Debug("EF migrations lock table does not exist yet; nothing to clear.");
+        }
     }
 
     private static async Task EnsureSchemaCompatibilityAsync(DavDatabaseContext databaseContext)

@@ -12,11 +12,18 @@ namespace NzbWebDAV.Database;
 
 public sealed class DavDatabaseContext() : DbContext(Options.Value)
 {
+    private static readonly TimeSpan[] VfsForgetRetryDelays =
+    [
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(15)
+    ];
+
     /// <summary>
     /// Static callback for vfs/forget integration. Set during startup
     /// to fire-and-forget rclone vfs/forget when DavItems change.
     /// </summary>
-    public static Func<string[], Task>? VfsForgetCallback { get; set; }
+    public static Func<string[], Task<bool>>? VfsForgetCallback { get; set; }
     public static string ConfigPath => Environment.GetEnvironmentVariable("CONFIG_PATH") ?? "/config";
     public static string DatabaseFilePath => Path.Join(ConfigPath, "db.sqlite");
 
@@ -631,8 +638,7 @@ public sealed class DavDatabaseContext() : DbContext(Options.Value)
         var dirsToForget = GetVfsForgetDirectories();
         var result = await base.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-        if (dirsToForget.Length > 0 && VfsForgetCallback != null)
-            _ = VfsForgetCallback(dirsToForget);
+        TriggerVfsForget(dirsToForget);
 
         return result;
     }
@@ -678,7 +684,44 @@ public sealed class DavDatabaseContext() : DbContext(Options.Value)
     /// </summary>
     public static void TriggerVfsForget(params string[] paths)
     {
-        if (paths.Length == 0 || VfsForgetCallback == null) return;
-        _ = VfsForgetCallback(paths);
+        var callback = VfsForgetCallback;
+        if (paths.Length == 0 || callback == null) return;
+
+        var normalizedPaths = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path.Replace('\\', '/').TrimEnd('/'))
+            .Select(path => path.Length == 0 ? "/" : path)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalizedPaths.Length == 0) return;
+
+        _ = ObserveVfsForgetAsync(callback, normalizedPaths);
+    }
+
+    private static async Task ObserveVfsForgetAsync(Func<string[], Task<bool>> callback, string[] paths)
+    {
+        for (var attempt = 1; attempt <= VfsForgetRetryDelays.Length + 1; attempt++)
+        {
+            try
+            {
+                if (await callback(paths).ConfigureAwait(false))
+                {
+                    if (attempt > 1)
+                        Log.Information("[VfsForget] Succeeded for {Count} path(s) on attempt {Attempt}: {Paths}", paths.Length, attempt, string.Join(", ", paths));
+                    return;
+                }
+
+                Log.Warning("[VfsForget] Callback returned false for {Count} path(s) on attempt {Attempt}: {Paths}", paths.Length, attempt, string.Join(", ", paths));
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[VfsForget] Callback failed for {Count} path(s) on attempt {Attempt}: {Paths}", paths.Length, attempt, string.Join(", ", paths));
+            }
+
+            if (attempt > VfsForgetRetryDelays.Length) break;
+            await Task.Delay(VfsForgetRetryDelays[attempt - 1]).ConfigureAwait(false);
+        }
+
+        Log.Error("[VfsForget] Exhausted retries for {Count} path(s): {Paths}", paths.Length, string.Join(", ", paths));
     }
 }

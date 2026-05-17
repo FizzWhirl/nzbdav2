@@ -10,6 +10,8 @@ namespace NzbWebDAV.Services;
 
 public partial class ArrReplacementSearchService(ConfigManager configManager)
 {
+    private const int MaxArrNotificationAttempts = 3;
+
     public async Task NotifyQueueItemFailedAsync(Guid queueItemId, string jobName, string reason, CancellationToken ct = default)
     {
         if (ct.IsCancellationRequested) return;
@@ -19,7 +21,11 @@ public partial class ArrReplacementSearchService(ConfigManager configManager)
         {
             try
             {
-                await arrClient.RefreshMonitoredDownloads().ConfigureAwait(false);
+                await RunArrNotificationWithRetryAsync(
+                    arrClient,
+                    $"refresh monitored downloads for failed queue item {jobName}",
+                    () => arrClient.RefreshMonitoredDownloads(),
+                    ct).ConfigureAwait(false);
                 handled = true;
                 Log.Information("[ArrReplacement] Requested Arr instance {Host} to refresh monitored downloads for failed queue item {JobName} ({QueueItemId}). Arr will apply its own failed-download removal/blocklist/search settings.",
                     arrClient.Host, jobName, queueItemId);
@@ -53,12 +59,16 @@ public partial class ArrReplacementSearchService(ConfigManager configManager)
         {
             try
             {
-                handled |= arrClient switch
-                {
-                    SonarrClient sonarrClient => await NotifySonarrQueueFilesDeletedAsync(sonarrClient, queueItemId, jobName, mediaFileNames).ConfigureAwait(false),
-                    RadarrClient radarrClient => await NotifyRadarrQueueFilesDeletedAsync(radarrClient, queueItemId, jobName).ConfigureAwait(false),
-                    _ => false
-                };
+                handled |= await RunArrNotificationWithRetryAsync(
+                    arrClient,
+                    $"replacement search for deleted queue files in {jobName}",
+                    () => arrClient switch
+                    {
+                        SonarrClient sonarrClient => NotifySonarrQueueFilesDeletedAsync(sonarrClient, queueItemId, jobName, mediaFileNames),
+                        RadarrClient radarrClient => NotifyRadarrQueueFilesDeletedAsync(radarrClient, queueItemId, jobName),
+                        _ => Task.FromResult(false)
+                    },
+                    ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -160,6 +170,31 @@ public partial class ArrReplacementSearchService(ConfigManager configManager)
             }
         }
     }
+
+    private static async Task<T> RunArrNotificationWithRetryAsync<T>(ArrClient client, string action, Func<Task<T>> operation, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return await operation().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (attempt < MaxArrNotificationAttempts
+                                       && !cancellationToken.IsCancellationRequested
+                                       && IsRetryableArrNotificationException(ex))
+            {
+                var delay = TimeSpan.FromSeconds(attempt * 5);
+                Log.Warning(ex, "[ArrReplacement] Arr instance {Host} failed to {Action} on attempt {Attempt}/{MaxAttempts}; retrying in {DelayMs}ms.",
+                    client.Host, action, attempt, MaxArrNotificationAttempts, delay.TotalMilliseconds);
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static bool IsRetryableArrNotificationException(Exception ex) =>
+        ex is HttpRequestException or TaskCanceledException or TimeoutException
+        || (ex.InnerException != null && IsRetryableArrNotificationException(ex.InnerException));
 
     private static bool MatchesQueueRecord(ArrQueueRecord record, Guid queueItemId, string jobName)
     {

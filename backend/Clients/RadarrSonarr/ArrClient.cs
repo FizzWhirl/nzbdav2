@@ -22,7 +22,11 @@ public class ArrClient(string host, string apiKey)
         // ... add other relevant event types if needed
     }
 
-    protected static readonly HttpClient HttpClient = new HttpClient();
+    private const int MaxErrorBodyLogLength = 4096;
+    protected static readonly HttpClient HttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(30)
+    };
 
     public string Host { get; } = host;
     private string ApiKey { get; } = apiKey;
@@ -81,12 +85,13 @@ public class ArrClient(string host, string apiKey)
 
     public async Task<bool> MarkHistoryFailedAsync(int historyId)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, GetRequestUri($"/history/failed/{historyId}"));
+        using var request = new HttpRequestMessage(HttpMethod.Post, GetRequestUri($"/history/failed/{historyId}"));
         using var response = await SendAsync(request);
 
         if (!response.IsSuccessStatusCode)
         {
-            Log.Error($"[ArrClient] MarkHistoryFailed failed with status {response.StatusCode}");
+            var responseBody = await ReadResponseBodySnippetAsync(response).ConfigureAwait(false);
+            Log.Error("[ArrClient] MarkHistoryFailed failed for {Path} with status {Status}: {Response}", request.RequestUri?.AbsolutePath, response.StatusCode, responseBody);
             return false;
         }
 
@@ -98,12 +103,13 @@ public class ArrClient(string host, string apiKey)
 
     protected async Task<T> GetRoot<T>(string rootPath)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, $"{Host}{rootPath}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{Host}{rootPath}");
         using var response = await SendAsync(request);
         
         if (!response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException($"Request to {rootPath} failed with status {response.StatusCode}");
+            var responseBody = await ReadResponseBodySnippetAsync(response).ConfigureAwait(false);
+            throw new HttpRequestException($"Request to {rootPath} failed with status {(int)response.StatusCode} {response.StatusCode}: {responseBody}");
         }
 
         if (response.Content.Headers.ContentLength == 0)
@@ -115,13 +121,16 @@ public class ArrClient(string host, string apiKey)
 
     protected async Task<T> Post<T>(string path, object body)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, GetRequestUri(path));
+        using var request = new HttpRequestMessage(HttpMethod.Post, GetRequestUri(path));
         var jsonBody = JsonSerializer.Serialize(body);
         request.Content = new StringContent(jsonBody, new MediaTypeHeaderValue("application/json"));
         using var response = await SendAsync(request);
 
         if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Request to {path} failed with status {response.StatusCode}");
+        {
+            var responseBody = await ReadResponseBodySnippetAsync(response).ConfigureAwait(false);
+            throw new HttpRequestException($"Request to {path} failed with status {(int)response.StatusCode} {response.StatusCode}: {responseBody}");
+        }
 
         if (response.Content.Headers.ContentLength == 0)
             return default!;
@@ -132,8 +141,14 @@ public class ArrClient(string host, string apiKey)
 
     protected async Task<HttpStatusCode> Delete(string path, Dictionary<string, string>? queryParams = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Delete, GetRequestUri(path, queryParams));
+        using var request = new HttpRequestMessage(HttpMethod.Delete, GetRequestUri(path, queryParams));
         using var response = await SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            var responseBody = await ReadResponseBodySnippetAsync(response).ConfigureAwait(false);
+            Log.Warning("[ArrClient] DELETE {Path} failed with status {Status}: {Response}", path, response.StatusCode, responseBody);
+        }
+
         return response.StatusCode;
     }
 
@@ -151,5 +166,14 @@ public class ArrClient(string host, string apiKey)
     {
         request.Headers.Add("X-Api-Key", ApiKey);
         return HttpClient.SendAsync(request);
+    }
+
+    private static async Task<string> ReadResponseBodySnippetAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(body)) return "<empty>";
+        return body.Length <= MaxErrorBodyLogLength
+            ? body
+            : body[..MaxErrorBodyLogLength] + "...";
     }
 }

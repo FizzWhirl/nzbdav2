@@ -131,6 +131,13 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.83 (2026-05-17)
+*   **Reliability**: VFS forget callbacks are now observed, normalized, and retried so rclone cache invalidation failures are logged instead of silently disappearing.
+*   **Reliability**: EF migration lock cleanup is now an explicit recovery action via `CLEAR_EF_MIGRATIONS_LOCK=true` or `--clear-migration-lock` instead of running on every migration startup.
+*   **Reliability**: Arr replacement notifications now retry transient failures before giving up on a Sonarr/Radarr instance.
+*   **Logging**: Arr HTTP failures now include bounded response-body diagnostics, and Arr/rclone HTTP clients have explicit timeouts.
+*   **Maintenance**: Health-check repair logs now describe the current replacement-repair workflow more clearly.
+
 ## v0.6.82 (2026-05-17)
 *   **Fix**: Container startup now exits immediately if the database migration command fails, preventing backend/frontend startup against an unsafe schema state.
 *   **Fix**: SAB queue/history delete requests and history ID filters now return a client error for malformed item IDs instead of surfacing invalid GUIDs as server errors.

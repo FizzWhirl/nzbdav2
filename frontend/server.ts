@@ -19,9 +19,7 @@ app.use(compression());
 app.disable("x-powered-by");
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "same-origin");
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   next();
 });
 

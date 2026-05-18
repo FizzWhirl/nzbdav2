@@ -131,6 +131,9 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.86 (2026-05-17)
+*   **Fix**: Removed frontend framing/opener headers that could prevent loading through reverse-proxy launch flows while keeping low-risk browser response hardening.
+
 ## v0.6.85 (2026-05-17)
 *   **Tooling**: Docker publish CI now runs backend restore/build, frontend contract tests, frontend typecheck, and shell syntax checks before publishing images.
 *   **Tooling**: Added a frontend WebSocket contract test covering valid and malformed topic-message payloads.

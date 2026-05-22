@@ -21,6 +21,49 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
+const defaultConfig = {
+    "general.base-url": "",
+    "general.log-level": "Information",
+    "api.key": "",
+    "api.categories": "",
+    "api.manual-category": "uncategorized",
+    "api.user-agent": "",
+    "api.max-queue-connections": "",
+    "api.ensure-importable-video": "true",
+    "api.ensure-article-existence": "false",
+    "api.ignore-history-limit": "true",
+    "api.download-extension-blacklist": ".nfo, .par2, .sfv",
+    "api.duplicate-nzb-behavior": "increment",
+    "api.import-strategy": "symlinks",
+    "api.completed-downloads-dir": "",
+    "api.history-retention-hours": "",
+    "usenet.providers": "",
+    "usenet.connections-per-stream": "20",
+    "usenet.total-streaming-connections": "20",
+    "usenet.stream-buffer-size": "100",
+    "usenet.hide-samples": "false",
+    "usenet.operation-timeout": "90",
+    "webdav.user": "admin",
+    "webdav.pass": "",
+    "webdav.show-hidden-files": "false",
+    "webdav.enforce-readonly": "true",
+    "webdav.preview-par2-files": "false",
+    "rclone.mount-dir": "",
+    "rclone.rc": "{}",
+    "media.library-dir": "",
+    "arr.instances": "{\"RadarrInstances\":[],\"SonarrInstances\":[],\"QueueRules\":[]}",
+    "repair.connections": "",
+    "repair.enable": "false",
+    "repair.min-check-interval-days": "",
+    "stats.enable": "false",
+    "analysis.enable": "true",
+    "analysis.max-concurrent": "3",
+    "provider-affinity.enable": "true",
+    "api.startup-vacuum": "false",
+    "api.health-check-categories": "",
+}
+
+>>>>>>> fb7706f (feat: make NZB-fetch User-Agent configurable)
 export async function loader({ request }: Route.LoaderArgs) {
     // fetch the config items
     var configItems = await backendClient.getConfig(Object.keys(defaultConfig));

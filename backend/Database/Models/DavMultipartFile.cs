@@ -36,7 +36,10 @@ public class DavMultipartFile
         public Dictionary<int, string[]>? SegmentFallbacks { get; set; }
 
         /// <summary>
-        /// Exact yEnc decoded byte sizes for <see cref="SegmentIds"/> when already known.
+        /// Decoded byte size of each segment in <see cref="SegmentIds"/> (yEnc PartSize).
+        /// When present and summing exactly to <see cref="SegmentIdByteRange"/>.Count, enables O(log N)
+        /// seeking in NzbFileStream. Null for items created before this field existed or not yet populated;
+        /// populated lazily on first stream (DatabaseStoreMultipartFile) and eagerly during RAR processing.
         /// </summary>
         public long[]? SegmentSizes { get; set; }
     }

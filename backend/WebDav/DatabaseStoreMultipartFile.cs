@@ -69,6 +69,39 @@ public class DatabaseStoreMultipartFile(
                 "This usually means the v1→v2 migration could not recover the upstream blob " +
                 "file (mounted at {CONFIG_PATH}/blobs). Re-download via Sonarr/Radarr to recover.");
 
+        // Lazily compute + persist exact decoded per-segment sizes so NzbFileStream can seek precisely.
+        // Covers items created before this field existed and any aggregator that did not populate them.
+        if (SegmentSizePopulation.NeedsPopulation(multipartFile.Metadata))
+        {
+            var changed = false;
+            foreach (var part in multipartFile.Metadata.FileParts)
+            {
+                if (part.SegmentSizes != null && part.SegmentSizes.Length == part.SegmentIds.Length) continue;
+                if (part.SegmentIds.Length == 0) continue;
+                try
+                {
+                    var sizes = await usenetClient.AnalyzeNzbAsync(
+                        part.SegmentIds, configManager.GetTotalStreamingConnections(),
+                        progress: null, ct, useSmartAnalysis: true).ConfigureAwait(false);
+
+                    if (SegmentSizePopulation.IsValidForPart(part, sizes)) { part.SegmentSizes = sizes; changed = true; }
+                    else Serilog.Log.Warning("[DatabaseStoreMultipartFile] Computed sizes for '{File}' did not sum to part size; will interpolate.", davMultipartFile.Name);
+                }
+                catch (Exception ex)
+                {
+                    Serilog.Log.Warning(ex, "[DatabaseStoreMultipartFile] Failed to compute segment sizes for '{File}'; will interpolate.", davMultipartFile.Name);
+                }
+            }
+
+            if (changed)
+            {
+                dbClient.Ctx.MultipartFiles.Update(multipartFile);
+                dbClient.Ctx.Entry(multipartFile).Property(x => x.Metadata).IsModified = true;
+                await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+                Serilog.Log.Information("[DatabaseStoreMultipartFile] Persisted segment sizes for '{File}'.", davMultipartFile.Name);
+            }
+        }
+
         var isPreviewMode = httpContext.Items.ContainsKey("PreviewMode");
         var isPreviewHlsMode = httpContext.Items.ContainsKey("PreviewHlsMode");
         long? requestedEndByte = null;

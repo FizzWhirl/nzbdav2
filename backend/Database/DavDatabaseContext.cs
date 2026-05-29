@@ -10,8 +10,13 @@ using Serilog;
 
 namespace NzbWebDAV.Database;
 
-public sealed class DavDatabaseContext() : DbContext(Options.Value)
+public sealed class DavDatabaseContext : DbContext
 {
+    public DavDatabaseContext() : base(Options.Value) { }
+
+    // Used by tests (and any caller needing an explicit provider, e.g. SQLite in-memory).
+    public DavDatabaseContext(DbContextOptions<DavDatabaseContext> options) : base(options) { }
+
     private static readonly TimeSpan[] VfsForgetRetryDelays =
     [
         TimeSpan.FromSeconds(1),

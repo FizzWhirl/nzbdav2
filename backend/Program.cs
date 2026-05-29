@@ -190,6 +190,9 @@ class Program
         await databaseContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout = 5000;").ConfigureAwait(false);
         await EnsureSchemaCompatibilityAsync(databaseContext).ConfigureAwait(false);
 
+        // Migrate legacy DavRarFile rows to DavMultipartFile (v0.8.0 one-time conversion)
+        await LegacyRarFileMigration.RunAsync(databaseContext).ConfigureAwait(false);
+
         // initialize the config-manager
         var configManager = new ConfigManager();
         await configManager.LoadConfig().ConfigureAwait(false);

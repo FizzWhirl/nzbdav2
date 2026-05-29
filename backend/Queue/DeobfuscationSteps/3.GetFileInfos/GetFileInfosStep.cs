@@ -125,6 +125,6 @@ public static class GetFileInfosStep
         public bool IsSevenZip { get; init; }
         public int MagicOffset { get; init; } = -1;
         public required bool MissingFirstSegment { get; init; }
-        public long[]? SegmentSizes { get; init; }
+        public long[]? SegmentSizes { get; set; }
     }
 }

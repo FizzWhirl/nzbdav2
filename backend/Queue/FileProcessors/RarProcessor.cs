@@ -131,6 +131,28 @@ public class RarProcessor(
 
         var offset = Math.Max(0, fileInfo.MagicOffset);
 
+        // Precompute exact decoded per-segment sizes for this volume so streaming gets fast, precise
+        // seeking. Uniform volumes resolve in ~3 yEnc-header fetches; on any failure leave null and
+        // let the lazy stream-time path handle it.
+        if (fileInfo.SegmentSizes == null)
+        {
+            try
+            {
+                var partIds = fileInfo.NzbFile.GetSegmentIds();
+                if (partIds.Length > 0)
+                {
+                    var headerConns = GetRarHeaderConnectionCount(partIds.Length);
+                    var computed = await usenet.AnalyzeNzbAsync(partIds, headerConns, null, headerCts.Token, useSmartAnalysis: true).ConfigureAwait(false);
+                    if (SegmentOffsetTable.TryBuild(computed, partIds.Length, stream.Length, out _))
+                        fileInfo.SegmentSizes = computed;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "[RarProcessor] Could not precompute segment sizes for {FileName}; lazy path will handle it.", fileInfo.FileName);
+            }
+        }
+
         var results = new List<StoredFileSegment>();
         foreach (var x in headers.Where(h => h.HeaderType == HeaderType.File))
         {

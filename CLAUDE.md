@@ -185,7 +185,7 @@ Log.Warning("  FEATURE: Database PRAGMA Optimizations (5-10x faster migrations)"
 
 Version format: `0.MINOR.PATCH`
 
-- **MINOR** — tracks the upstream [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) sync level. Currently `6` (synced to upstream v0.6.0). Only bump MINOR after a deliberate upstream sync — document this in `docs/upstream-sync-YYYY-MM-DD.md`.
+- **MINOR** — tracks the upstream [dgherman/nzbdav2](https://github.com/dgherman/nzbdav2) sync level. Currently `8` (synced to upstream v0.8.0, commit `dca490e6`). Only bump MINOR after a deliberate upstream sync — document this in `docs/upstream-sync-YYYY-MM-DD.md`.
 - **PATCH** — auto-incremented by CI. **Never set this manually.** The formula is in `.github/workflows/docker-publish.yml`:
   ```bash
   PATCH=$(( ${{ github.run_number }} - OFFSET ))
@@ -405,3 +405,11 @@ If experiencing slow download speeds (< 10 MB/s), check for these common issues:
   # Look for cache hits vs misses in debug logs
   docker logs nzbdav 2>&1 | grep "CombinedStream\|cache"
   ```
+
+## Upstream Sync History
+
+| Date | Upstream Version | Upstream Commit | Description |
+|------|-----------------|-----------------|-------------|
+| 2026-05-28 | v0.8.0 | `dca490e6` | Integrated 25 files (+1,325/−127). Added SegmentOffsetTable, SegmentSizePopulation, LegacyRarFileMigration. Hybridized RarProcessor, SevenZipProcessor, DavMultipartFile, ConfigManager. Added configurable User-Agent. Deliberately skipped upstream RarFile removal chain (our Zstd in-DB storage requires it). All fork-protected features preserved. |
+| 2026-04-08 | v0.6.3 | `6482ca1` | Previous sync. Added duplicate detection, logging improvements, SemaphoreSlim fixes, NZB parsing fixes, async provider stats. Deliberately skipped blobstore migration, Export NZB features, Dependabot bumps, CI changes. |
+| 2026-03-10 | v0.6.0 | (cutoff) | Initial sync cutoff. Deliberately skipped PrioritizedSemaphore (use our GlobalOperationLimiter), 7z MultiProgress (deferred). |

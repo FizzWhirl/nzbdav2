@@ -863,10 +863,17 @@ public class ProviderErrorService : IDisposable
         _cts.Cancel();
         try
         {
-            _persistenceTask.Wait(TimeSpan.FromSeconds(5));
-            PersistEvents().GetAwaiter().GetResult();
+            // Wrap in Task.Run to avoid sync-over-async deadlocks during shutdown.
+            // The persistence loop may be mid-await when cancelled; running on a
+            // fresh thread-pool thread prevents capturing the calling thread's context.
+            Task.Run(async () =>
+            {
+                try { await _persistenceTask.ConfigureAwait(false); }
+                catch (OperationCanceledException) { /* expected on cancellation */ }
+                await PersistEvents().ConfigureAwait(false);
+            }).GetAwaiter().GetResult();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             Log.Warning(ex, "Failed to flush provider error buffer during shutdown");
         }

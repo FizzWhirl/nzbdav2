@@ -101,9 +101,9 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
         var usageContext = cancellationToken.GetContext<ConnectionUsageContext>();
 
         // ConnectionUsageContext is a readonly struct (value type). GetContext<T> returns
-        // default(ConnectionUsageContext) when no context is set, which has UsageType=Unknown (0)
+        // default(ConnectionUsageContext) when no context is set, which has UsageType=Unlabeled (0)
         // and Details=null. Check for this default state instead of null.
-        var isDefault = usageContext.UsageType == ConnectionUsageType.Unknown
+        var isDefault = usageContext.UsageType == ConnectionUsageType.Unlabeled
                         && usageContext.Details == null;
 
         if (isDefault)
@@ -111,14 +111,14 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
             var stackHint = Environment.StackTrace;
             Serilog.Log.Warning(
                 "[ConnectionPool][{PoolName}] Connection acquired without ConnectionUsageContext on CancellationToken. " +
-                "This will show as 'Unknown' on the frontend. Stack trace hint: {StackHint}",
+                "This will show as 'Unlabeled' on the frontend. Stack trace hint: {StackHint}",
                 PoolName, stackHint.Substring(0, Math.Min(stackHint.Length, 500)));
         }
 
-        // Fall back to a descriptive Unknown context with stack info so the frontend
+        // Fall back to a descriptive Unlabeled context with stack info so the frontend
         // shows useful details instead of just "No details"
         var effectiveContext = isDefault
-            ? new ConnectionUsageContext(ConnectionUsageType.Unknown, "No context set on cancellation token")
+            ? new ConnectionUsageContext(ConnectionUsageType.Unlabeled, "No context set on cancellation token")
             : usageContext;
 
         // Determine if we need to reserve slots for higher-priority callers.
@@ -171,6 +171,8 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
                 {
                     // Quick liveness check with 3s timeout (reduced from 5s for faster failure detection)
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    using var _ = cts.Token.SetScopedContext(
+                        new ConnectionUsageContext(ConnectionUsageType.HealthCheck, "Idle connection liveness check"));
                     await client.DateAsync(cts.Token).ConfigureAwait(false);
                     Serilog.Log.Debug("[ConnectionPool][{PoolName}] Health check passed for idle connection (idle: {IdleTime:F0}s)", PoolName, (Environment.TickCount64 - item.LastTouchedMillis) / 1000.0);
                 }
@@ -331,7 +333,7 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
         // the sweeper already released it. Double-release would corrupt the
         // semaphore count and allow more than _maxConnections concurrent connections.
         var wasActive = _activeConnections.TryRemove(connectionId, out var info);
-        var usageType = info?.Context.UsageType ?? ConnectionUsageType.Unknown;
+        var usageType = info?.Context.UsageType ?? ConnectionUsageType.Unlabeled;
 
         var poolDisposed = Volatile.Read(ref _disposed) == 1;
         var isDoomed = _doomedConnections.TryRemove(connection, out _);
@@ -360,7 +362,7 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
     private void Destroy(T connection, string connectionId)
     {
         _activeConnections.TryRemove(connectionId, out var info);
-        var usageType = info?.Context.UsageType ?? ConnectionUsageType.Unknown;
+        var usageType = info?.Context.UsageType ?? ConnectionUsageType.Unlabeled;
 
         // When a lock requests replacement, we dispose the connection instead of reusing.
         _ = DisposeConnectionSafeAsync(connection, "destroy/replace");

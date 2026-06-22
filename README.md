@@ -131,6 +131,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.87 (2026-06-21)
+*   **Optimization**: Removed the high-cardinality `path` label from shared-stream Prometheus hit/miss counters, keeping miss reason labels bounded for safer long-term metric cardinality.
+*   **Feature**: Wired `nzbdav_shared_stream_active_readers` so the collector now publishes live attached-reader counts from shared stream entries.
+*   **Maintenance**: Deduplicated the connection-pool circuit-breaker failure threshold into a single constant to keep trip checks and logging behavior in sync.
+
 ## v0.6.86 (2026-05-17)
 *   **Fix**: Removed frontend framing/opener headers that could prevent loading through reverse-proxy launch flows while keeping low-risk browser response hardening.
 

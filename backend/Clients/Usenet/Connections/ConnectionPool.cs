@@ -34,7 +34,7 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
 
     // -- AppMetrics.IPoolSnapshotProvider extras
     public int ConsecutiveFailures => _consecutiveConnectionFailures;
-    public bool IsCircuitBreakerTripped => _consecutiveConnectionFailures > 5;
+    public bool IsCircuitBreakerTripped => _consecutiveConnectionFailures > CircuitBreakerFailureThreshold;
 
     public event EventHandler<ConnectionPoolStats.ConnectionPoolChangedEventArgs>? OnConnectionPoolChanged;
 
@@ -64,6 +64,7 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
     // Circuit breaker state
     private int _consecutiveConnectionFailures;
     private DateTimeOffset _lastConnectionFailure = DateTimeOffset.MinValue;
+    private const int CircuitBreakerFailureThreshold = 5;
 
     /* ------------------------------------------------------------------------------ */
 
@@ -201,7 +202,7 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
         while (true)
         {
             // Circuit breaker check - reduced cooldown from 5s to 2s for faster recovery
-            if (_consecutiveConnectionFailures > 5)
+            if (_consecutiveConnectionFailures > CircuitBreakerFailureThreshold)
             {
                 var cooldown = TimeSpan.FromSeconds(2);
                 var timeSinceFailure = DateTimeOffset.UtcNow - _lastConnectionFailure;
@@ -270,7 +271,7 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
                 }
                 else if (currentFailures > 3)
                 {
-                    Serilog.Log.Error("[ConnectionPool][{PoolName}] Failed to create connection for {UsageType} (Failure #{Failures}). Circuit breaker will activate after 5 failures. Error: {Error}", PoolName, usageContext.UsageType, currentFailures, ex.Message);
+                    Serilog.Log.Error("[ConnectionPool][{PoolName}] Failed to create connection for {UsageType} (Failure #{Failures}). Circuit breaker will activate after {Threshold} failures. Error: {Error}", PoolName, usageContext.UsageType, currentFailures, CircuitBreakerFailureThreshold, ex.Message);
                 }
                 else
                 {

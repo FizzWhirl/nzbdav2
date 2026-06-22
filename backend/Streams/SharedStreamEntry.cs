@@ -49,6 +49,7 @@ public class SharedStreamEntry : IDisposable
     public long ValidRangeStart => Math.Max(_basePosition, WritePosition - _ringBufferSize);
     public bool IsCompleted => _completed;
     public Exception? Failure => _failure;
+    public int ReaderCount => Math.Max(0, Volatile.Read(ref _readerCount));
     public long StreamLength { get; }
     public EntryState State => _state;
 

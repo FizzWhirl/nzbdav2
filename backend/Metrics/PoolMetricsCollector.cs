@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using NzbWebDAV.Streams;
 using Serilog;
 
 namespace NzbWebDAV.Metrics;
@@ -22,6 +23,8 @@ public sealed class PoolMetricsCollector : BackgroundService
                 try
                 {
                     AppMetrics.RefreshPoolGauges();
+                    AppMetrics.SharedStreamActiveEntries.Set(SharedStreamManager.ActiveEntryCount);
+                    AppMetrics.SharedStreamActiveReaders.Set(SharedStreamManager.ActiveReaderCount);
                 }
                 catch (Exception ex)
                 {

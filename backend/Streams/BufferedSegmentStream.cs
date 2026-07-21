@@ -17,8 +17,76 @@ namespace NzbWebDAV.Streams;
 /// High-performance buffered stream that maintains a read-ahead buffer of segments
 /// for smooth, consistent streaming performance.
 /// </summary>
-public class BufferedSegmentStream : Stream
+public class BufferedSegmentStream : Stream, ITouchableStream
 {
+    /// <summary>
+    /// Floor for the prefetch window, in BYTES of segment data in flight. The window is what stops the
+    /// fetchers racing to the end of the file (issue #19) — but set it too low and the reader starves,
+    /// playback dies on NNTP body-read timeouts, and the retries trip the providers' breakers.
+    ///
+    /// The floor is denominated in bytes, not segments, because the quantity that must not starve is a
+    /// bandwidth-delay product — data in flight covering worst-case refill latency — and segment COUNT
+    /// is a terrible proxy for it: segment size is a property of how the file was posted and varies by
+    /// ~8x between releases. Measured on production: 215 MB in flight plays clean at BOTH 300 segments
+    /// of 717 KB (Alone) and 51 segments of 4.19 MB (Backrooms); PR #21's 90 segments of 717 KB = 64 MB
+    /// starved the second stream and tripped breakers. A fixed 300-segment floor held 215 MB on Alone
+    /// but 2.4 GB on Backrooms (43% of the movie resident) for the identical guarantee. 256 MB is the
+    /// proven-good 215 MB plus margin.
+    ///
+    /// Refill latency here is ~99% connection-acquire contention (issue #18); fix #18 and this floor can
+    /// come down. Until then it errs generous on purpose: too large costs memory the operator can tune
+    /// away via usenet.prefetch-window, too small breaks playback.
+    /// </summary>
+    public const long MinPrefetchWindowBytes = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// Fallback floor in segments, used only when the average segment size is unknown (no size table,
+    /// or a zero-length stream) so the byte floor cannot be computed. Kept at the value the byte floor
+    /// was validated against on the 717 KB-segment file.
+    /// </summary>
+    public const int MinPrefetchWindowSegments = 300;
+
+    // 0 = auto. Set from config at startup (see Program.cs), overridable at runtime.
+    private static volatile int s_prefetchWindow;
+
+    public static void SetPrefetchWindow(int window)
+    {
+        s_prefetchWindow = Math.Max(0, window);
+    }
+
+    /// <summary>
+    /// Resolve the prefetch window (in segments) and a source label for logging, from the auto-computed
+    /// window, an explicit operator override, and this file's average segment size. Pure and
+    /// deterministic — the arithmetic lives here so it can be tested without running a real stream.
+    ///
+    /// Precedence: an explicit override wins verbatim; otherwise the byte-denominated floor
+    /// (<see cref="MinPrefetchWindowBytes"/> converted to segments via the average size) applies when it
+    /// exceeds the computed window; otherwise the computed window stands. The floor never drops the
+    /// window below the computed value, so a large-segment file whose byte budget buys only a few
+    /// segments is never starved of parallelism.
+    /// </summary>
+    public static (int window, string source) ComputePrefetchWindow(
+        int computedWindow, int configuredWindow, long avgSegmentSize)
+    {
+        if (configuredWindow > 0)
+            return (configuredWindow, "configured");
+
+        // Convert the byte budget to a segment count for this file. A zero/unknown average (no size
+        // table, empty stream) can't be converted — fall back to the segment-count floor.
+        var byteFloorSegments = avgSegmentSize > 0
+            ? (int)Math.Min(int.MaxValue, MinPrefetchWindowBytes / avgSegmentSize)
+            : MinPrefetchWindowSegments;
+
+        return byteFloorSegments > computedWindow
+            ? (byteFloorSegments, "byte-floor")
+            : (computedWindow, "computed");
+    }
+
+    // How long a worker waits for a global streaming permit before giving the job back to the
+    // urgent queue. Internal rather than const so a test can drive the re-queue path without
+    // sitting through the real 60s wait.
+    internal static TimeSpan PermitAcquireTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
     // Concurrent stream cap — limits how many BufferedSegmentStreams can exist simultaneously
     private static volatile SemaphoreSlim s_concurrentStreamSlots = new(2, 2);
     private SemaphoreSlim? _acquiredSemaphore; // Tracks which semaphore instance we acquired from
@@ -335,6 +403,14 @@ public class BufferedSegmentStream : Stream
 
     public int BufferedCount => _bufferedCount;
 
+    /// <summary>
+    /// Marks the stream as alive without reading, holding off the idle-timeout self-cancel.
+    /// Used by SharedStreamEntry's pump while it is paused on ring-buffer backpressure with readers
+    /// still attached — a paused player is not an orphaned stream, and tearing the workers down there
+    /// forces a cold rebuild (connection ramp + buffer refill) on resume.
+    /// </summary>
+    public void Touch() => Volatile.Write(ref _lastReadTimestamp, Stopwatch.GetTimestamp());
+
     // Detailed timing metrics (only collected when EnableDetailedTiming = true)
     private long _totalFetchTimeMs;
     private long _totalDecodeTimeMs;
@@ -419,7 +495,10 @@ public class BufferedSegmentStream : Stream
     private readonly long[]? _segmentSizes;
     private readonly Dictionary<int, string[]>? _segmentFallbacks;
     private readonly int _segmentIndexOffset;
-    private readonly List<(int Index, string SegmentId)> _corruptedSegments = new();
+    // Concurrent: written from worker threads during graceful degradation. A DMCA'd file fails many
+    // segments at once across workers, and a plain List would corrupt or throw under that exact load —
+    // aborting the stream precisely when degradation is supposed to keep it alive.
+    private readonly ConcurrentBag<(int Index, string SegmentId)> _corruptedSegments = new();
     private int _lastSuccessfulSegmentSize = 0;
 
     // Cached per-stream effective GD cap, computed from the file's container fragility on
@@ -758,6 +837,20 @@ public class BufferedSegmentStream : Stream
         // FileSize is already set by NzbFileStream to total file size, don't overwrite it
         details.CurrentBytePosition = (details.BaseByteOffset ?? 0) + _position;
 
+        // Heartbeat the live-streams registry that powers the dashboard's Active Streams panel.
+        // Keyed by DavItem so seeks/multipart parts of one file collapse to a single session.
+        // Off the fetch loop (this method is called on progress, not per segment) and null-safe
+        // so streaming tools/tests without a registry are unaffected.
+        if (details.DavItemId is { } davItemId && details.FileSize is { } fileSize)
+        {
+            NzbWebDAV.Services.StreamSessionRegistry.Current?.Touch(
+                davItemId,
+                details.Text,
+                _usageContext.Value.AffinityKey ?? details.Text,
+                details.CurrentBytePosition ?? 0,
+                fileSize);
+        }
+
         // Occasionally trigger a UI update via ConnectionPool if possible
         var multiClient = GetMultiProviderClient(_client);
         if (multiClient != null)
@@ -812,6 +905,41 @@ public class BufferedSegmentStream : Stream
             var segmentSlots = new PooledSegmentData?[segmentIds.Length];
             var nextIndexToWrite = 0;
 
+            // How far ahead of the reader a segment may be dispatched. A completed segment parks a
+            // ~1MB pooled buffer in segmentSlots until the ordering task drains it, and segmentSlots
+            // is sized to the whole file. _bufferChannel bounds only the ordering task, which is
+            // downstream of the slots, so it is not backpressure on the fetchers. The window covers
+            // everything that can hold a buffer at once: the channel plus the in-flight workers.
+            var computedWindow = bufferSegmentCount + concurrentConnections;
+            // Length is this stream's remaining bytes and segmentIds.Length its remaining segments, so
+            // the ratio is the average segment size over exactly the slice being fetched.
+            var avgSegmentSize = segmentIds.Length > 0 ? Length / segmentIds.Length : 0;
+            var (maxPrefetchWindow, windowSource) =
+                ComputePrefetchWindow(computedWindow, s_prefetchWindow, avgSegmentSize);
+
+            // The producer stops at effectiveSegmentCount, so the window is only the binding constraint
+            // on a stream long enough to reach it. A range-bounded read stops earlier and never costs a
+            // full window. This is the stream's actual memory ceiling, and without it the window alone
+            // invites reading every stream as if it held the full window — which overstates a ranged
+            // read by an order of magnitude and understates nothing.
+            var holdSegments = Math.Min(effectiveSegmentCount, maxPrefetchWindow);
+            var boundedBy = holdSegments == effectiveSegmentCount ? "segments" : "window";
+            // Data in flight, in MB. Uses the actual average segment size — the earlier 1 MB/segment
+            // assumption undercounted a 4.19 MB-segment file 4x and is exactly how 2.4 GB read as
+            // 300 MB. Resident is slightly higher because SegmentBufferPool rounds each rent up to the
+            // next 256 KB size class, so this is a data floor, not the resident ceiling.
+            var holdMb = holdSegments * avgSegmentSize / (1024 * 1024);
+            var avgSegKb = avgSegmentSize / 1024;
+
+            // Warning level on purpose: production runs LOG_LEVEL=warning, and a window that cannot be
+            // read back from the log is a window nobody can attribute a result to.
+            Log.Warning("[BufferedStream] PREFETCH WINDOW: {Window} segments ({Ratio:F1}x of {Connections} connections, source={Source}, avgSeg={AvgKB}KB, bufferSegmentCount={BufferSegmentCount}), holds~{HoldMB}MB data (bound={BoundedBy}, effective={Effective} of {Total} segments), Job={Job}",
+                maxPrefetchWindow,
+                concurrentConnections > 0 ? (double)maxPrefetchWindow / concurrentConnections : 0,
+                concurrentConnections, windowSource, avgSegKb, bufferSegmentCount,
+                holdMb, boundedBy, effectiveSegmentCount, segmentIds.Length,
+                _usageContext?.DetailsObject?.Text ?? "Unknown");
+
             // Producer: Queue segment IDs up to effectiveSegmentCount (may be < segmentIds.Length
             // when bounded by an HTTP Range end byte to prevent over-prefetching).
             var producerTask = Task.Run(async () =>
@@ -820,6 +948,19 @@ public class BufferedSegmentStream : Stream
                 {
                     for (int i = 0; i < effectiveSegmentCount; i++)
                     {
+                        if (ct.IsCancellationRequested) break;
+
+                        // Backpressure: hold the segment back until the reader is close enough to
+                        // need it. Without this the workers race to the end of the file and the
+                        // resident set scales with file size instead of with bufferSegmentCount —
+                        // which is the OOM in issue #19. Index _nextIndexToRead is always inside the
+                        // window, so the segment the reader is waiting on can never be gated.
+                        while (i >= Volatile.Read(ref _nextIndexToRead) + maxPrefetchWindow
+                               && !ct.IsCancellationRequested)
+                        {
+                            await Task.Delay(10, ct).ConfigureAwait(false);
+                        }
+
                         if (ct.IsCancellationRequested) break;
                         await segmentQueue.Writer.WriteAsync((i, segmentIds[i]), ct).ConfigureAwait(false);
                     }
@@ -1177,7 +1318,7 @@ public class BufferedSegmentStream : Stream
                                 if (limiter != null)
                                 {
                                     permitLease = await limiter.AcquireLeaseAsync(
-                                        TimeSpan.FromSeconds(60),
+                                        PermitAcquireTimeout,
                                         jobCts.Token,
                                         $"segment={job.index}").ConfigureAwait(false);
                                     if (permitLease == null)

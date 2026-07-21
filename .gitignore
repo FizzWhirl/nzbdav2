@@ -48,3 +48,4 @@ backend/local_data/
 .fork-files-full.txt
 backend/build_output.log
 *.log
+.DS_Store

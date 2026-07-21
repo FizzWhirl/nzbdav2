@@ -4,7 +4,9 @@ import type { DashboardData } from '~/types/dashboard';
 import { TIME_WINDOW_OPTIONS } from '~/types/dashboard';
 import type { ConnectionUsageContext } from '~/types/connections';
 import type { ProviderBandwidthSnapshot } from '~/types/bandwidth';
+import type { StreamSession } from '~/types/streams';
 import { ActiveStreaming } from './ActiveStreaming';
+import { ActiveStreams } from './ActiveStreams';
 import { TotalDownloaded } from './TotalDownloaded';
 import { ProviderHealth } from './ProviderHealth';
 import { ProviderUsage } from './ProviderUsage';
@@ -15,12 +17,14 @@ type Props = {
     initialData: DashboardData;
     initialConnections: Record<number, ConnectionUsageContext[]>;
     initialBandwidth: ProviderBandwidthSnapshot[];
+    initialStreams?: StreamSession[];
 };
 
-export function Dashboard({ initialData, initialConnections, initialBandwidth }: Props) {
+export function Dashboard({ initialData, initialConnections, initialBandwidth, initialStreams = [] }: Props) {
     const [data, setData] = useState(initialData);
     const [connections, setConnections] = useState(initialConnections);
     const [currentBandwidth, setCurrentBandwidth] = useState(initialBandwidth);
+    const [streams, setStreams] = useState(initialStreams);
     const [selectedHours, setSelectedHours] = useState(initialData.timeWindowHours);
     const [isLoading, setIsLoading] = useState(false);
     const [backendError, setBackendError] = useState<string | null>(null);
@@ -49,7 +53,7 @@ export function Dashboard({ initialData, initialConnections, initialBandwidth }:
 
             ws.onopen = () => {
                 backoff.reset();
-                ws?.send(JSON.stringify({ 'cxs': 'state', 'bw': 'state' }));
+                ws?.send(JSON.stringify({ 'cxs': 'state', 'bw': 'state', 'str': 'state' }));
             };
 
             ws.onmessage = receiveMessage((topic, message) => {
@@ -58,6 +62,15 @@ export function Dashboard({ initialData, initialConnections, initialBandwidth }:
                         setCurrentBandwidth(JSON.parse(message) as ProviderBandwidthSnapshot[]);
                     } catch (e) {
                         console.error('Failed to parse bandwidth JSON from websocket', e);
+                    }
+                    return;
+                }
+
+                if (topic === 'str') {
+                    try {
+                        setStreams(JSON.parse(message) as StreamSession[]);
+                    } catch (e) {
+                        console.error('Failed to parse active-streams message', e);
                     }
                     return;
                 }
@@ -168,6 +181,9 @@ export function Dashboard({ initialData, initialConnections, initialBandwidth }:
                     Dashboard data could not be refreshed from the backend. Showing the last loaded data. {backendError}
                 </Alert>
             }
+
+            {/* Active Streams - Full Width */}
+            <ActiveStreams streams={streams} />
 
             {/* Active Streaming - Full Width */}
             <ActiveStreaming connections={connections} providerNames={providerNames} bandwidth={currentBandwidth} />

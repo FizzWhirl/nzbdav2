@@ -131,6 +131,11 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.88 (2026-07-22)
+*   **Optimization**: Wired the segment hot path through `SegmentBufferPool` so pooled segment buffers now use byte-bounded retention instead of `ArrayPool<byte>.Shared`.
+*   **Reliability**: Added provider-level circuit-breaker tracking and latency-check throttling to the NNTP client so tripped providers are deprioritized instead of repeatedly retried.
+*   **Feature**: Kept the new GC diagnostics, stream-session registry, and dashboard Active Streams panel wired into the runtime path.
+
 ## v0.6.87 (2026-06-21)
 *   **Optimization**: Removed the high-cardinality `path` label from shared-stream Prometheus hit/miss counters, keeping miss reason labels bounded for safer long-term metric cardinality.
 *   **Feature**: Wired `nzbdav_shared_stream_active_readers` so the collector now publishes live attached-reader counts from shared stream entries.

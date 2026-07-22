@@ -96,6 +96,9 @@ public sealed class SegmentBufferPool
     /// <summary>The absolute ceiling on <see cref="IdleBytes"/>.</summary>
     public long MaxIdleBytes => _maxIdleBytes;
 
+    /// <summary>The largest buffer size this pool will retain idle.</summary>
+    public int MaxBufferSize => _maxBufferSize;
+
     /// <summary>Trims triggered by cap pressure rather than by the opportunistic rent-path check.
     /// Zero means the pool never actually ran out of room — worth knowing before tuning the cap.</summary>
     public long PressureTrims => Interlocked.Read(ref _pressureTrims);

@@ -526,6 +526,7 @@ public class MultiProviderNntpClient : INntpClient
             .Where(x => !hasExcluded || !excludedIndices!.Contains(x.ProviderIndex))
             .Where(x => !hasDeprioritized || !deprioritizedIndices!.Contains(x.ProviderIndex))
             .Where(x => !hasLowSuccessRate || !lowSuccessRateIndices!.Contains(x.ProviderIndex))
+            .Where(x => !x.IsProviderCircuitBreakerTripped)
             .Select(x => new {
                 Provider = x,
                 // Calculate availability ratio (0.0 to 1.0) for better load distribution
@@ -545,6 +546,7 @@ public class MultiProviderNntpClient : INntpClient
             .Where(x => !hasExcluded || !excludedIndices!.Contains(x.ProviderIndex))
             .Where(x => !hasDeprioritized || !deprioritizedIndices!.Contains(x.ProviderIndex))
             .Where(x => !hasLowSuccessRate || !lowSuccessRateIndices!.Contains(x.ProviderIndex))
+            .Where(x => !x.IsProviderCircuitBreakerTripped)
             .OrderBy(x => x.ProviderType) // Backup vs BackupOnly
             .ThenByDescending(x => x.IdleConnections);
 
@@ -564,8 +566,15 @@ public class MultiProviderNntpClient : INntpClient
                 .Where(x => x.ProviderType != ProviderType.Disabled)
                 .Where(x => !hasExcluded || !excludedIndices!.Contains(x.ProviderIndex))
                 .Where(x => lowSuccessRateIndices!.Contains(x.ProviderIndex))
+                .Where(x => !x.IsProviderCircuitBreakerTripped)
                 .OrderByDescending(x => x.AvailableConnections)
             : Enumerable.Empty<MultiConnectionNntpClient>();
+
+        var circuitBreakerTripped = Providers
+            .Where(x => x.ProviderType != ProviderType.Disabled)
+            .Where(x => !hasExcluded || !excludedIndices!.Contains(x.ProviderIndex))
+            .Where(x => x.IsProviderCircuitBreakerTripped)
+            .OrderByDescending(x => x.AvailableConnections);
 
         // Provider ordering:
         // 1. Affinity provider (if available and not excluded/deprioritized)
@@ -574,7 +583,7 @@ public class MultiProviderNntpClient : INntpClient
         // 4. Deprioritized providers (per-stream cooldown)
         // 5. Low success rate providers (global job-level)
         // Excluded providers are NEVER included
-        return pooled.Concat(others).Concat(deprioritized).Concat(lowSuccessRate)
+        return pooled.Concat(others).Concat(deprioritized).Concat(lowSuccessRate).Concat(circuitBreakerTripped)
             .Prepend(affinityProvider)  // NZB-level affinity takes priority
             .Where(x => x is not null)
             .Select(x => x!)

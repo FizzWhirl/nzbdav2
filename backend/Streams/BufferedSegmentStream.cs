@@ -1622,7 +1622,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 var initialRentSize = (_segmentSizes != null && index < _segmentSizes.Length && _segmentSizes[index] > 0)
                     ? (int)Math.Min(_segmentSizes[index] + 4096, int.MaxValue)
                     : Math.Max(_lastSuccessfulSegmentSize, 1024 * 1024);
-                var buffer = ArrayPool<byte>.Shared.Rent(initialRentSize);
+                var buffer = RentSegmentBuffer(initialRentSize, out var pooledBuffer);
                 var totalRead = 0;
 
                 // Time network read
@@ -1639,10 +1639,11 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                         if (totalRead == buffer.Length)
                         {
                             // Resize via ArrayPool to avoid LOH churn
-                            var newBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
+                            var newBuffer = RentSegmentBuffer(buffer.Length * 2, out var newBufferPooled);
                             Buffer.BlockCopy(buffer, 0, newBuffer, 0, totalRead);
-                            ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
+                            ReleaseSegmentBuffer(buffer, pooledBuffer);
                             buffer = newBuffer;
+                            pooledBuffer = newBufferPooled;
                         }
 
                         var readStartMs = readLoopWatch.ElapsedMilliseconds;
@@ -1707,7 +1708,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                         operationDetails.ExcludedProviderIndices = null;
                     }
 
-                    return new PooledSegmentData(segmentId, buffer, totalRead, pooled: true);
+                    return new PooledSegmentData(segmentId, buffer, totalRead, pooledBuffer);
                 }
                 catch
                 {
@@ -2078,7 +2079,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 : await client.GetSegmentStreamAsync(segmentId, false, ct).ConfigureAwait(false);
 
             var initialSize = Math.Max(_lastSuccessfulSegmentSize, 1024 * 1024);
-            var buffer = ArrayPool<byte>.Shared.Rent(initialSize);
+            var buffer = RentSegmentBuffer(initialSize, out var pooledBuffer);
             var totalRead = 0;
             try
             {
@@ -2086,20 +2087,21 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 {
                     if (totalRead == buffer.Length)
                     {
-                        var newBuffer = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
+                        var newBuffer = RentSegmentBuffer(buffer.Length * 2, out var newBufferPooled);
                         Buffer.BlockCopy(buffer, 0, newBuffer, 0, totalRead);
-                        ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
+                        ReleaseSegmentBuffer(buffer, pooledBuffer);
                         buffer = newBuffer;
+                        pooledBuffer = newBufferPooled;
                     }
                     var read = await stream.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead), ct).ConfigureAwait(false);
                     if (read == 0) break;
                     totalRead += read;
                 }
-                return new PooledSegmentData(segmentId, buffer, totalRead, pooled: true);
+                return new PooledSegmentData(segmentId, buffer, totalRead, pooledBuffer);
             }
             catch
             {
-                ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
+                ReleaseSegmentBuffer(buffer, pooledBuffer);
                 throw;
             }
         }
@@ -2385,6 +2387,28 @@ public class BufferedSegmentStream : Stream, ITouchableStream
 
     #endregion
 
+    private static byte[] RentSegmentBuffer(int minimumLength, out bool pooled)
+    {
+        pooled = minimumLength > 0 && minimumLength <= SegmentBufferPool.Shared.MaxBufferSize;
+        var buffer = SegmentBufferPool.Shared.Rent(minimumLength);
+        if (pooled)
+        {
+            SegmentBufferPoolDiagnostics.RecordRent(buffer);
+        }
+        return buffer;
+    }
+
+    private static void ReleaseSegmentBuffer(byte[] buffer, bool pooled)
+    {
+        if (!pooled)
+        {
+            return;
+        }
+
+        SegmentBufferPoolDiagnostics.RecordReturn();
+        SegmentBufferPool.Shared.Return(buffer);
+    }
+
     private class PooledSegmentData : IDisposable
     {
         private byte[]? _buffer;
@@ -2408,7 +2432,8 @@ public class BufferedSegmentStream : Stream, ITouchableStream
             _buffer = null;
             if (buf != null && _pooled)
             {
-                ArrayPool<byte>.Shared.Return(buf, clearArray: false);
+                SegmentBufferPoolDiagnostics.RecordReturn();
+                SegmentBufferPool.Shared.Return(buf);
             }
         }
     }

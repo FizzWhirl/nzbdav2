@@ -30,11 +30,12 @@ public class MultiConnectionNntpClient : INntpClient
     private readonly GlobalOperationLimiter? _globalLimiter;
     private readonly BandwidthService? _bandwidthService;
     private readonly ProviderErrorService? _providerErrorService;
+    private readonly ProviderCircuitBreaker? _providerCircuitBreaker;
     private readonly int _providerIndex;
     private readonly string _host;
     private readonly int _operationTimeoutSeconds;
     private DateTimeOffset _lastActivity = DateTimeOffset.UtcNow;
-    private DateTimeOffset _lastLatencyRecordTime = DateTimeOffset.MinValue;
+    private readonly LatencyCheckGate _latencyCheckGate = new(TimeSpan.FromSeconds(45));
     private readonly Timer? _latencyMonitorTimer;
     private readonly ComponentLogger? _logger;
 
@@ -62,12 +63,15 @@ public class MultiConnectionNntpClient : INntpClient
         _host = host ?? $"Provider {providerIndex}";
         _operationTimeoutSeconds = operationTimeoutSeconds;
         _logger = configManager != null ? new ComponentLogger(LogComponents.Usenet, configManager) : null;
+        _providerCircuitBreaker = _providerIndex >= 0 ? new ProviderCircuitBreaker(_host) : null;
 
         if (_providerIndex >= 0 && _bandwidthService != null && type != ProviderType.Disabled)
         {
             _latencyMonitorTimer = new Timer(CheckLatency, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
         }
     }
+
+    public bool IsProviderCircuitBreakerTripped => _providerCircuitBreaker?.IsTripped ?? false;
 
     private int GetDynamicTimeout()
     {
@@ -86,34 +90,27 @@ public class MultiConnectionNntpClient : INntpClient
 
     private void CheckLatency(object? state)
     {
-        if (DateTimeOffset.UtcNow - _lastLatencyRecordTime <= TimeSpan.FromSeconds(45)) return;
-        
-        try
+        Task.Run(async () =>
         {
-            // We can't easily wait for this in a void timer callback, but we can fire and forget
-            // However, we want to ensure we don't pile up checks if they are slow.
-            // Since DateAsync uses connection pool, it will just wait/timeout if busy.
-            // We use a separate async void wrapper or Task.Run to handle the async nature.
-            Task.Run(async () =>
+            if (!_latencyCheckGate.TryBegin(DateTimeOffset.UtcNow)) return;
+
+            try
             {
-                try
-                {
-                    // Use a short timeout for the ping
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    // Set context to Analysis so it's clear it's a provider health check/ping
-                    using var _ = cts.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.Analysis, "Latency Check"));
-                    await DateAsync(cts.Token).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.Debug("Latency check (ping) failed for provider {Host}: {Error}", _host, ex.Message);
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger?.Error(ex, "Error initiating latency check");
-        }
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                using var _ = cts.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.Analysis, "Latency Check"));
+                await DateAsync(cts.Token).ConfigureAwait(false);
+                _providerCircuitBreaker?.RecordSuccess();
+            }
+            catch (Exception ex)
+            {
+                _providerCircuitBreaker?.RecordFailure();
+                _logger?.Debug("Latency check (ping) failed for provider {Host}: {Error}", _host, ex.Message);
+            }
+            finally
+            {
+                _latencyCheckGate.End();
+            }
+        });
     }
 
     public Task<bool> ConnectAsync(string host, int port, bool useSsl, CancellationToken cancellationToken)
@@ -241,8 +238,9 @@ public class MultiConnectionNntpClient : INntpClient
                 if (recordLatency && _bandwidthService != null && _providerIndex >= 0)
                 {
                     _bandwidthService.RecordLatency(_providerIndex, (int)operationStart.ElapsedMilliseconds);
-                    _lastLatencyRecordTime = DateTimeOffset.UtcNow;
                 }
+
+                _providerCircuitBreaker?.RecordSuccess();
 
                 // Create a callback stream that will handle the cleanup of the connection lock and global permit
                 // when the stream is disposed.
@@ -294,6 +292,7 @@ public class MultiConnectionNntpClient : INntpClient
             catch (Exception ex) when (ex is UsenetException or UsenetNotConnectedException or ObjectDisposedException or IOException or SocketException or TimeoutException or RetryableDownloadException)
             {
                 // we want to replace the underlying connection in cases of NntpExceptions or login failures.
+                _providerCircuitBreaker?.RecordFailure();
                 connectionLock.Replace();
                 connectionLock.Dispose();
                 connectionLock = null;
@@ -318,6 +317,7 @@ public class MultiConnectionNntpClient : INntpClient
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)
         {
+            _providerCircuitBreaker?.RecordFailure();
             var elapsedSeconds = startTime.Elapsed.TotalSeconds;
             _logger?.Debug("[{Host}] Operation timed out after {ElapsedSeconds:F1}s (limit: {Timeout:F1}s). This usually indicates slow Usenet server response or connection lock contention.", _host, elapsedSeconds, currentTimeoutMs / 1000.0);
             throw new TimeoutException($"[{_host}] GetSegmentStream operation timed out after {elapsedSeconds:F1} seconds (limit: {currentTimeoutMs / 1000.0:F1}s)");
@@ -414,14 +414,16 @@ public class MultiConnectionNntpClient : INntpClient
                 if (recordLatency && _bandwidthService != null && _providerIndex >= 0)
                 {
                     _bandwidthService.RecordLatency(_providerIndex, (int)operationStart.ElapsedMilliseconds);
-                    _lastLatencyRecordTime = DateTimeOffset.UtcNow;
                 }
+
+                _providerCircuitBreaker?.RecordSuccess();
 
                 return result;
             }
             catch (Exception ex) when (ex is UsenetException or UsenetNotConnectedException or ObjectDisposedException or IOException or SocketException or TimeoutException or RetryableDownloadException)
             {
                 // we want to replace the underlying connection in cases of NntpExceptions or login failures.
+                _providerCircuitBreaker?.RecordFailure();
                 connectionLock.Replace();
                 connectionLock.Dispose();
                 isDisposed = true;
@@ -474,6 +476,7 @@ public class MultiConnectionNntpClient : INntpClient
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)
         {
+            _providerCircuitBreaker?.RecordFailure();
             var elapsedSeconds = startTime.Elapsed.TotalSeconds;
             _logger?.Debug("[{Host}] Operation timed out after {ElapsedSeconds:F1}s (limit: {Timeout:F1}s). This usually indicates slow Usenet server response or connection lock contention.", _host, elapsedSeconds, currentTimeoutMs / 1000.0);
             throw new TimeoutException($"[{_host}] NNTP operation timed out after {elapsedSeconds:F1} seconds (limit: {currentTimeoutMs / 1000.0:F1}s)");

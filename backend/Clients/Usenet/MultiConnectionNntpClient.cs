@@ -103,7 +103,6 @@ public class MultiConnectionNntpClient : INntpClient
             }
             catch (Exception ex)
             {
-                _providerCircuitBreaker?.RecordFailure();
                 _logger?.Debug("Latency check (ping) failed for provider {Host}: {Error}", _host, ex.Message);
             }
             finally

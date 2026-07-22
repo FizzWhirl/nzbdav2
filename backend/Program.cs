@@ -73,8 +73,8 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-05-17-REVERSE-PROXY-HEADERS");
-        Log.Warning("  FIX: Reverse-proxy friendly frontend security headers.");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-07-22-UPSTREAM-RUNTIME-WIRING");
+        Log.Warning("  FIX: Upstream runtime wiring for buffered segments, provider circuit breaking, and stream sessions.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested

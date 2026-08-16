@@ -1363,7 +1363,25 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                                     if (permitLease == null)
                                     {
                                         Log.Warning("[BufferedStream] Worker {WorkerId} timed out waiting for streaming permit for segment {Index}", workerId, job.index);
-                                        continue; // Try again with next job
+
+                                        // The job was already popped. A bare continue strands the ordering
+                                        // task at this index forever: the straggler monitor cannot see the
+                                        // assignment (it is removed in the finally below), and the only
+                                        // recovery is the 60s idle watchdog tearing the stream down into a
+                                        // premature EOF. Re-queue the segment so it is retried once a permit
+                                        // becomes available. The standard queue's writer is completed by the
+                                        // producer, so the urgent channel (priority drain) carries the retry.
+                                        if (Volatile.Read(ref segmentSlots[job.index]) == null &&
+                                            queuedUrgentIndices.TryAdd(job.index, true))
+                                        {
+                                            if (!urgentChannel.Writer.TryWrite(job))
+                                            {
+                                                queuedUrgentIndices.TryRemove(job.index, out _);
+                                                Log.Warning("[BufferedStream] Worker {WorkerId} could not re-queue segment {Index} after permit timeout (urgent queue full)", workerId, job.index);
+                                            }
+                                        }
+
+                                        continue;
                                     }
                                 }
 
@@ -1875,7 +1893,21 @@ public class BufferedSegmentStream : Stream, ITouchableStream
             finally
             {
                 if (stream != null)
-                    await stream.DisposeAsync().ConfigureAwait(false);
+                {
+                    try
+                    {
+                        await stream.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception disposeEx)
+                    {
+                        // Disposal is best-effort cleanup. A dispose that throws (e.g. an OOM while the
+                        // dispose chain allocates under memory pressure) must never replace a successful
+                        // fetch result nor mask the exception already being handled by the retry loop —
+                        // doing so is what used to abort the whole stream over one segment's disposal.
+                        Log.Warning(disposeEx, "[BufferedStream] SEGMENT DISPOSE FAILED: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}): {Message}",
+                            jobName, index, segmentIds.Length, segmentId, disposeEx.Message);
+                    }
+                }
             }
         }
 

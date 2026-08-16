@@ -1,5 +1,6 @@
 ﻿using NzbWebDAV.Config;
 using NzbWebDAV.Models;
+using NzbWebDAV.Utils;
 using NzbWebDAV.Websocket;
 using System.Text.Json;
 
@@ -61,6 +62,11 @@ public class ConnectionPoolStats
 
     public EventHandler<ConnectionPoolChangedEventArgs> GetOnConnectionPoolChanged(int providerIndex)
     {
+        // The handler fires on every connection borrow/return, which is thousands of times a
+        // second during streaming and far faster than any reader can consume. Coalesce a burst
+        // into a single push per window: the first event in the window publishes and the rest are
+        // suppressed (issue #14 — per-event garbage is what kills a long stream).
+        var debounce = DebounceUtil.CreateDebounce(TimeSpan.FromMilliseconds(250));
         return OnEvent;
 
         void OnEvent(object? _, ConnectionPoolChangedEventArgs args)
@@ -76,30 +82,38 @@ public class ConnectionPoolStats
                 }
             }
 
-            // Get usage breakdown from all connection pools
-            var usageBreakdown = GetGlobalUsageBreakdown();
-            var providerBreakdown = GetProviderUsageBreakdown(providerIndex);
-            
-            // Get detailed connections for this provider to send over websocket
-            var activeConns = _connectionPools[providerIndex]?.GetActiveConnections() ?? new List<ConnectionUsageContext>();
-            var connsJson = JsonSerializer.Serialize(activeConns.Select(c => new {
-                t = (int)c.UsageType,
-                d = c.Details,
-                jn = c.JobName,
-                b = c.IsBackup,
-                s = c.IsSecondary,
-                bc = c.DetailsObject?.BufferedCount,
-                ws = c.DetailsObject?.BufferWindowStart,
-                we = c.DetailsObject?.BufferWindowEnd,
-                ts = c.DetailsObject?.TotalSegments,
-                i = c.DetailsObject?.DavItemId,
-                bp = c.DetailsObject?.CurrentBytePosition,
-                fs = c.DetailsObject?.FileSize
-            }));
+            // Nothing painting the UI -> skip the serialize entirely (mirrors StreamSessionRegistry).
+            if (!_websocketManager.HasSubscribers) return;
 
-            var message = $"{providerIndex}|{args.Live}|{args.Idle}|{_totalLive}|{_max}|{_totalIdle}|{usageBreakdown}|{providerBreakdown}|{connsJson}";
-            _websocketManager.SendMessage(WebsocketTopic.UsenetConnections, message);
+            debounce(() => PublishProviderState(providerIndex, args));
         }
+    }
+
+    private void PublishProviderState(int providerIndex, ConnectionPoolChangedEventArgs args)
+    {
+        // Get usage breakdown from all connection pools
+        var usageBreakdown = GetGlobalUsageBreakdown();
+        var providerBreakdown = GetProviderUsageBreakdown(providerIndex);
+
+        // Get detailed connections for this provider to send over websocket
+        var activeConns = _connectionPools[providerIndex]?.GetActiveConnections() ?? new List<ConnectionUsageContext>();
+        var connsJson = JsonSerializer.Serialize(activeConns.Select(c => new {
+            t = (int)c.UsageType,
+            d = c.Details,
+            jn = c.JobName,
+            b = c.IsBackup,
+            s = c.IsSecondary,
+            bc = c.DetailsObject?.BufferedCount,
+            ws = c.DetailsObject?.BufferWindowStart,
+            we = c.DetailsObject?.BufferWindowEnd,
+            ts = c.DetailsObject?.TotalSegments,
+            i = c.DetailsObject?.DavItemId,
+            bp = c.DetailsObject?.CurrentBytePosition,
+            fs = c.DetailsObject?.FileSize
+        }));
+
+        var message = $"{providerIndex}|{args.Live}|{args.Idle}|{_totalLive}|{_max}|{_totalIdle}|{usageBreakdown}|{providerBreakdown}|{connsJson}";
+        _websocketManager.SendMessage(WebsocketTopic.UsenetConnections, message);
     }
 
     private string GetGlobalUsageBreakdown()

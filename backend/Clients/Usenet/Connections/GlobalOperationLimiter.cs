@@ -101,6 +101,23 @@ public class GlobalOperationLimiter : IDisposable
             // Acquire from the shared pool with appropriate priority
             await _sharedPool.WaitAsync(priority, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            // If shared pool acquisition fails (cancellation), release the low-priority gate
+            if (acquiredLowPriorityGate)
+                _lowPriorityGate.Release();
+
+            // Diagnostic: cancellation here means the caller's token fired while waiting for a
+            // permit. Emit the gate snapshot so a leaked-permit scenario (gates pinned at 0 with
+            // no active connections) is immediately visible in the logs.
+            Log.Warning(
+                "[GlobalPool] Permit acquisition CANCELED for {UsageType} after {WaitSeconds:F1}s. LowGate={LowGateRemaining}/{LowGateMax}, SharedPool={SharedRemaining}/{SharedMax}, Usage=[{UsageBreakdown}]",
+                usageType, (DateTime.UtcNow - waitStartTime).TotalSeconds,
+                _lowPriorityGate.CurrentCount, _totalConnections - _streamingReserve,
+                _sharedPool.CurrentCount, _totalConnections,
+                GetUsageBreakdown());
+            throw;
+        }
         catch
         {
             // If shared pool acquisition fails (cancellation), release the low-priority gate
@@ -110,6 +127,16 @@ public class GlobalOperationLimiter : IDisposable
         }
 
         var waitElapsed = DateTime.UtcNow - waitStartTime;
+
+        if (waitElapsed.TotalSeconds > 30)
+        {
+            Log.Warning(
+                "[GlobalPool] Permit acquired for {UsageType} only after {WaitSeconds:F1}s. LowGate={LowGateRemaining}/{LowGateMax}, SharedPool={SharedRemaining}/{SharedMax}, Usage=[{UsageBreakdown}]",
+                usageType, waitElapsed.TotalSeconds,
+                _lowPriorityGate.CurrentCount, _totalConnections - _streamingReserve,
+                _sharedPool.CurrentCount, _totalConnections,
+                GetUsageBreakdown());
+        }
 
         // Track usage
         int currentUsage;

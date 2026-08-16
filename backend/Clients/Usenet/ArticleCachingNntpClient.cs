@@ -45,25 +45,35 @@ public class ArticleCachingNntpClient : WrappingNntpClient
 
             // Fetch from usenet and cache
             var response = await base.GetSegmentStreamAsync(segmentId, includeHeaders, ct).ConfigureAwait(false);
-
-            // Read yenc headers before consuming the stream
-            var yencHeaders = response.Header;
-            var articleHeaders = response.ArticleHeaders;
-
-            // Cache the decoded stream to disk
-            var cachePath = GetCachePath(segmentId);
-            await using (var fileStream = new FileStream(cachePath, FileMode.Create, FileAccess.Write, FileShare.None,
-                bufferSize: 81920, useAsync: true))
+            try
             {
-                await response.CopyToAsync(fileStream, ct).ConfigureAwait(false);
+                // Read yenc headers before consuming the stream
+                var yencHeaders = response.Header;
+                var articleHeaders = response.ArticleHeaders;
+
+                // Cache the decoded stream to disk
+                var cachePath = GetCachePath(segmentId);
+                await using (var fileStream = new FileStream(cachePath, FileMode.Create, FileAccess.Write, FileShare.None,
+                    bufferSize: 81920, useAsync: true))
+                {
+                    await response.CopyToAsync(fileStream, ct).ConfigureAwait(false);
+                }
+
+                // Store cache entry
+                _cachedSegments.TryAdd(segmentId, new CacheEntry(yencHeaders, articleHeaders));
+
+                // Return a new stream from the cached file
+                return ReadFromCache(segmentId, new CacheEntry(yencHeaders, articleHeaders));
             }
-            await response.DisposeAsync().ConfigureAwait(false);
-
-            // Store cache entry
-            _cachedSegments.TryAdd(segmentId, new CacheEntry(yencHeaders, articleHeaders));
-
-            // Return a new stream from the cached file
-            return ReadFromCache(segmentId, new CacheEntry(yencHeaders, articleHeaders));
+            finally
+            {
+                // The response stream owns both the pooled connection lock and the
+                // GlobalOperationLimiter permit. If CopyToAsync (or header access) throws —
+                // e.g. the per-file timeout fires mid-download — skipping this dispose leaks
+                // BOTH, draining the shared pool and low-priority gate to zero and blocking
+                // all subsequent connection acquisition (the "queue stuck, 0 connections" stall).
+                await response.DisposeAsync().ConfigureAwait(false);
+            }
         }
         finally
         {

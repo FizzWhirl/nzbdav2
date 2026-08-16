@@ -73,8 +73,9 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-07-22-UPSTREAM-RUNTIME-WIRING");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-08-16-MEMORY-BUDGET-AND-SAMPLE-FILTER");
         Log.Warning("  FIX: Upstream runtime wiring for buffered segments, provider circuit breaking, and stream sessions.");
+        Log.Warning("  FIX (OOM): streaming memory is now derived from the process heap ceiling (MemoryBudget) and the prefetch window is bound by the per-stream byte budget raised only to a one-segment-per-connection parallelism floor. Sample-video filtering is available via 'api.sample-filter-enabled' (opt-in, default OFF in this fork) plus 'api.download-filename-blacklist' globs.");
         Log.Warning("═══════════════════════════════════════════════════════════════");
 
         // Run Arr History Tester if requested
@@ -220,8 +221,13 @@ class Program
             }
         };
 
-        // Set initial concurrent buffered stream cap
-        BufferedSegmentStream.SetMaxConcurrentStreams(configManager.GetMaxConcurrentBufferedStreams());
+        // Set initial concurrent buffered stream cap. The prefetch budget divides the heap across
+        // those slots, so it is recomputed whenever the slot count changes.
+        MemoryBudget.LogBudget();
+        var maxConcurrentStreams = configManager.GetMaxConcurrentBufferedStreams();
+        BufferedSegmentStream.SetMaxConcurrentStreams(maxConcurrentStreams);
+        BufferedSegmentStream.SetPrefetchBudgetBytes(
+            MemoryBudget.PerStreamPrefetchBytes(MemoryBudget.HeapLimitBytes, maxConcurrentStreams));
         BufferedSegmentStream.SetMaxGracefulDegradationSegments(configManager.GetMaxGracefulDegradationSegments());
 
         // Update on config change
@@ -229,7 +235,10 @@ class Program
         {
             if (eventArgs.NewConfig.ContainsKey("usenet.max-concurrent-buffered-streams"))
             {
-                BufferedSegmentStream.SetMaxConcurrentStreams(configManager.GetMaxConcurrentBufferedStreams());
+                var streams = configManager.GetMaxConcurrentBufferedStreams();
+                BufferedSegmentStream.SetMaxConcurrentStreams(streams);
+                BufferedSegmentStream.SetPrefetchBudgetBytes(
+                    MemoryBudget.PerStreamPrefetchBytes(MemoryBudget.HeapLimitBytes, streams));
             }
             if (eventArgs.NewConfig.ContainsKey("usenet.max-graceful-degradation-segments"))
             {

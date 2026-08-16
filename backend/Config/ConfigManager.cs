@@ -214,10 +214,16 @@ public class ConfigManager
 
     public int GetMaxConcurrentBufferedStreams()
     {
-        return int.Parse(
-            StringUtil.EmptyToNull(GetConfigValue("usenet.max-concurrent-buffered-streams"))
-            ?? "8"
-        );
+        // Default 8 (was 2): a single multipart/RAR playback needs a buffered-stream slot per active
+        // part, plus the player's parallel head/tail probes — 2 caused "No semaphore slot available"
+        // and stalls. Each slot holds a ~32 MB ring buffer (see shared-stream buffer size).
+        // Unset: derive from the heap ceiling. Each slot costs a 32 MB ring plus a full prefetch
+        // window, so 8 slots need a heap a small container does not provide; an explicit value
+        // still wins verbatim.
+        var configured = StringUtil.EmptyToNull(GetConfigValue("usenet.max-concurrent-buffered-streams"));
+        return configured != null
+            ? int.Parse(configured)
+            : MemoryBudget.MaxConcurrentStreams(MemoryBudget.HeapLimitBytes);
     }
 
     /// <summary>
@@ -532,6 +538,26 @@ public class ConfigManager
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => x.ToLower())
             .ToHashSet();
+    }
+
+    public HashSet<string> GetBlacklistedFilenamePatterns()
+    {
+        var defaultValue = "";
+        return (GetConfigValue("api.download-filename-blacklist") ?? defaultValue)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToHashSet();
+    }
+
+    public bool IsSampleFilterEnabled()
+    {
+        // Fork default: DISABLED (opt-in). Upstream defaults this to true, but the fork must not
+        // change existing users' behaviour, so the heuristic only runs once an operator enables
+        // `api.sample-filter-enabled` explicitly.
+        var defaultValue = false;
+        var configValue = StringUtil.EmptyToNull(GetConfigValue("api.sample-filter-enabled"));
+        return (configValue != null ? bool.Parse(configValue) : defaultValue);
     }
 
     public string GetImportStrategy()

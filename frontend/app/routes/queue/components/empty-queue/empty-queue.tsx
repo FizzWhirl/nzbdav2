@@ -6,7 +6,13 @@ import { className } from "~/utils/styling";
 import { useFetcher } from "react-router";
 import { Alert } from "react-bootstrap";
 
-export function EmptyQueue() {
+export type NzbUploadProps = {
+    // when true, renders a slim upload bar instead of the
+    // full-height placeholder shown when the queue is empty.
+    compact?: boolean,
+}
+
+export function EmptyQueue({ compact = false }: NzbUploadProps) {
     const fetcher = useFetcher();
     const formRef = useRef<HTMLFormElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -14,6 +20,7 @@ export function EmptyQueue() {
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         accept: { 'application/x-nzb': ['.nzb'] },
+        multiple: true,
         onDrop: useCallback((acceptedFiles: FileWithPath[]) => {
             const dataTransfer = new DataTransfer();
             acceptedFiles.forEach((file) => {
@@ -32,17 +39,23 @@ export function EmptyQueue() {
 
     return (
         <fetcher.Form ref={formRef} method="POST" encType="multipart/form-data">
-            <div className={pageStyles["section-title"]}>
-                <div className={pageStyles["section-heading"]}>
-                    <h3>Queue</h3>
+            {!compact &&
+                <div className={pageStyles["section-title"]}>
+                    <div className={pageStyles["section-heading"]}>
+                        <h3>Queue</h3>
+                    </div>
                 </div>
-            </div>
-                {fetcher.data?.error && (
-                    <Alert variant="danger">{fetcher.data.error}</Alert>
-                )}
-            <div {...className([styles.container, isDragActive && styles["drag-active"]])}  {...getRootProps()}>
+            }
+            {fetcher.data?.error && (
+                <Alert variant="danger">{fetcher.data.error}</Alert>
+            )}
+            <div {...className([
+                styles.container,
+                compact && styles.compact,
+                isDragActive && styles["drag-active"],
+            ])} {...getRootProps()}>
                 <input {...getInputProps()} />
-                <input ref={inputRef} name="nzbFile" type="file" style={{ display: 'none' }} />
+                <input ref={inputRef} name="nzbFile" type="file" multiple style={{ display: 'none' }} />
 
                 {isSubmitting && <>
                     <div>Uploading...</div>
@@ -51,16 +64,16 @@ export function EmptyQueue() {
                 {/* default view */}
                 {!isSubmitting && !isDragActive && <>
                     <div className={styles["upload-icon"]}></div>
-                    <br />
-                    <div>Queue is empty.</div>
-                    <div>Upload an *.nzb file</div>
+                    {!compact && <br />}
+                    {!compact && <div>Queue is empty.</div>}
+                    <div>Upload one or more *.nzb files</div>
                 </>}
 
-                {/* when dragging a file */}
+                {/* when dragging files */}
                 {!isSubmitting && isDragActive && <>
                     <div className={styles["drop-icon"]}></div>
-                    <br />
-                    <div>Drop your *.nzb file</div>
+                    {!compact && <br />}
+                    <div>Drop your *.nzb files</div>
                 </>}
             </div>
         </fetcher.Form>

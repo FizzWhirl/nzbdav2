@@ -6,6 +6,7 @@ using NzbWebDAV.Clients.Usenet.Connections;
 using NzbWebDAV.Exceptions;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Services;
+using NzbWebDAV.Utils;
 using Serilog;
 using System.IO;
 using System.Collections.Concurrent;
@@ -39,6 +40,21 @@ public class BufferedSegmentStream : Stream, ITouchableStream
     /// </summary>
     public const long MinPrefetchWindowBytes = 256L * 1024 * 1024;
 
+    // The per-stream prefetch budget actually in force, in bytes. Derived from the process's heap
+    // ceiling by MemoryBudget rather than fixed at MinPrefetchWindowBytes: that constant was tuned
+    // against a NAS with a 4 GiB heap, and a container capped at 512 MB cannot survive one stream
+    // holding 256 MB of data (490 MB resident).
+    private static long s_prefetchBudgetBytes =
+        MemoryBudget.PerStreamPrefetchBytes(MemoryBudget.HeapLimitBytes,
+            MemoryBudget.MaxConcurrentStreams(MemoryBudget.HeapLimitBytes));
+
+    public static void SetPrefetchBudgetBytes(long budgetBytes)
+    {
+        if (budgetBytes > 0) Interlocked.Exchange(ref s_prefetchBudgetBytes, budgetBytes);
+    }
+
+    public static long PrefetchBudgetBytes => Interlocked.Read(ref s_prefetchBudgetBytes);
+
     /// <summary>
     /// Fallback floor in segments, used only when the average segment size is unknown (no size table,
     /// or a zero-length stream) so the byte floor cannot be computed. Kept at the value the byte floor
@@ -55,31 +71,54 @@ public class BufferedSegmentStream : Stream, ITouchableStream
     }
 
     /// <summary>
-    /// Resolve the prefetch window (in segments) and a source label for logging, from the auto-computed
-    /// window, an explicit operator override, and this file's average segment size. Pure and
-    /// deterministic — the arithmetic lives here so it can be tested without running a real stream.
+    /// Resolve the prefetch window (in segments) and a source label for logging, from this stream's
+    /// byte budget, its worker count and this file's average segment size. Pure and deterministic —
+    /// the arithmetic lives here so it can be tested without running a real stream.
     ///
-    /// Precedence: an explicit override wins verbatim; otherwise the byte-denominated floor
-    /// (<see cref="MinPrefetchWindowBytes"/> converted to segments via the average size) applies when it
-    /// exceeds the computed window; otherwise the computed window stands. The floor never drops the
-    /// window below the computed value, so a large-segment file whose byte budget buys only a few
-    /// segments is never starved of parallelism.
+    /// Precedence: an explicit override wins verbatim; otherwise the window is the byte budget
+    /// converted to a segment count for this file, raised only as far as parallelism requires.
+    ///
+    /// The window used to be raised to <c>bufferSegmentCount + connections</c> whenever that exceeded
+    /// the budget. That figure is a SEGMENT count and ignores segment size, so on a 4 MB-segment
+    /// release it meant 90 segments = 360 MB in flight against a 96 MB budget. The budget has to bound
+    /// that case too, or it only bounds the releases that were never the problem.
     /// </summary>
     public static (int window, string source) ComputePrefetchWindow(
-        int computedWindow, int configuredWindow, long avgSegmentSize)
+        int computedWindow, int configuredWindow, long avgSegmentSize, int concurrentConnections)
+        => ComputePrefetchWindow(computedWindow, configuredWindow, avgSegmentSize,
+            concurrentConnections, PrefetchBudgetBytes);
+
+    /// <inheritdoc cref="ComputePrefetchWindow(int,int,long,int)"/>
+    /// <param name="prefetchBudgetBytes">Bytes of data this stream may hold in flight. Supplied
+    /// explicitly so the arithmetic can be tested against any box size.</param>
+    public static (int window, string source) ComputePrefetchWindow(
+        int computedWindow, int configuredWindow, long avgSegmentSize,
+        int concurrentConnections, long prefetchBudgetBytes)
     {
         if (configuredWindow > 0)
             return (configuredWindow, "configured");
 
+        // The segment-count fallback was validated against a 717 KB-segment file at the full 256 MB
+        // budget. On a smaller budget it would hand out the same count for a fraction of the memory,
+        // so scale it down in the same proportion.
+        var fallbackSegments = (int)Math.Max(1,
+            (long)MinPrefetchWindowSegments * prefetchBudgetBytes / MinPrefetchWindowBytes);
+
         // Convert the byte budget to a segment count for this file. A zero/unknown average (no size
         // table, empty stream) can't be converted — fall back to the segment-count floor.
-        var byteFloorSegments = avgSegmentSize > 0
-            ? (int)Math.Min(int.MaxValue, MinPrefetchWindowBytes / avgSegmentSize)
-            : MinPrefetchWindowSegments;
+        var budgetSegments = avgSegmentSize > 0
+            ? (int)Math.Min(int.MaxValue, prefetchBudgetBytes / avgSegmentSize)
+            : fallbackSegments;
 
-        return byteFloorSegments > computedWindow
-            ? (byteFloorSegments, "byte-floor")
-            : (computedWindow, "computed");
+        // Every worker needs one segment in flight or it idles, and an idle worker is how a stream
+        // starves (PR #21). This is the one reason to exceed the budget, and it costs
+        // connections x segment size rather than the whole computed window.
+        var parallelismFloor = Math.Max(1, concurrentConnections);
+
+        if (budgetSegments >= parallelismFloor)
+            return (budgetSegments, budgetSegments > computedWindow ? "byte-floor" : "byte-budget");
+
+        return (parallelismFloor, "parallelism-floor");
     }
 
     // How long a worker waits for a global streaming permit before giving the job back to the
@@ -915,7 +954,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
             // the ratio is the average segment size over exactly the slice being fetched.
             var avgSegmentSize = segmentIds.Length > 0 ? Length / segmentIds.Length : 0;
             var (maxPrefetchWindow, windowSource) =
-                ComputePrefetchWindow(computedWindow, s_prefetchWindow, avgSegmentSize);
+                ComputePrefetchWindow(computedWindow, s_prefetchWindow, avgSegmentSize, concurrentConnections);
 
             // The producer stops at effectiveSegmentCount, so the window is only the binding constraint
             // on a stream long enough to reach it. A range-bounded read stops earlier and never costs a

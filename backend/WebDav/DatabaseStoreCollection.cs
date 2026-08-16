@@ -32,7 +32,7 @@ public class DatabaseStoreCollection(
 
     protected override async Task<IStoreItem?> GetItemAsync(GetItemRequest request)
     {
-        if (configManager.HideSamples() && FilenameUtil.IsSampleFileName(request.Name))
+        if (configManager.HideSamples() && FileFilterUtil.LooksLikeSampleName(request.Name))
             return null;
 
         var child = await dbClient.GetDirectoryChildAsync(davDirectory.Id, request.Name, request.CancellationToken).ConfigureAwait(false);
@@ -47,7 +47,7 @@ public class DatabaseStoreCollection(
         if (configManager.HideSamples())
         {
             items = items
-                .Where(x => !FilenameUtil.IsSampleFileName(x.Name))
+                .Where(x => !FileFilterUtil.LooksLikeSampleName(x.Name))
                 .ToList();
         }
 

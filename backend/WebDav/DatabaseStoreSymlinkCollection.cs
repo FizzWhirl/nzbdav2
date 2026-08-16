@@ -27,7 +27,7 @@ public class DatabaseStoreSymlinkCollection(
     protected override async Task<IStoreItem?> GetItemAsync(GetItemRequest request)
     {
         if (DeletedFiles.IsDeleted(request.Name)) return null;
-        if (configManager.HideSamples() && FilenameUtil.IsSampleFileName(request.Name))
+        if (configManager.HideSamples() && FileFilterUtil.LooksLikeSampleName(request.Name))
             return null;
 
         var name = Regex.Replace(request.Name, @"\.rclonelink$", "");
@@ -48,7 +48,7 @@ public class DatabaseStoreSymlinkCollection(
         if (configManager.HideSamples())
         {
             children = children
-                .Where(x => !FilenameUtil.IsSampleFileName(x.Name))
+                .Where(x => !FileFilterUtil.LooksLikeSampleName(x.Name))
                 .ToList();
         }
 

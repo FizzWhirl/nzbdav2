@@ -10,6 +10,8 @@ export const defaultConfig: Record<string, string> = {
     "api.ensure-article-existence": "false",
     "api.ignore-history-limit": "true",
     "api.download-extension-blacklist": ".nfo, .par2, .sfv",
+    "api.download-filename-blacklist": "",
+    "api.sample-filter-enabled": "false",
     "api.duplicate-nzb-behavior": "increment",
     "api.import-strategy": "symlinks",
     "api.completed-downloads-dir": "",

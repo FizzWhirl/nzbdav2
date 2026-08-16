@@ -243,6 +243,10 @@ public class FullNzbTester
                                 PathWithinArchive = baseGroup.Key + " (combined RAR stream)",
                                 ByteRangeWithinPart = LongRange.FromStartAndSize(cumulativeOffset, fileSize),
                                 AesParams = null,
+                                // Synthesised from NZB sizes rather than parsed RAR headers, so
+                                // there is no declared uncompressed size to check coverage against.
+                                FileUncompressedSize = 0,
+                                IsUncompressedSizeUnknown = true,
                                 ReleaseDate = file.ReleaseDate
                             });
 
@@ -321,6 +325,10 @@ public class FullNzbTester
                                 PathWithinArchive = file.FileName,
                                 ByteRangeWithinPart = LongRange.FromStartAndSize(0, fileSize),
                                 AesParams = null,
+                                // Synthesised from NZB sizes rather than parsed RAR headers, so
+                                // there is no declared uncompressed size to check coverage against.
+                                FileUncompressedSize = 0,
+                                IsUncompressedSizeUnknown = true,
                                 ReleaseDate = file.ReleaseDate
                             }
                         }

@@ -153,7 +153,15 @@ public class HealthCheckService
 
             var maxRepairConnections = _configManager.GetMaxRepairConnections();
             var maxConcurrentChecks = _configManager.GetMaxConcurrentHealthChecks();
-            var concurrency = Math.Max(1, (int)Math.Ceiling((double)maxRepairConnections / maxConcurrentChecks));
+            var gateCapacity = Math.Max(1, _configManager.GetTotalStreamingConnections() - _configManager.GetStreamingReserve() - 1);
+            var rawConcurrency = Math.Max(1, (int)Math.Ceiling((double)maxRepairConnections / maxConcurrentChecks));
+            var maxConcurrencyPerItem = Math.Max(1, gateCapacity / maxConcurrentChecks);
+            var concurrency = Math.Min(rawConcurrency, maxConcurrencyPerItem);
+
+            if (concurrency < rawConcurrency)
+            {
+                Log.Information("[HealthCheck] Concurrency clamped from {Raw} to {Clamped} to stay within low-priority gate capacity {Gate}.", rawConcurrency, concurrency, gateCapacity);
+            }
 
             // set connection usage context
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken);

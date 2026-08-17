@@ -186,23 +186,10 @@ public class BufferedSegmentStream : Stream, ITouchableStream
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, byte> s_mp4LayoutBackfillsInFlight = new();
 
     /// <summary>
-    /// Container fragility tier — drives the per-file effective GD cap. Computed once per
-    /// file from ffprobe metadata (DavItem.MediaInfo) by parsing the format_name field.
-    ///
-    /// Why this matters: zero-fill graceful degradation is "blind" to container structure.
-    /// A bad segment that lands inside a structural element (MP4 moov box, AVI index, etc.)
-    /// makes the file unplayable from byte 0; a bad segment in the middle of an MKV cluster
-    /// or an MPEG-TS sequence is much more likely to be skipped by a tolerant decoder.
+    /// Container fragility tier now lives in <see cref="ContainerFragilityTier"/> /
+    /// <see cref="ContainerFragilityTierResolver"/> so the health check and the streaming
+    /// layer share the exact same "unplayable" definition.
     /// </summary>
-    private enum ContainerFragilityTier
-    {
-        /// <summary>MKV/WebM/MPEG-TS/fragmented MP4 — use the full configured cap.</summary>
-        Resilient = 0,
-        /// <summary>Plain MP4/MOV/AVI/WMV/FLV — hard-cap at min(configured, 2).</summary>
-        Standard = 1,
-        /// <summary>Unknown container or non-video file — hard-cap at 0 (truncate immediately).</summary>
-        Unknown = 2,
-    }
 
     /// <summary>
     /// Compute the effective GD cap for this stream by combining the user-configured cap
@@ -252,64 +239,8 @@ public class BufferedSegmentStream : Stream, ITouchableStream
         // Cache the raw MediaInfo for the lazy-backfill check at the end of construction.
         _cachedMediaInfoForLayoutCheck = mediaInfoJson;
 
-        if (string.IsNullOrWhiteSpace(mediaInfoJson)) return ContainerFragilityTier.Unknown;
-
-        // Extract format_name from the ffprobe JSON. We avoid full JSON parsing to keep this cheap.
-        // ffprobe emits e.g. "format_name": "matroska,webm" or "format_name": "mov,mp4,m4a,3gp,3g2,mj2".
-        var lower = mediaInfoJson.ToLowerInvariant();
-        const string key = "\"format_name\"";
-        var keyIdx = lower.IndexOf(key, StringComparison.Ordinal);
-        if (keyIdx < 0) return ContainerFragilityTier.Unknown;
-        var colonIdx = lower.IndexOf(':', keyIdx + key.Length);
-        if (colonIdx < 0) return ContainerFragilityTier.Unknown;
-        var quoteStart = lower.IndexOf('"', colonIdx + 1);
-        if (quoteStart < 0) return ContainerFragilityTier.Unknown;
-        var quoteEnd = lower.IndexOf('"', quoteStart + 1);
-        if (quoteEnd < 0) return ContainerFragilityTier.Unknown;
-        var formatName = lower.Substring(quoteStart + 1, quoteEnd - quoteStart - 1);
-
-        // Resilient containers — all explicitly designed for streaming or with strong
-        // resync semantics (cluster boundaries, fragment boxes, packet sync bytes).
-        if (formatName.Contains("matroska") || formatName.Contains("webm")
-            || formatName.Contains("mpegts") || formatName.Contains("mpegtsraw"))
-        {
-            return ContainerFragilityTier.Resilient;
-        }
-
-        // Standard tier — recoverable in the best case, catastrophic if structural
-        // metadata is hit. We don't try to detect moov-at-end vs moov-at-start here
-        // (that would require deeper parsing); we just lower the ceiling.
-        if (formatName.Contains("mp4") || formatName.Contains("mov")
-            || formatName.Contains("m4a") || formatName.Contains("3gp")
-            || formatName.Contains("avi") || formatName.Contains("asf")
-            || formatName.Contains("wmv") || formatName.Contains("flv"))
-        {
-            // Fragmented MP4 (moof boxes per fragment) is highly resilient — promote to Resilient tier.
-            // moov-at-end MP4/MOV is catastrophic — losing the moov box means the whole file is
-            // unplayable. Demote to Unknown tier (cap=0). The "__nzbdav_mp4_layout" field is
-            // injected by MediaAnalysisService.TryAddMp4LayoutAnnotationAsync.
-            const string layoutKey = "\"__nzbdav_mp4_layout\"";
-            var layoutKeyIdx = lower.IndexOf(layoutKey, StringComparison.Ordinal);
-            if (layoutKeyIdx >= 0)
-            {
-                var lc = lower.IndexOf(':', layoutKeyIdx + layoutKey.Length);
-                if (lc >= 0)
-                {
-                    var lq = lower.IndexOf('"', lc + 1);
-                    var le = lq >= 0 ? lower.IndexOf('"', lq + 1) : -1;
-                    if (lq >= 0 && le >= 0)
-                    {
-                        var layout = lower.Substring(lq + 1, le - lq - 1);
-                        if (layout == "moov-at-end") return ContainerFragilityTier.Unknown;
-                        if (layout == "fragmented") return ContainerFragilityTier.Resilient;
-                        // "faststart" or "unknown" → fall through to Standard.
-                    }
-                }
-            }
-            return ContainerFragilityTier.Standard;
-        }
-
-        return ContainerFragilityTier.Unknown;
+        // Shared with the health check so "unplayable" means the same thing everywhere.
+        return ContainerFragilityTierResolver.Resolve(mediaInfoJson);
     }
 
     // Memory-pressure throttle: when an OOM is observed in the fetch path, force GC and
@@ -538,6 +469,12 @@ public class BufferedSegmentStream : Stream, ITouchableStream
     // segments at once across workers, and a plain List would corrupt or throw under that exact load —
     // aborting the stream precisely when degradation is supposed to keep it alive.
     private readonly ConcurrentBag<(int Index, string SegmentId)> _corruptedSegments = new();
+    // Consecutive-run + cumulative tracking for the truncation decision. Mirrors
+    // HealthCheckThreshold so the streaming layer and the proactive health check share one rule.
+    private readonly object _corruptedRunLock = new();
+    private bool[]? _corruptedFlags; // lazily sized to _totalSegments on first corruption
+    private int _corruptedTotal;
+    private int _corruptedMaxRun;
     private int _lastSuccessfulSegmentSize = 0;
 
     // Cached per-stream effective GD cap, computed from the file's container fragility on
@@ -784,10 +721,11 @@ public class BufferedSegmentStream : Stream, ITouchableStream
             {
                 var configuredCap = s_maxGracefulDegradationSegments;
                 var effectiveCap = ResolveEffectiveGracefulDegradationCap(configuredCap);
+                var cumulativeCap = effectiveCap * HealthCheckThreshold.CumulativeMissingMultiplier;
                 var jobName = _usageContext?.DetailsObject?.Text ?? "Unknown";
                 Log.Information(
-                    "[BufferedStream] GD cap resolved for stream: configured={Configured} effective={Effective} (Job={Job}, DavItemId={DavItemId})",
-                    configuredCap, effectiveCap, jobName, _usageContext.Value.DetailsObject.DavItemId);
+                    "[BufferedStream] GD cap resolved for stream: configured={Configured} effective={Effective} cumulative={Cumulative} (Job={Job}, DavItemId={DavItemId})",
+                    configuredCap, effectiveCap, cumulativeCap, jobName, _usageContext.Value.DetailsObject.DavItemId);
 
                 // Lazy backfill: if this is a real user-facing streaming request (not an
                 // analysis / probe / health-check pass) and the file's MediaInfo lacks the
@@ -1931,6 +1869,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
 
         // Track this segment as corrupted
         _corruptedSegments.Add((index, segmentId));
+        var (corruptedTotal, corruptedMaxRun) = RecordCorruptedSegment(index);
 
         // Threshold check: once we have zero-filled too many segments in a single stream,
         // continuing to substitute zeros is actively harmful — the player has almost certainly
@@ -1938,12 +1877,11 @@ public class BufferedSegmentStream : Stream, ITouchableStream
         // here produces a clean EOF on the WebDAV response, which players handle gracefully
         // ("playback ended early") instead of stalling indefinitely.
         //
-        // We also flip IsCorrupted=true unconditionally at this point: when 3+ segments in the
-        // same playback session have failed every retry on every provider, the file is
-        // unplayable regardless of whether the failures were "transient" or "permanent". The
-        // operator can override the threshold via usenet.max-graceful-degradation-segments
-        // (env: MAX_GRACEFUL_DEGRADATION_SEGMENTS) — set to int.MaxValue for the legacy
-        // "always zero-fill" behaviour, or 0 to truncate on the first failure.
+        // The truncation rule mirrors the proactive health check (HealthCheckThreshold):
+        // truncate when the longest run of consecutive zero-filled segments exceeds the tier
+        // cap, or when the total zero-filled count exceeds the cumulative backstop (4× the tier
+        // cap) to catch rolling takedowns. The operator can override the base cap via
+        // usenet.max-graceful-degradation-segments (env: MAX_GRACEFUL_DEGRADATION_SEGMENTS).
         //
         // The user-configured value is then refined per-file by the container fragility tier
         // computed from ffprobe metadata (cached per stream): resilient containers (MKV /
@@ -1952,15 +1890,16 @@ public class BufferedSegmentStream : Stream, ITouchableStream
         // because their structural metadata is more sensitive to byte-offset corruption; and
         // unknown / non-video files are hard-capped at 0 (truncate on the first failure).
         var gdLimit = ResolveEffectiveGracefulDegradationCap(s_maxGracefulDegradationSegments);
-        if (_corruptedSegments.Count > gdLimit)
+        var gdCumulativeLimit = gdLimit * HealthCheckThreshold.CumulativeMissingMultiplier;
+        if (corruptedMaxRun > gdLimit || corruptedTotal > gdCumulativeLimit)
         {
-            Log.Error("[BufferedStream] GRACEFUL DEGRADATION LIMIT EXCEEDED: Job={Job}, corrupted-segment count {Count} > limit {Limit}. Terminating stream and marking item as corrupted to give the player a clean EOF.",
-                jobName, _corruptedSegments.Count, gdLimit);
+            Log.Error("[BufferedStream] GRACEFUL DEGRADATION LIMIT EXCEEDED: Job={Job}, corrupted run {MaxRun} > consecutive limit {Limit} or count {Count} > cumulative limit {CumLimit}. Terminating stream and marking item as corrupted to give the player a clean EOF.",
+                jobName, corruptedMaxRun, gdLimit, corruptedTotal, gdCumulativeLimit);
 
             if (_usageContext?.DetailsObject?.DavItemId != null)
             {
                 var davItemId = _usageContext.Value.DetailsObject.DavItemId.Value;
-                var reason = $"Stream truncated: {_corruptedSegments.Count} segments failed all retries (limit {gdLimit}). Last error: {lastException?.Message ?? "Unknown"}";
+                var reason = $"Stream truncated: {corruptedTotal} segments failed all retries (longest run {corruptedMaxRun}; limits {gdLimit} consecutive / {gdCumulativeLimit} cumulative). Last error: {lastException?.Message ?? "Unknown"}";
                 _ = Task.Run(async () => {
                     try {
                         using var db = new DavDatabaseContext();
@@ -2002,7 +1941,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 if (providerErrorService != null && providerCount > 0 && !string.IsNullOrEmpty(ledgerFilename))
                 {
                     var isImported = _usageContext?.IsImported ?? false;
-                    var truncationError = $"Segment failed all retries (stream truncated at GD limit {gdLimit}). Last error: {lastException?.GetType().Name ?? "Unknown"}";
+                    var truncationError = $"Segment failed all retries (stream truncated; run {corruptedMaxRun} > {gdLimit} or count {corruptedTotal} > {gdCumulativeLimit}). Last error: {lastException?.GetType().Name ?? "Unknown"}";
                     foreach (var (segIndex, segId) in _corruptedSegments)
                     {
                         if (string.IsNullOrEmpty(segId)) continue;
@@ -2032,7 +1971,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
             }
 
             throw new PermanentSegmentFailureException(index, segmentId,
-                $"Graceful-degradation limit ({gdLimit}) exceeded with {_corruptedSegments.Count} corrupted segments. Last error: {lastException?.Message ?? "Unknown"}");
+                $"Graceful-degradation limit exceeded with {corruptedTotal} corrupted segments (longest run {corruptedMaxRun}; limits {gdLimit} consecutive / {gdCumulativeLimit} cumulative). Last error: {lastException?.Message ?? "Unknown"}");
         }
 
         // Report corruption back to database if we have a DavItemId
@@ -2284,6 +2223,28 @@ public class BufferedSegmentStream : Stream, ITouchableStream
     /// Used to trigger health checks for files with corruption.
     /// </summary>
     public IReadOnlyCollection<(int Index, string SegmentId)> CorruptedSegments => _corruptedSegments.ToList();
+
+    /// <summary>
+    /// Records a zero-filled segment and returns the current (total corrupted, longest
+    /// consecutive run). Mirrors the health check's <see cref="HealthCheckThreshold"/> rule so the
+    /// streaming truncation decision and the proactive health check agree.
+    /// </summary>
+    private (int Total, int MaxRun) RecordCorruptedSegment(int index)
+    {
+        lock (_corruptedRunLock)
+        {
+            var flags = _corruptedFlags ??= new bool[_totalSegments];
+            if (index >= 0 && index < flags.Length && !flags[index])
+            {
+                flags[index] = true;
+                _corruptedTotal++;
+            }
+
+            var run = HealthCheckThreshold.ConsecutiveRunAt(flags, index);
+            if (run > _corruptedMaxRun) _corruptedMaxRun = run;
+            return (_corruptedTotal, _corruptedMaxRun);
+        }
+    }
 
     public override long Position
     {

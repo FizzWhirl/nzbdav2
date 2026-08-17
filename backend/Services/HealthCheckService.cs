@@ -432,7 +432,8 @@ public class HealthCheckService
             }
 
             // update the release date, if null
-            segments = await GetAllSegments(davItem, dbClient, ct).ConfigureAwait(false);
+            var segmentSet = await GetAllSegments(davItem, dbClient, ct).ConfigureAwait(false);
+            segments = segmentSet.SegmentIds;
             Log.Debug($"[HealthCheck] Fetched {segments.Count} segments for {davItem.Name}");
 
             if (segments.Count == 0)
@@ -490,19 +491,56 @@ public class HealthCheckService
             Log.Information("[HealthCheck] Verifying {SegmentCount} segments ({FileSizeGiB:F1} GiB) for {Name} using {Operation}. Timeout: {Timeout}m. Concurrency: {Concurrency}",
                 segments.Count, GetGiB(davItem.FileSize), davItem.Name, requestedOperation, timeoutMinutes, concurrency);
             string? headFallbackReason = null;
-            var sizes = await _usenetClient.CheckAllSegmentsAsync(segments, concurrency, progress, healthCheckCts.Token, useHead, reason => headFallbackReason = reason).ConfigureAwait(false);
+            var totalBytes = davItem.FileSize ?? 0;
+            var fragilityTier = ContainerFragilityTierResolver.Resolve(davItem.MediaInfo);
+            var configuredCap = _configManager.GetMaxGracefulDegradationSegments();
+            var maxConsecutiveSegments = HealthCheckThreshold.EffectiveMaxMissingSegments(fragilityTier, configuredCap);
+            var maxCumulativeSegments = HealthCheckThreshold.EffectiveCumulativeMissingSegments(fragilityTier, configuredCap);
+            var outcome = await _usenetClient.CheckSegmentsHealthAsync(
+                segments.ToArray(),
+                concurrency,
+                totalBytes,
+                maxConsecutiveSegments,
+                maxCumulativeSegments,
+                segmentSet.CriticalPrefixCount,
+                segmentSet.CriticalSuffixCount,
+                progress,
+                healthCheckCts.Token,
+                useHead,
+                reason => headFallbackReason = reason).ConfigureAwait(false);
+
+            if (HealthCheckThreshold.IsBad(outcome, maxConsecutiveSegments, maxCumulativeSegments))
+            {
+                var failureDetails = BuildBadOutcomeFailureDetails(outcome, maxConsecutiveSegments, maxCumulativeSegments);
+                Log.Warning("[HealthCheck] Health check confirmed bad for item {Name}. {FailureDetails}. Attempting repair.",
+                    davItem.Name, failureDetails);
+                _ = _websocketManager.SendMessage(WebsocketTopic.HealthItemProgress, $"{davItem.Id}|100");
+                _ = _websocketManager.SendMessage(WebsocketTopic.HealthItemProgress, $"{davItem.Id}|done");
+
+                // when usenet articles are missing beyond tolerance, perform repairs
+                using var repairCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                // Normalize AffinityKey from parent directory (matches WebDav file patterns)
+                var rawAffinityKey3 = Path.GetFileName(Path.GetDirectoryName(davItem.Path));
+                var normalizedAffinityKey3 = FilenameNormalizer.NormalizeName(rawAffinityKey3);
+                using var repairScope = repairCts.Token.SetScopedContext(new ConnectionUsageContext(ConnectionUsageType.Repair, new ConnectionUsageDetails { Text = davItem.Path, JobName = davItem.Name, AffinityKey = normalizedAffinityKey3, DavItemId = davItem.Id }));
+
+                var operation = useHead ? "HEAD" : "STAT";
+                await Repair(davItem, dbClient, repairCts.Token, failureDetails, operation).ConfigureAwait(false);
+                return;
+            }
+
             var actualOperation = useHead
-                ? sizes != null ? "HEAD" : "STAT_FALLBACK"
+                ? (outcome.SegmentSizes != null ? "HEAD" : "STAT_FALLBACK")
                 : "STAT";
 
             // If we did a HEAD check, we now have the segment sizes. Cache them for faster seeking.
-            if (useHead && sizes != null && davItem.Type == DavItem.ItemType.NzbFile)
+            if (useHead && outcome.SegmentSizes != null && davItem.Type == DavItem.ItemType.NzbFile)
             {
                 var nzbFile = await dbClient.GetNzbFileAsync(davItem.Id, ct).ConfigureAwait(false);
                 if (nzbFile != null)
                 {
-                    nzbFile.SetSegmentSizes(sizes);
-                    Log.Debug($"[HealthCheck] Cached {sizes.Length} segment sizes for {davItem.Name}");
+                    nzbFile.SetSegmentSizes(outcome.SegmentSizes);
+                    Log.Debug($"[HealthCheck] Cached {outcome.SegmentSizes.Length} segment sizes for {davItem.Name}");
                 }
             }
 
@@ -554,7 +592,9 @@ public class HealthCheckService
                 CreatedAt = DateTimeOffset.UtcNow,
                 Result = HealthCheckResult.HealthResult.Healthy,
                 RepairStatus = HealthCheckResult.RepairAction.None,
-                Message = GetSuccessfulHealthCheckMessage(actualOperation, headFallbackReason),
+                Message = outcome.MissingSegments > 0
+                    ? GetToleratedMissingHealthCheckMessage(actualOperation, outcome)
+                    : GetSuccessfulHealthCheckMessage(actualOperation, headFallbackReason),
                 Operation = actualOperation
             }));
             await dbClient.Ctx.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -639,10 +679,42 @@ public class HealthCheckService
         return operation switch
         {
             "HEAD" => "HEAD health check completed: smart article-header checks confirmed the required articles were available. Stale missing-article diagnostics for this item were cleared.",
-            "STAT_FALLBACK" => $"HEAD health check was inconclusive ({fallbackReason ?? "smart header analysis could not safely infer segment sizes"}); fallback STAT health check completed: all required article metadata was available, but historical streaming/body errors may still need a HEAD check to clear.",
+            "STAT_FALLBACK" => $"HEAD health check fell back to a full STAT check ({fallbackReason ?? "smart header analysis could not safely infer segment sizes"}); STAT health check completed: all required article metadata was available, but historical streaming/body errors may still need a HEAD check to clear.",
             "STAT" => "STAT health check completed: all required article metadata was available. This confirms article presence, but does not clear historical streaming/body errors.",
             _ => "Health check completed: all required articles were available."
         };
+    }
+
+    private static string BuildBadOutcomeFailureDetails(SegmentHealthOutcome outcome, int maxConsecutiveSegments, int maxCumulativeSegments)
+    {
+        if (outcome.CriticalLocationMissing)
+        {
+            return $"Missing segment at critical location index {outcome.CriticalIndex}/{outcome.TotalSegments} (container header/footer).";
+        }
+
+        if (outcome.MaxConsecutiveMissing > maxConsecutiveSegments)
+        {
+            return $"Missing run of {outcome.MaxConsecutiveMissing} consecutive segments — exceeds the {maxConsecutiveSegments}-segment gap tolerance.";
+        }
+
+        var percent = HealthCheckThreshold.GetMissingPercent(outcome);
+        return $"Missing {outcome.MissingSegments} of {outcome.TotalSegments} segments total " +
+               $"(~{FormatBytes(outcome.MissingBytes)}, {percent:F2}% of file) — exceeds the {maxCumulativeSegments}-segment cumulative tolerance.";
+    }
+
+    private static string GetToleratedMissingHealthCheckMessage(string operation, SegmentHealthOutcome outcome)
+    {
+        var percent = HealthCheckThreshold.GetMissingPercent(outcome);
+        return $"{operation} health check completed: {outcome.MissingSegments} of {outcome.TotalSegments} segments " +
+               $"were missing (longest run {outcome.MaxConsecutiveMissing}; ~{FormatBytes(outcome.MissingBytes)}, {percent:F2}% of file) but stayed within tolerance — treated as healthy.";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return $"{bytes / (1024d * 1024 * 1024):F2} GiB";
+        if (bytes >= 1024L * 1024) return $"{bytes / (1024d * 1024):F2} MiB";
+        if (bytes >= 1024) return $"{bytes / 1024d:F2} KiB";
+        return $"{bytes} B";
     }
 
     private async Task UpdateReleaseDate(DavItem davItem, List<string> segments, CancellationToken ct)
@@ -653,12 +725,15 @@ public class HealthCheckService
         davItem.ReleaseDate = articleHeaders.Date;
     }
 
-    private async Task<List<string>> GetAllSegments(DavItem davItem, DavDatabaseClient dbClient, CancellationToken ct)
+    private sealed record SegmentSet(List<string> SegmentIds, int CriticalPrefixCount, int CriticalSuffixCount);
+
+    private async Task<SegmentSet> GetAllSegments(DavItem davItem, DavDatabaseClient dbClient, CancellationToken ct)
     {
         if (davItem.Type == DavItem.ItemType.NzbFile)
         {
             var nzbFile = await dbClient.GetNzbFileAsync(davItem.Id, ct).ConfigureAwait(false);
-            return nzbFile?.SegmentIds?.ToList() ?? [];
+            var ids = nzbFile?.SegmentIds?.ToList() ?? [];
+            return new SegmentSet(ids, Math.Min(1, ids.Count), Math.Min(1, ids.Count));
         }
 
         if (davItem.Type == DavItem.ItemType.RarFile)
@@ -667,7 +742,9 @@ public class HealthCheckService
                 .AsNoTracking()
                 .Where(x => x.Id == davItem.Id)
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-            return rarFile?.RarParts?.SelectMany(x => x.SegmentIds)?.ToList() ?? [];
+            var parts = rarFile?.RarParts ?? [];
+            var ids = parts.SelectMany(x => x.SegmentIds).ToList();
+            return new SegmentSet(ids, parts.FirstOrDefault()?.SegmentIds?.Length ?? 0, parts.LastOrDefault()?.SegmentIds?.Length ?? 0);
         }
 
         if (davItem.Type == DavItem.ItemType.MultipartFile)
@@ -676,10 +753,12 @@ public class HealthCheckService
                 .AsNoTracking()
                 .Where(x => x.Id == davItem.Id)
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-            return multipartFile?.Metadata?.FileParts?.SelectMany(x => x.SegmentIds)?.ToList() ?? [];
+            var parts = multipartFile?.Metadata?.FileParts ?? [];
+            var ids = parts.SelectMany(x => x.SegmentIds).ToList();
+            return new SegmentSet(ids, parts.FirstOrDefault()?.SegmentIds?.Length ?? 0, parts.LastOrDefault()?.SegmentIds?.Length ?? 0);
         }
 
-        return [];
+        return new SegmentSet([], 0, 0);
     }
 
     public void TriggerManualRepairInBackground(string filePath)

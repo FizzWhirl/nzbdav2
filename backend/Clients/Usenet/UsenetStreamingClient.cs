@@ -359,6 +359,198 @@ public class UsenetStreamingClient
         return null;
     }
 
+    /// <summary>
+    /// Tolerant segment health check. Accumulates missing segments (instead of failing on the
+    /// first one) and stops early once the file is confirmed bad. A clean HEAD smart sample
+    /// short-circuits the scan; otherwise a STAT scan quantifies the missing data.
+    /// </summary>
+    public async Task<SegmentHealthOutcome> CheckSegmentsHealthAsync(
+        string[] segmentIds,
+        int concurrency,
+        long totalBytes,
+        int maxConsecutiveSegments,
+        int maxCumulativeSegments,
+        int criticalPrefixCount,
+        int criticalSuffixCount,
+        IProgress<int>? progress,
+        CancellationToken cancellationToken,
+        bool useHead,
+        Action<string>? headFallbackReason = null)
+    {
+        var segmentArray = segmentIds as string[] ?? segmentIds.ToArray();
+
+        if (useHead && (criticalPrefixCount > 1 || criticalSuffixCount > 1))
+        {
+            // The HEAD smart sample probes only the first/last single segment plus a few spot
+            // positions. For multipart/RAR files the critical header/footer region spans the
+            // whole first/last part, so a boundary-internal missing segment could escape the
+            // sample. Use the full STAT scan so the critical-location rule is always enforced.
+            headFallbackReason?.Invoke("Multipart file: critical first/last part spans multiple segments; full scan required.");
+            Log.Information("[HealthCheck] Skipping HEAD smart sample for {SegmentCount} segments because the critical first/last part spans multiple segments; running full STAT scan.", segmentArray.Length);
+        }
+        else if (useHead)
+        {
+            // Fast path: smart sampling (first/second/last + spot checks) can prove the file
+            // healthy without a full scan. Any doubt falls through to the tolerant STAT scan.
+            try
+            {
+                var sizes = await AnalyzeNzbAsync(segmentArray, concurrency, progress, cancellationToken, useSmartAnalysis: true, allowFullScan: false).ConfigureAwait(false);
+                return new SegmentHealthOutcome
+                {
+                    TotalSegments = segmentArray.Length,
+                    CheckedSegments = segmentArray.Length,
+                    MissingSegments = 0,
+                    MissingBytes = 0,
+                    TotalBytes = totalBytes,
+                    CriticalLocationMissing = false,
+                    SegmentSizes = sizes
+                };
+            }
+            catch (UsenetArticleNotFoundException ex)
+            {
+                headFallbackReason?.Invoke(ex.Message);
+                Log.Warning(ex, "[HealthCheck] Smart HEAD analysis found missing articles for {SegmentCount} segments. Falling back to tolerant STAT scan to quantify damage.", segmentArray.Length);
+            }
+            catch (NonRetryableDownloadException)
+            {
+                // DMCA/takedown confirmed (first + last + mid all missing) — definitely bad.
+                throw;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (SmartAnalysisInconclusiveException ex)
+            {
+                headFallbackReason?.Invoke(ex.Message);
+                Log.Warning(ex, "[HealthCheck] Smart HEAD analysis was inconclusive for {SegmentCount} segments. Falling back to tolerant STAT scan.", segmentArray.Length);
+            }
+            catch (OperationCanceledException ex)
+            {
+                headFallbackReason?.Invoke(ex.Message);
+                Log.Warning(ex, "[HealthCheck] Smart HEAD analysis timed out for {SegmentCount} segments. Falling back to tolerant STAT scan.", segmentArray.Length);
+            }
+            catch (TimeoutException ex)
+            {
+                headFallbackReason?.Invoke(ex.Message);
+                Log.Warning(ex, "[HealthCheck] Smart HEAD analysis timed out for {SegmentCount} segments. Falling back to tolerant STAT scan.", segmentArray.Length);
+            }
+        }
+
+        return await CheckSegmentsHealthStatAsync(segmentArray, concurrency, totalBytes, maxConsecutiveSegments, maxCumulativeSegments, criticalPrefixCount, criticalSuffixCount, progress, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<SegmentHealthOutcome> CheckSegmentsHealthStatAsync(
+        string[] segmentArray,
+        int concurrency,
+        long totalBytes,
+        int maxConsecutiveSegments,
+        int maxCumulativeSegments,
+        int criticalPrefixCount,
+        int criticalSuffixCount,
+        IProgress<int>? progress,
+        CancellationToken cancellationToken)
+    {
+        var totalSegments = segmentArray.Length;
+
+        using var childCt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var _1 = childCt.Token.SetScopedContext(cancellationToken.GetContext<LastSuccessfulProviderContext>());
+        using var _2 = childCt.Token.SetScopedContext(cancellationToken.GetContext<ConnectionUsageContext>());
+        var token = childCt.Token;
+        var usageContext = token.GetContext<ConnectionUsageContext>();
+        var timeoutSeconds = _configManager.GetUsenetOperationTimeout();
+
+        var missingCount = 0;
+        var checkedCount = 0;
+        var maxConsecutiveMissing = 0;
+        var criticalLocationMissing = false;
+        int? criticalIndex = null;
+        var missingFlags = new bool[totalSegments];
+
+        var tasks = segmentArray
+            .Select((id, index) => (id, index))
+            .Select(async probe =>
+            {
+                using var segmentCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                segmentCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+                using var _ = segmentCts.Token.SetScopedContext(usageContext);
+                try
+                {
+                    var result = await _client.StatAsync(probe.id, segmentCts.Token).ConfigureAwait(false);
+                    return result.ArticleExists ? -1 : probe.index;
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested && segmentCts.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"Stat timed out for segment {probe.id}");
+                }
+            })
+            .WithConcurrencyAsync(concurrency);
+
+        try
+        {
+            await foreach (var index in tasks.ConfigureAwait(false))
+            {
+                checkedCount++;
+                if (index >= 0)
+                {
+                    missingCount++;
+                    missingFlags[index] = true;
+                    var run = HealthCheckThreshold.ConsecutiveRunAt(missingFlags, index);
+                    if (run > maxConsecutiveMissing) maxConsecutiveMissing = run;
+
+                    if (HealthCheckThreshold.IsCriticalIndex(index, totalSegments, criticalPrefixCount, criticalSuffixCount))
+                    {
+                        criticalLocationMissing = true;
+                        criticalIndex = index;
+                        progress?.Report(checkedCount);
+                        await childCt.CancelAsync().ConfigureAwait(false);
+                        break;
+                    }
+
+                    if (maxConsecutiveMissing > maxConsecutiveSegments)
+                    {
+                        progress?.Report(checkedCount);
+                        await childCt.CancelAsync().ConfigureAwait(false);
+                        break;
+                    }
+
+                    if (missingCount > maxCumulativeSegments)
+                    {
+                        progress?.Report(checkedCount);
+                        await childCt.CancelAsync().ConfigureAwait(false);
+                        break;
+                    }
+                }
+                progress?.Report(checkedCount);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // childCt was canceled for fail-fast — the verdict is assembled from the outcome below.
+        }
+        catch (Exception)
+        {
+            await childCt.CancelAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        return new SegmentHealthOutcome
+        {
+            TotalSegments = totalSegments,
+            CheckedSegments = checkedCount,
+            MissingSegments = missingCount,
+            MaxConsecutiveMissing = maxConsecutiveMissing,
+            MissingBytes = HealthCheckThreshold.EstimateMissingBytes(missingCount, totalBytes, totalSegments),
+            TotalBytes = totalBytes,
+            CriticalLocationMissing = criticalLocationMissing,
+            CriticalIndex = criticalIndex
+        };
+    }
+
     public async Task<NzbFileStream> GetFileStream(NzbFile nzbFile, int concurrentConnections, CancellationToken ct)
     {
         var usageContext = new ConnectionUsageContext(ConnectionUsageType.Streaming);

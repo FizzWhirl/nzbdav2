@@ -115,7 +115,7 @@ public class RarAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, b
     /// </param>
     /// <param name="PackedBytes">Bytes of the extracted file that live in this volume.</param>
     /// <param name="IsEncrypted">True when this volume's payload is AES-encrypted.</param>
-    public readonly record struct VolumeCoverage(
+    internal readonly record struct VolumeCoverage(
         long DeclaredUncompressedSize,
         bool IsUncompressedSizeUnknown,
         long PackedBytes,
@@ -151,7 +151,7 @@ public class RarAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, b
     /// The volumes disagree about the file's size, or together they cover less (or more) of it
     /// than the headers declare.
     /// </exception>
-    public static void ValidateVolumeCoverage(
+    internal static void ValidateVolumeCoverage(
         IReadOnlyList<VolumeCoverage> volumes,
         string pathWithinArchive
     )

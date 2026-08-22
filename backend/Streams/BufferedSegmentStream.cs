@@ -1763,7 +1763,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 var originalIndex = index + _segmentIndexOffset;
                 if (_segmentFallbacks != null && _segmentFallbacks.TryGetValue(originalIndex, out var fallbackIds))
                 {
-                    Log.Warning("[BufferedStream] Article not found for primary ID, trying {FallbackCount} fallback(s): Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId})",
+                    Log.Information("[BufferedStream] Article not found for primary ID, trying {FallbackCount} fallback(s): Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId})",
                         fallbackIds.Length, jobName, index, segmentIds.Length, segmentId);
 
                     foreach (var fallbackId in fallbackIds)
@@ -1804,14 +1804,14 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 if (excludedProviders.Count < totalProviders && attempt < maxRetries - 1)
                 {
                     // More providers available — retry with the failed provider excluded
-                    Log.Warning("[BufferedStream] ARTICLE NOT FOUND on provider {FailedProvider}: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}). Retrying on other providers ({Remaining} remaining). Attempt={Attempt}/{MaxRetries}",
+                    Log.Information("[BufferedStream] ARTICLE NOT FOUND on provider {FailedProvider}: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}). Retrying on other providers ({Remaining} remaining). Attempt={Attempt}/{MaxRetries}",
                         failedProviderIndex?.ToString() ?? "unknown", jobName, index, segmentIds.Length, segmentId, totalProviders - excludedProviders.Count, attempt + 1, maxRetries);
                     // Continue to next iteration of retry loop
                 }
                 else
                 {
                     // All providers have been tried, or no retries left
-                    Log.Warning("[BufferedStream] PERMANENT FAILURE: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}): Article not found on {TriedCount}/{TotalProviders} provider(s) (no fallbacks remaining). Proceeding to zero-fill.",
+                    Log.Information("[BufferedStream] PERMANENT FAILURE: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}): Article not found on {TriedCount}/{TotalProviders} provider(s) (no fallbacks remaining). Proceeding to zero-fill.",
                         jobName, index, segmentIds.Length, segmentId, excludedProviders.Count, totalProviders);
                     break;
                 }
@@ -2061,7 +2061,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
             // This is a safe bet for 99.9% of Usenet posts where segments are uniform size.
             // For the last segment, we cannot guess safely, so we still fail.
             zeroBufferSize = _lastSuccessfulSegmentSize;
-            Log.Warning("[BufferedStream] Estimating segment size {Size} for segment {Index}/{Total} based on max observed segment size to allow graceful degradation.", 
+            Log.Information("[BufferedStream] Estimating segment size {Size} for segment {Index}/{Total} based on max observed segment size to allow graceful degradation.",
                 zeroBufferSize, index, segmentIds.Length);
         }
         else if (lastKnownSegmentSize is > 0 && index < segmentIds.Length - 1)
@@ -2071,7 +2071,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
             // still parsed before the CRC failure and contains the decoded part size, which is
             // exact enough to preserve file offsets while zero-filling the failed segment.
             zeroBufferSize = lastKnownSegmentSize.Value;
-            Log.Warning("[BufferedStream] Using yEnc header size {Size} for corrupted segment {Index}/{Total} to allow graceful degradation without shifting offsets.",
+            Log.Information("[BufferedStream] Using yEnc header size {Size} for corrupted segment {Index}/{Total} to allow graceful degradation without shifting offsets.",
                 zeroBufferSize, index, segmentIds.Length);
         }
         else

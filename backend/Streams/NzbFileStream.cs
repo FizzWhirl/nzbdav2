@@ -52,7 +52,7 @@ public class NzbFileStream : Stream
     {
         if (usageContext == null)
         {
-            Serilog.Log.Warning("[NzbFileStream] Created without ConnectionUsageContext — connections will appear as 'Unlabeled' on the frontend. " +
+            Serilog.Log.Information("[NzbFileStream] Created without ConnectionUsageContext — connections will appear as 'Unlabeled' on the frontend. " +
                 "This indicates a caller is not propagating usage context. Using fallback.");
             _usageContext = new ConnectionUsageContext(ConnectionUsageType.Unlabeled, "NzbFileStream: no context provided");
         }

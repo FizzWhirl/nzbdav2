@@ -42,7 +42,7 @@ public class SevenZipAggregator(
             var itemId = GuidUtil.CreateDeterministic(parentDirectory.Id, name);
             if (IsAlreadyTracked(itemId))
             {
-                Log.Warning("[SevenZipAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
+                Log.Information("[SevenZipAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
                     name, itemId);
                 continue;
             }

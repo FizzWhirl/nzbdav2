@@ -342,7 +342,7 @@ public class MultiProviderNntpClient : INntpClient
         {
             var ctx = cancellationToken.GetContext<ConnectionUsageContext>();
             var filename = ctx.DetailsObject?.Text ?? ctx.Details ?? "Unknown";
-            Log.Warning(
+            Log.Information(
                 "[MultiProvider] Segment '{SegmentId}' missing across all {ProviderCount} providers (operation={Op}, file='{Filename}', walk took {Elapsed:F2}s). This causes the streaming worker to stall while it walks every provider for the segment.",
                 missing.SegmentId,
                 attempts,

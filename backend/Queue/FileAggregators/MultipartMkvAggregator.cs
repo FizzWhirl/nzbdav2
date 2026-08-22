@@ -36,7 +36,7 @@ public class MultipartMkvAggregator
             var itemId = GuidUtil.CreateDeterministic(parentDirectory.Id, name);
             if (IsAlreadyTracked(itemId))
             {
-                Log.Warning("[MultipartMkvAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
+                Log.Information("[MultipartMkvAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
                     name, itemId);
                 continue;
             }

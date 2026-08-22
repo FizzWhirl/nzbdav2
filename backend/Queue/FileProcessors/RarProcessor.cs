@@ -87,7 +87,7 @@ public class RarProcessor(
             {
                 if (fileInfo.MissingFirstSegment)
                 {
-                    Log.Warning("[RarProcessor] Skipping part {FileName} because the first segment is missing.", fileInfo.FileName);
+                    Log.Information("[RarProcessor] Skipping part {FileName} because the first segment is missing.", fileInfo.FileName);
                     return new List<StoredFileSegment>();
                 }
 

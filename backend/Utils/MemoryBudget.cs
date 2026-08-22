@@ -194,7 +194,7 @@ public static class MemoryBudget
         var streams = MaxConcurrentStreams(HeapLimitBytes);
         // Keep this the ONLY place the literal "[MemoryBudget] Heap limit" appears: the startup banner
         // used to quote it, so every grep for the real line also matched the banner.
-        Log.Warning("[MemoryBudget] Heap limit {HeapMB}MB -> {Streams} concurrent streams, " +
+        Log.Information("[MemoryBudget] Heap limit {HeapMB}MB -> {Streams} concurrent streams, " +
                     "{PerStreamMB}MB prefetch data each (~{ResidentMB}MB resident), {PoolMB}MB pool retention. " +
                     "Override with usenet.prefetch-window / usenet.max-concurrent-buffered-streams / NZBDAV_SEGMENT_POOL_MAX_IDLE_MB.",
             HeapLimitBytes / Mb,

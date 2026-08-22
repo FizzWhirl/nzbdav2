@@ -17,7 +17,7 @@ public class FileProcessor(
     {
         if (fileInfo.MissingFirstSegment)
         {
-            Log.Warning("File {FileName} has missing first segment. Skipping for partial completion", fileInfo.FileName);
+            Log.Information("File {FileName} has missing first segment. Skipping for partial completion", fileInfo.FileName);
             return null;
         }
 
@@ -35,7 +35,7 @@ public class FileProcessor(
 
         catch (UsenetArticleNotFoundException)
         {
-            Log.Warning("File {FileName} has missing articles. Skipping for partial completion", fileInfo.FileName);
+            Log.Information("File {FileName} has missing articles. Skipping for partial completion", fileInfo.FileName);
             return null;
         }
     }

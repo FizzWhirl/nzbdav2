@@ -58,7 +58,7 @@ public class RarAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, b
             var itemId = GuidUtil.CreateDeterministic(parentDirectory.Id, name);
             if (IsAlreadyTracked(itemId))
             {
-                Log.Warning("[RarAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
+                Log.Information("[RarAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
                     name, itemId);
                 continue;
             }

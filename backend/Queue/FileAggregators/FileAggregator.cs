@@ -22,7 +22,7 @@ public class FileAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, 
             var itemId = GuidUtil.CreateDeterministic(mountDirectory.Id, result.FileName);
             if (IsAlreadyTracked(itemId))
             {
-                Log.Warning("[FileAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
+                Log.Information("[FileAggregator] Skipping duplicate DavItem for file '{FileName}' (ID {Id} already tracked)",
                     result.FileName, itemId);
                 continue;
             }

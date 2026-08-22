@@ -18,7 +18,7 @@ public static class LegacyRarFileMigration
         var rarFiles = await ctx.RarFiles.AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
         if (rarFiles.Count == 0) return 0;
 
-        Log.Warning("[LegacyRarFileMigration] Converting {Count} legacy DavRarFile rows to DavMultipartFile...", rarFiles.Count);
+        Log.Information("[LegacyRarFileMigration] Converting {Count} legacy DavRarFile rows to DavMultipartFile...", rarFiles.Count);
 
         // Step 1: flip the DavItem type RarFile(4) -> MultipartFile(6) FIRST. DavItem.Type is init-only
         // on the model, so update via SQL (values are compile-time enum constants, no user input).
@@ -52,7 +52,7 @@ public static class LegacyRarFileMigration
 
         await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        Log.Warning("[LegacyRarFileMigration] Converted {Count} DavRarFile rows.", converted);
+        Log.Information("[LegacyRarFileMigration] Converted {Count} DavRarFile rows.", converted);
         return converted;
     }
 }

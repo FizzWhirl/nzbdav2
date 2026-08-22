@@ -110,7 +110,7 @@ public sealed class ConnectionPool<T> : IDisposable, IAsyncDisposable, AppMetric
         if (isDefault)
         {
             var stackHint = Environment.StackTrace;
-            Serilog.Log.Warning(
+            Serilog.Log.Information(
                 "[ConnectionPool][{PoolName}] Connection acquired without ConnectionUsageContext on CancellationToken. " +
                 "This will show as 'Unlabeled' on the frontend. Stack trace hint: {StackHint}",
                 PoolName, stackHint.Substring(0, Math.Min(stackHint.Length, 500)));

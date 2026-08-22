@@ -158,7 +158,7 @@ public class DatabaseMaintenanceService(IServiceScopeFactory scopeFactory) : Bac
 
         if (uncompressedIds.Count == 0) return;
 
-        Log.Warning("[DatabaseMaintenance] Compressing {Count} uncompressed HistoryItem NzbContents...", uncompressedIds.Count);
+        Log.Information("[DatabaseMaintenance] Compressing {Count} uncompressed HistoryItem NzbContents...", uncompressedIds.Count);
 
         var compressed = 0;
         foreach (var id in uncompressedIds)
@@ -197,6 +197,6 @@ public class DatabaseMaintenanceService(IServiceScopeFactory scopeFactory) : Bac
             compressed++;
         }
 
-        Log.Warning("[DatabaseMaintenance] Compressed {Count} HistoryItem NzbContents rows.", compressed);
+        Log.Information("[DatabaseMaintenance] Compressed {Count} HistoryItem NzbContents rows.", compressed);
     }
 }

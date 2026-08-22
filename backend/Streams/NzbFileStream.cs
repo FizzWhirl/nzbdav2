@@ -259,6 +259,48 @@ public class NzbFileStream : Stream
         return relative;
     }
 
+    /// <summary>
+    /// Resolve the worker count and buffer size for a direct <see cref="BufferedSegmentStream"/>.
+    /// Pure and deterministic so the production path in <see cref="GetCombinedStream"/> and the
+    /// unit tests share the exact same arithmetic.
+    ///
+    /// Rules:
+    /// <list type="bullet">
+    /// <item>A bounded HTTP Range read (<paramref name="hasRequestedEndByte"/> is true) always
+    /// resolves to the small worker set (capped at 4) regardless of whether a scarce full
+    /// buffered-stream slot was acquired. rclone vfs-cache fans out parallel 32 MB chunks; letting
+    /// each bounded chunk run the full configured worker count would exhaust the streaming-permit
+    /// semaphore and the provider connection pool.</item>
+    /// <item>An unbounded read holding an acquired slot resolves to the full configured worker
+    /// count so whole-file streaming keeps its throughput.</item>
+    /// <item>An unbounded read without a slot resolves to the same small worker set as the legacy
+    /// range-reliability fallback.</item>
+    /// </list>
+    /// The small worker set is clamped to [1, 4] and additionally bounded by the segment count and
+    /// the configured connection count; the buffer is clamped to [workers * 2, 16].
+    /// </summary>
+    public static (int WorkerCount, int BufferSize) ResolveDirectBufferedStreamParameters(
+        int concurrentConnections,
+        int segmentCount,
+        int configuredBufferSize,
+        bool hasRequestedEndByte,
+        bool slotAcquired)
+    {
+        if (!hasRequestedEndByte && slotAcquired)
+        {
+            // Unbounded full-file read holding the scarce slot: use the configured worker count
+            // verbatim so whole-file streaming keeps its throughput.
+            return (concurrentConnections, configuredBufferSize);
+        }
+
+        // Bounded reads and no-slot unbounded reads share the small worker set. The [1, 4] clamp
+        // also guards against concurrentConnections == 0 or negative producing a zero/negative
+        // worker count.
+        var workerCount = Math.Clamp(Math.Min(Math.Min(concurrentConnections, segmentCount), 4), 1, 4);
+        var bufferSize = Math.Clamp(configuredBufferSize, workerCount * 2, 16);
+        return (workerCount, bufferSize);
+    }
+
     private async Task<InterpolationSearch.Result> SeekSegment(long byteOffset, CancellationToken ct)
     {
         if (_segmentOffsets != null)
@@ -442,34 +484,32 @@ public class NzbFileStream : Stream
 
         // Direct BufferedSegmentStream path (no DavItemId, or shared stream not available).
         // Full direct buffered streams still use the scarce global slot only for streams large
-        // enough to benefit from the normal worker count. Bounded HTTP range reads are handled
-        // separately below so small RAR/multipart part streams do not fall back to raw segment
-        // reads and bypass retry/GD handling.
+        // enough to benefit from the normal worker count.
         var canUseAnyDirectBufferedStream = shouldUseBufferedStreaming && _concurrentConnections >= 3 && _fileSegmentIds.Length > 0;
-        var shouldUseFullDirectBufferedStream = canUseAnyDirectBufferedStream && _fileSegmentIds.Length > _concurrentConnections;
-        var acquiredSlot = shouldUseFullDirectBufferedStream ? BufferedSegmentStream.TryAcquireSlot() : null;
+        var isBoundedRangeRead = _requestedEndByte.HasValue;
 
-        // If a bounded HTTP Range request cannot get one of the scarce full buffered-stream
-        // slots, still prefer a tiny direct BufferedSegmentStream over the legacy raw
-        // CombinedStream fallback. rclone vfs-cache issues many bounded range GETs; the raw
-        // fallback bypasses BufferedSegmentStream's retry/GD logic, so corrupt yEnc segments
-        // bubble up as unhandled InvalidDataException and noisy 500s. The fallback below keeps
-        // reliability behaviour while capping worker/buffer count to avoid memory blowups.
-        var useRangeReliabilityFallback = canUseAnyDirectBufferedStream
-            && acquiredSlot == null
-            && _requestedEndByte.HasValue
-            && _usageContext.UsageType == ConnectionUsageType.Streaming;
+        // Bounded HTTP Range reads (e.g. rclone vfs-cache 32MB chunks) must NOT spend one of the
+        // scarce full buffered-stream slots. rclone fans out parallel chunks; if every bounded
+        // chunk grabbed a slot and spun the full configured worker count, they would exhaust the
+        // streaming-permit semaphore and the provider's connection pool (60s permit timeouts,
+        // re-queues and stalled playback). Bounded reads instead use a small direct
+        // BufferedSegmentStream, keeping retry/GD reliability without the full worker cost.
+        var acquiredSlot = !isBoundedRangeRead && canUseAnyDirectBufferedStream && _fileSegmentIds.Length > _concurrentConnections
+            ? BufferedSegmentStream.TryAcquireSlot()
+            : null;
 
-        if (acquiredSlot != null || useRangeReliabilityFallback)
+        var shouldUseDirectBufferedStream = acquiredSlot != null || (isBoundedRangeRead && canUseAnyDirectBufferedStream);
+
+        if (shouldUseDirectBufferedStream)
         {
             try
             {
-                var directConcurrentConnections = acquiredSlot != null
-                    ? _concurrentConnections
-                    : Math.Clamp(Math.Min(Math.Min(_concurrentConnections, _fileSegmentIds.Length), 4), 1, 4);
-                var directBufferSize = acquiredSlot != null
-                    ? _bufferSize
-                    : Math.Clamp(_bufferSize, directConcurrentConnections * 2, 16);
+                var (directConcurrentConnections, directBufferSize) = ResolveDirectBufferedStreamParameters(
+                    _concurrentConnections,
+                    _fileSegmentIds.Length,
+                    _bufferSize,
+                    isBoundedRangeRead,
+                    acquiredSlot != null);
 
                 var detailsObj = new ConnectionUsageDetails
                 {
@@ -505,8 +545,8 @@ public class NzbFileStream : Stream
                     }
                 }
 
-                Serilog.Log.Debug("[NzbFileStream] Creating BufferedSegmentStream for {SegmentCount} segments, approximated size: {ApproximateSize}, concurrent connections: {ConcurrentConnections}, buffer size: {BufferSize}, slotAcquired={SlotAcquired}, rangeReliabilityFallback={RangeFallback}",
-                    remainingSegments.Length, remainingSize, directConcurrentConnections, directBufferSize, acquiredSlot != null, useRangeReliabilityFallback);
+                Serilog.Log.Debug("[NzbFileStream] Creating BufferedSegmentStream for {SegmentCount} segments, approximated size: {ApproximateSize}, concurrent connections: {ConcurrentConnections}, buffer size: {BufferSize}, slotAcquired={SlotAcquired}, boundedRangeRead={BoundedRangeRead}",
+                    remainingSegments.Length, remainingSize, directConcurrentConnections, directBufferSize, acquiredSlot != null, isBoundedRangeRead);
                 _contextScope = _streamCts.Token.SetScopedContext(bufferedContext);
                 var bufferedContextCt = _streamCts.Token;
 

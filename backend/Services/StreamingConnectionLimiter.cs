@@ -54,6 +54,17 @@ public class StreamingConnectionLimiter : IDisposable
         _instance = this;  // Set static instance
         _sweeperTask = Task.Run(SweeperLoop);  // Start background sweeper
         Log.Information("[StreamingConnectionLimiter] Initialized with {MaxConnections} total streaming connections", _currentMaxConnections);
+
+        var providerConfig = _configManager.GetUsenetProviderConfig();
+        var totalPooledConnections = providerConfig.TotalPooledConnections;
+        if (_currentMaxConnections > totalPooledConnections && totalPooledConnections > 0)
+        {
+            Log.Warning(
+                "[StreamingConnectionLimiter] Streaming connection limit ({StreamingConnections}) exceeds the provider's total pooled connections ({PooledConnections}); " +
+                "the excess connections can never run concurrently and cause permit contention with range-based clients (e.g. rclone vfs-cache / Plex). " +
+                "Lower `usenet.total-streaming-connections` / `TOTAL_STREAMING_CONNECTIONS` to the provider limit (typically 20-50).",
+                _currentMaxConnections, totalPooledConnections);
+        }
     }
 
     /// <summary>

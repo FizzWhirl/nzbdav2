@@ -244,14 +244,20 @@ public static class OrganizedLinksUtil
             // 1. Scan Disk (Heavy operation)
             var rawDiskLinks = await Task.Run(() => GetLibraryDavItemLinks(configManager).ToList(), ct);
 
-            // Validate FKs: Only keep links that point to existing DavItems
+            // Validate FKs: Only keep links that point to existing DavItems.
+            // Query in batches to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER limit,
+            // which EF Core's Contains() translation would otherwise exceed on large libraries.
             var davItemIds = rawDiskLinks.Select(x => x.DavItemId).Distinct().ToList();
-            var validDavItemIds = await dbContext.Items
-                .AsNoTracking()
-                .Where(x => davItemIds.Contains(x.Id))
-                .Select(x => x.Id)
-                .ToListAsync(ct);
-            var validDavItemIdSet = new HashSet<Guid>(validDavItemIds);
+            var validDavItemIdSet = new HashSet<Guid>();
+            foreach (var chunk in ChunkDavItemIds(davItemIds))
+            {
+                var validIdsInChunk = await dbContext.Items
+                    .AsNoTracking()
+                    .Where(x => chunk.Contains(x.Id))
+                    .Select(x => x.Id)
+                    .ToListAsync(ct);
+                validDavItemIdSet.UnionWith(validIdsInChunk);
+            }
 
             var onDiskLinks = rawDiskLinks.Where(x => validDavItemIdSet.Contains(x.DavItemId)).ToList();
             var onDiskMap = onDiskLinks.ToDictionary(x => x.LinkPath, x => x.DavItemId);
@@ -331,6 +337,33 @@ public static class OrganizedLinksUtil
         catch (Exception ex)
         {
             Log.Error(ex, "[OrganizedLinksUtil] Error during filesystem sync.");
+        }
+    }
+
+    /// <summary>
+    /// Splits a collection of DavItem ids into batches no larger than <paramref name="batchSize"/>.
+    /// Kept public so the isolated test harness can exercise it directly (the backend assembly
+    /// has no InternalsVisibleTo for NzbWebDAV.Tests).
+    /// </summary>
+    public static IEnumerable<List<Guid>> ChunkDavItemIds(IReadOnlyCollection<Guid> ids, int batchSize = 800)
+    {
+        if (ids == null) throw new ArgumentNullException(nameof(ids));
+        if (batchSize <= 0) throw new ArgumentOutOfRangeException(nameof(batchSize));
+
+        var chunk = new List<Guid>(batchSize);
+        foreach (var id in ids)
+        {
+            chunk.Add(id);
+            if (chunk.Count == batchSize)
+            {
+                yield return chunk;
+                chunk = new List<Guid>(batchSize);
+            }
+        }
+
+        if (chunk.Count > 0)
+        {
+            yield return chunk;
         }
     }
 

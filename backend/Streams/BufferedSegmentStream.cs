@@ -1075,6 +1075,8 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 try
                 {
                     var spinCount = 0;
+                    DateTimeOffset? stallSince = null;
+                    var stallIndex = -1;
                     while (nextIndexToWrite < effectiveSegmentCount && !ct.IsCancellationRequested)
                     {
                         var segment = Volatile.Read(ref segmentSlots[nextIndexToWrite]);
@@ -1117,7 +1119,28 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                         }
                         else
                         {
-                            // Slot not ready yet - use adaptive waiting
+                            // Slot not ready yet — use adaptive waiting, and diagnose long stalls.
+                            var now = DateTimeOffset.UtcNow;
+                            if (stallIndex != nextIndexToWrite)
+                            {
+                                stallIndex = nextIndexToWrite;
+                                stallSince = now;
+                            }
+                            else if (stallSince.HasValue && now - stallSince.Value > TimeSpan.FromSeconds(30))
+                            {
+                                stallSince = now; // re-arm for the next 30s window
+                                var limiter = StreamingConnectionLimiter.Instance;
+                                var limiterStats = limiter?.GetStats();
+                                Log.Warning(
+                                    "[BufferedStream] ORDERING STALL: waiting for segment {Index}/{Total} for 30s+. InFlight={InFlight}, UrgentQueued={Urgent}, Racing={Racing}. Limiter: Available={Avail}/{TotalConn}, TrackedPermits={Permits}, Timeouts={Timeouts}, ForcedReleases={Forced}",
+                                    nextIndexToWrite, effectiveSegmentCount,
+                                    activeAssignments.Count,
+                                    queuedUrgentIndices.ContainsKey(nextIndexToWrite),
+                                    racingIndices.ContainsKey(nextIndexToWrite),
+                                    limiterStats?.Available, limiterStats?.Total,
+                                    limiterStats?.TrackedPermits, limiterStats?.Timeouts, limiterStats?.ForcedReleases);
+                            }
+
                             spinCount++;
                             if (spinCount < 10)
                             {
@@ -1300,7 +1323,9 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                                         $"segment={job.index}").ConfigureAwait(false);
                                     if (permitLease == null)
                                     {
-                                        Log.Warning("[BufferedStream] Worker {WorkerId} timed out waiting for streaming permit for segment {Index}", workerId, job.index);
+                                        var limiterStats = StreamingConnectionLimiter.Instance?.GetStats();
+                                        Log.Warning("[BufferedStream] Worker {WorkerId} timed out waiting for streaming permit for segment {Index}. Limiter: Available={Avail}/{TotalConn}, TrackedPermits={Permits}, Timeouts={Timeouts}, ForcedReleases={Forced}",
+                                            workerId, job.index, limiterStats?.Available, limiterStats?.Total, limiterStats?.TrackedPermits, limiterStats?.Timeouts, limiterStats?.ForcedReleases);
 
                                         // The job was already popped. A bare continue strands the ordering
                                         // task at this index forever: the straggler monitor cannot see the

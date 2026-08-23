@@ -67,6 +67,38 @@ public class RarVolumeCoverageTests
     }
 
     [Fact]
+    public void EncryptedSetOvershootingByMoreThanOneBlock_IsAccepted()
+    {
+        // Each encrypted volume pads its payload independently, so a complete set of N encrypted
+        // volumes can overshoot the declared size by up to one block per volume — more than the
+        // single 16-byte block the old logic allowed.
+        var volumes = new[]
+        {
+            Volume(declaredSize: 300, packedBytes: 110, encrypted: true),
+            Volume(declaredSize: 300, packedBytes: 110, encrypted: true),
+            Volume(declaredSize: 300, packedBytes: 110, encrypted: true),
+        };
+
+        RarAggregator.ValidateVolumeCoverage(volumes, "archive.mkv");
+    }
+
+    [Fact]
+    public void EncryptedSetMissingAVolume_IsStillRejected()
+    {
+        // Widening the tolerance for AES padding must not mask a genuinely missing volume: the
+        // shortfall here is far larger than any per-volume padding.
+        var volumes = new[]
+        {
+            Volume(declaredSize: 400, packedBytes: 110, encrypted: true),
+            Volume(declaredSize: 400, packedBytes: 110, encrypted: true),
+            Volume(declaredSize: 400, packedBytes: 110, encrypted: true),
+        };
+
+        Assert.Throws<InvalidDataException>(
+            () => RarAggregator.ValidateVolumeCoverage(volumes, "archive.mkv"));
+    }
+
+    [Fact]
     public void ConflictingDeclaredSizes_AreRejected()
     {
         var volumes = new[]

@@ -124,7 +124,7 @@ public class RarAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, b
 
     /// <summary>
     /// AES pads each encrypted volume's payload up to a block boundary, so the packed bytes
-    /// may legitimately overshoot the declared size by less than one block.
+    /// may legitimately overshoot the declared size by less than one block per encrypted volume.
     /// </summary>
     private const long CoverageToleranceBytes = 16;
 
@@ -187,7 +187,16 @@ public class RarAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, b
         }
 
         var declaredSize = declaredSizes[0];
-        if (Math.Abs(packedTotal - declaredSize) <= CoverageToleranceBytes) return;
+
+        // Store-mode (m0) volumes pack exactly, so an unencrypted set must match the declared
+        // size byte-for-byte. AES-encrypted volumes each pad their payload up to a 16-byte block
+        // boundary, so a complete encrypted set can legitimately overshoot by up to one block per
+        // encrypted volume. A genuinely incomplete set is short by whole volumes (far beyond this
+        // tolerance), so widening it does not mask missing volumes.
+        var encryptedVolumeCount = volumes.Count(x => x.IsEncrypted);
+        var tolerance = CoverageToleranceBytes * Math.Max(1, encryptedVolumeCount);
+
+        if (Math.Abs(packedTotal - declaredSize) <= tolerance) return;
 
         throw new InvalidDataException(
             $"RAR volumes for '{pathWithinArchive}' are incomplete: {volumes.Count} volume(s) " +

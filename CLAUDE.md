@@ -158,6 +158,13 @@ Run container (user will do this):
 docker run -p 3000:3000 -v $(pwd)/config:/config local/nzbdav:3
 ```
 
+### Local Build Verification (No .NET SDK Installed)
+
+`dotnet` is not available on this machine (`dotnet: command not found`), so do not rely on `dotnet build`/`dotnet test` to verify backend changes. Verify backend changes by building the Docker image instead:
+
+- Backend-only compile: `docker build -f backend/Dockerfile backend`
+- Full app image (compiles backend in Stage 2): `docker build -t local/nzbdav:3 .`
+
 ### Build Version Updates
 
 **IMPORTANT:** When making significant code changes, update the build version string in `backend/Program.cs` — the `Log.Warning` banner in `Main`, just after the logger is configured:

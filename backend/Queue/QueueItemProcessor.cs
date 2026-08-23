@@ -457,7 +457,7 @@ public class QueueItemProcessor(
 
             if (probeFailures > 0)
             {
-                Log.Warning("[QueueItemProcessor] Step 3: {FailCount}/{FileCount} files had probe issues for {JobName}. Will run ffprobe to verify integrity.",
+                Log.Information("[QueueItemProcessor] Step 3: {FailCount}/{FileCount} files had probe issues for {JobName}. Will run ffprobe to verify integrity.",
                     probeFailures, fileSegments.Count, queueItem.JobName);
                 triggerMediaAnalysis = true;
             }

@@ -146,7 +146,7 @@ public class UsenetStreamingClient
                                 if (!exists)
                                 {
                                     spotCheckFailure = $"Mid-file article missing at index {idx}/{segmentIds.Length} ({(int)(fraction * 100)}%). Partial DMCA or corruption.";
-                                    Serilog.Log.Warning("[UsenetStreamingClient] Smart Analysis: {Message}", spotCheckFailure);
+                                    Serilog.Log.Information("[UsenetStreamingClient] Smart Analysis: {Message}", spotCheckFailure);
                                     break;
                                 }
                             }

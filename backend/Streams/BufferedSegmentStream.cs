@@ -1889,7 +1889,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
         }
 
         // Use graceful degradation
-        Log.Error("[BufferedStream] GRACEFUL DEGRADATION: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}) failed after {MaxRetries} attempts. Substituting with zeros to allow stream to continue. Last error: {LastError}",
+        Log.Information("[BufferedStream] GRACEFUL DEGRADATION: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}) failed after {MaxRetries} attempts. Substituting with zeros to allow stream to continue. Last error: {LastError}",
             jobName, index, segmentIds.Length, segmentId, maxRetries, lastException?.Message ?? "Unknown");
 
         // Track this segment as corrupted

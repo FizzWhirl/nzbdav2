@@ -89,7 +89,7 @@ public class DatabaseStoreMultipartFile(
                 }
                 catch (Exception ex)
                 {
-                    Serilog.Log.Warning(ex, "[DatabaseStoreMultipartFile] Failed to compute segment sizes for '{File}'; will interpolate.", davMultipartFile.Name);
+                    Serilog.Log.Information(ex, "[DatabaseStoreMultipartFile] Failed to compute segment sizes for '{File}'; will interpolate.", davMultipartFile.Name);
                 }
             }
 

@@ -910,7 +910,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
 
             // Warning level on purpose: production runs LOG_LEVEL=warning, and a window that cannot be
             // read back from the log is a window nobody can attribute a result to.
-            Log.Warning("[BufferedStream] PREFETCH WINDOW: {Window} segments ({Ratio:F1}x of {Connections} connections, source={Source}, avgSeg={AvgKB}KB, bufferSegmentCount={BufferSegmentCount}), holds~{HoldMB}MB data (bound={BoundedBy}, effective={Effective} of {Total} segments), Job={Job}",
+            Log.Information("[BufferedStream] PREFETCH WINDOW: {Window} segments ({Ratio:F1}x of {Connections} connections, source={Source}, avgSeg={AvgKB}KB, bufferSegmentCount={BufferSegmentCount}), holds~{HoldMB}MB data (bound={BoundedBy}, effective={Effective} of {Total} segments), Job={Job}",
                 maxPrefetchWindow,
                 concurrentConnections > 0 ? (double)maxPrefetchWindow / concurrentConnections : 0,
                 concurrentConnections, windowSource, avgSegKb, bufferSegmentCount,
@@ -1573,7 +1573,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
             if (attempt > 0)
             {
                 var delaySeconds = Math.Pow(2, attempt - 1);
-                Log.Warning("[BufferedStream] RETRY: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}), Attempt={Attempt}/{MaxRetries}, Waiting {Delay}s before retry, ExcludingProviders=[{ExcludedProviders}]",
+                Log.Information("[BufferedStream] RETRY: Job={Job}, Segment={SegmentIndex}/{TotalSegments} (ID: {SegmentId}), Attempt={Attempt}/{MaxRetries}, Waiting {Delay}s before retry, ExcludingProviders=[{ExcludedProviders}]",
                     jobName, index, segmentIds.Length, segmentId, attempt + 1, maxRetries, delaySeconds, string.Join(",", excludedProviders));
                 await Task.Delay(TimeSpan.FromSeconds(delaySeconds), ct).ConfigureAwait(false);
             }

@@ -177,7 +177,7 @@ public class UsenetStreamingClient
                 // Check if this looks like a DMCA/takedown (article not found)
                 if (IsArticleNotFoundException(ex) && segmentIds.Length > 3)
                 {
-                    Serilog.Log.Warning("[UsenetStreamingClient] Smart Analysis failed with article-not-found. Running DMCA confirmation check on mid segment...");
+                    Serilog.Log.Information("[UsenetStreamingClient] Smart Analysis failed with article-not-found. Running DMCA confirmation check on mid segment...");
 
                     // Standard DMCA confirmation: check mid segment only.
                     // DMCA takedowns remove ALL articles for a file — if first, last, AND mid are all missing,
@@ -193,14 +193,14 @@ public class UsenetStreamingClient
 
                         // Mid segment exists — not a full DMCA, but has partial article loss.
                         // Skip full HEAD scan — defer to ffprobe for definitive integrity check.
-                        Serilog.Log.Warning("[UsenetStreamingClient] DMCA check PASSED (mid-segment exists). Not DMCA — deferring to ffprobe.");
+                        Serilog.Log.Information("[UsenetStreamingClient] DMCA check PASSED (mid-segment exists). Not DMCA — deferring to ffprobe.");
                         throw new UsenetArticleNotFoundException(
                             $"Partial article loss detected (first/last missing but mid exists). Deferring to ffprobe.");
                     }
                     catch (Exception confirmEx) when (IsArticleNotFoundException(confirmEx))
                     {
                         // Confirmed: first, last, AND mid segments all missing — DMCA/takedown pattern
-                        Serilog.Log.Warning("[UsenetStreamingClient] DMCA/takedown pattern confirmed: first, mid={MidIndex}, and last segments all missing. Failing fast.", midIndex);
+                        Serilog.Log.Information("[UsenetStreamingClient] DMCA/takedown pattern confirmed: first, mid={MidIndex}, and last segments all missing. Failing fast.", midIndex);
                         throw new NonRetryableDownloadException(
                             $"DMCA/takedown pattern detected: first, mid ({midIndex}), and last segments all missing. " +
                             $"Skipping full scan of {segmentIds.Length} segments.");

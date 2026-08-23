@@ -244,14 +244,22 @@ public static class OrganizedLinksUtil
             // 1. Scan Disk (Heavy operation)
             var rawDiskLinks = await Task.Run(() => GetLibraryDavItemLinks(configManager).ToList(), ct);
 
-            // Validate FKs: Only keep links that point to existing DavItems
+            // Validate FKs: Only keep links that point to existing DavItems.
+            // The disk scan can produce more distinct DavItemIds than SQLite allows in a
+            // single IN(...) clause (older SQLite caps bound parameters at 999), so query
+            // in batches and aggregate the results.
             var davItemIds = rawDiskLinks.Select(x => x.DavItemId).Distinct().ToList();
-            var validDavItemIds = await dbContext.Items
-                .AsNoTracking()
-                .Where(x => davItemIds.Contains(x.Id))
-                .Select(x => x.Id)
-                .ToListAsync(ct);
-            var validDavItemIdSet = new HashSet<Guid>(validDavItemIds);
+            var validDavItemIdSet = new HashSet<Guid>();
+            const int batchSize = 500;
+            foreach (var batch in davItemIds.ToBatches(batchSize))
+            {
+                var validDavItemIds = await dbContext.Items
+                    .AsNoTracking()
+                    .Where(x => batch.Contains(x.Id))
+                    .Select(x => x.Id)
+                    .ToListAsync(ct);
+                validDavItemIdSet.UnionWith(validDavItemIds);
+            }
 
             var onDiskLinks = rawDiskLinks.Where(x => validDavItemIdSet.Contains(x.DavItemId)).ToList();
             var onDiskMap = onDiskLinks.ToDictionary(x => x.LinkPath, x => x.DavItemId);

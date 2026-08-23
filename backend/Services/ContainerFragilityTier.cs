@@ -7,7 +7,11 @@ namespace NzbWebDAV.Services;
 /// </summary>
 public enum ContainerFragilityTier
 {
-    /// <summary>MKV/WebM/MPEG-TS/fragmented MP4 — use the full configured cap.</summary>
+    /// <summary>
+    /// MKV/WebM/MPEG-TS/fragmented MP4 — use the full configured cap. Also the permissive
+    /// fallback for files whose MediaInfo is not available yet (analysis has not run), where
+    /// no fragility cap should be applied until the real tier is known.
+    /// </summary>
     Resilient = 0,
     /// <summary>Plain MP4/MOV/AVI/WMV/FLV — hard-cap at min(configured, 2).</summary>
     Standard = 1,
@@ -20,10 +24,16 @@ public static class ContainerFragilityTierResolver
     /// <summary>
     /// Resolves the fragility tier from ffprobe JSON (DavItem.MediaInfo). Pure — no DB access —
     /// so both <see cref="Streams.BufferedSegmentStream"/> and the health check share one rule.
+    /// A null/empty <paramref name="mediaInfoJson"/> means the file has not been analyzed yet,
+    /// so no fragility cap should be applied: it resolves to
+    /// <see cref="ContainerFragilityTier.Resilient"/> (full configured cap) until ffprobe
+    /// metadata exists. Files that HAVE been analyzed but have no recognizable container
+    /// (e.g. an ffprobe error or a non-video format) still resolve to
+    /// <see cref="ContainerFragilityTier.Unknown"/>.
     /// </summary>
     public static ContainerFragilityTier Resolve(string? mediaInfoJson)
     {
-        if (string.IsNullOrWhiteSpace(mediaInfoJson)) return ContainerFragilityTier.Unknown;
+        if (string.IsNullOrWhiteSpace(mediaInfoJson)) return ContainerFragilityTier.Resilient;
 
         // Extract format_name from the ffprobe JSON. We avoid full JSON parsing to keep this cheap.
         // ffprobe emits e.g. "format_name": "matroska,webm" or "format_name": "mov,mp4,m4a,3gp,3g2,mj2".

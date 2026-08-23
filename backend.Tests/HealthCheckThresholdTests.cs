@@ -158,7 +158,7 @@ public class HealthCheckThresholdTests
     [InlineData(@"{""format_name"":""mov,mp4"",""__nzbdav_mp4_layout"":""moov-at-end""}", ContainerFragilityTier.Unknown)]
     [InlineData(@"{""format_name"":""mov,mp4"",""__nzbdav_mp4_layout"":""fragmented""}", ContainerFragilityTier.Resilient)]
     [InlineData(@"{""format_name"":""wav""}", ContainerFragilityTier.Unknown)]
-    [InlineData("", ContainerFragilityTier.Unknown)]
+    [InlineData("", ContainerFragilityTier.Resilient)] // not yet analyzed → permissive
     public void ContainerFragilityTierResolver_ClassifiesContainers(string mediaInfoJson, ContainerFragilityTier expected)
     {
         Assert.Equal(expected, ContainerFragilityTierResolver.Resolve(mediaInfoJson));

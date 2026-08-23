@@ -1733,7 +1733,7 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 catch
                 {
                     // Return the rented buffer on failure to avoid pool leaks
-                    ArrayPool<byte>.Shared.Return(buffer, clearArray: false);
+                    ReleaseSegmentBuffer(buffer, pooledBuffer);
                     throw;
                 }
             }

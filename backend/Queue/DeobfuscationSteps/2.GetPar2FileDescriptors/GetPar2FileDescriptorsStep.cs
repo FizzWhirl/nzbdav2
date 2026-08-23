@@ -56,7 +56,7 @@ public static class GetPar2FileDescriptorsStep
             ConnectionUsageType.Analysis,
             originalContext.DetailsObject ?? new ConnectionUsageDetails { Text = originalContext.Details ?? "" }
         );
-        using var _ = timeoutToken.SetScopedContext(par2Context);
+        using var scopedPar2Context = timeoutToken.SetScopedContext(par2Context);
 
         var startTime = DateTimeOffset.UtcNow;
 

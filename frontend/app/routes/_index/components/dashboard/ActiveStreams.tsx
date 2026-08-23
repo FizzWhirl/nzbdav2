@@ -1,9 +1,12 @@
 import { Card, ProgressBar } from 'react-bootstrap';
 import type { StreamSession, StreamProviderTally } from '~/types/streams';
 
-type Props = { streams: StreamSession[] };
+type Props = {
+    streams: StreamSession[];
+    onFileClick: (davItemId: string) => void;
+};
 
-export function ActiveStreams({ streams }: Props) {
+export function ActiveStreams({ streams, onFileClick }: Props) {
     if (streams.length === 0) {
         return (
             <Card bg="dark" text="white" className="border-secondary mb-4">
@@ -20,7 +23,7 @@ export function ActiveStreams({ streams }: Props) {
                 <h6 className="text-muted mb-3">Active Streaming</h6>
                 <div className="d-flex flex-column gap-3">
                     {streams.map(stream => (
-                        <StreamRow key={stream.davItemId} stream={stream} />
+                        <StreamRow key={stream.davItemId} stream={stream} onFileClick={onFileClick} />
                     ))}
                 </div>
             </Card.Body>
@@ -28,14 +31,25 @@ export function ActiveStreams({ streams }: Props) {
     );
 }
 
-function StreamRow({ stream }: { stream: StreamSession }) {
-    const name = stream.fileName.split('/').pop() || stream.fileName;
+function StreamRow({ stream, onFileClick }: { stream: StreamSession; onFileClick: (davItemId: string) => void }) {
+    const name = stream.jobName || stream.fileName.split('/').pop() || stream.fileName;
     return (
         <div className="bg-black bg-opacity-25 rounded p-3">
             <div className="d-flex justify-content-between align-items-center mb-1">
-                <span className="fw-bold text-truncate" style={{ maxWidth: '70%' }} title={stream.fileName}>
-                    {name}
-                </span>
+                {stream.davItemId ? (
+                    <span
+                        className="fw-bold text-truncate"
+                        style={{ maxWidth: '70%', cursor: 'pointer', textDecoration: 'underline', color: '#6ea8fe' }}
+                        title={stream.jobName || stream.fileName}
+                        onClick={() => onFileClick(stream.davItemId!)}
+                    >
+                        {name}
+                    </span>
+                ) : (
+                    <span className="fw-bold text-truncate" style={{ maxWidth: '70%' }} title={stream.jobName || stream.fileName}>
+                        {name}
+                    </span>
+                )}
                 <span className="text-muted small">{stream.progressPercent}%</span>
             </div>
             <ProgressBar now={stream.progressPercent} style={{ height: '4px' }} className="mb-2" />

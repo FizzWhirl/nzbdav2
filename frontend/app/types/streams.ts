@@ -7,6 +7,7 @@ export type StreamProviderTally = {
 export type StreamSession = {
     davItemId: string;
     fileName: string;
+    jobName?: string | null;
     currentBytePosition: number;
     fileSize: number;
     progressPercent: number;

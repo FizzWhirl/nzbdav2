@@ -825,7 +825,8 @@ public class BufferedSegmentStream : Stream, ITouchableStream
                 details.Text,
                 _usageContext.Value.AffinityKey ?? details.Text,
                 details.CurrentBytePosition ?? 0,
-                fileSize);
+                fileSize,
+                _usageContext.Value.JobName);
         }
 
         // Occasionally trigger a UI update via ConnectionPool if possible

@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Alert, ButtonGroup, Button, Row, Col } from 'react-bootstrap';
 import type { DashboardData } from '~/types/dashboard';
 import { TIME_WINDOW_OPTIONS } from '~/types/dashboard';
 import type { ConnectionUsageContext } from '~/types/connections';
 import type { ProviderBandwidthSnapshot } from '~/types/bandwidth';
 import type { StreamSession } from '~/types/streams';
+import type { FileDetails } from '~/types/backend';
+import { FileDetailsModal } from '~/routes/health/components/file-details-modal/file-details-modal';
 import { ActiveStreaming } from './ActiveStreaming';
 import { ActiveStreams } from './ActiveStreams';
 import { TotalDownloaded } from './TotalDownloaded';
@@ -28,6 +30,34 @@ export function Dashboard({ initialData, initialConnections, initialBandwidth, i
     const [selectedHours, setSelectedHours] = useState(initialData.timeWindowHours);
     const [isLoading, setIsLoading] = useState(false);
     const [backendError, setBackendError] = useState<string | null>(null);
+    const [showDetailsModal, setShowDetailsModal] = useState(false);
+    const [selectedFileDetails, setSelectedFileDetails] = useState<FileDetails | null>(null);
+    const [loadingFileDetails, setLoadingFileDetails] = useState(false);
+
+    const onFileClick = useCallback(async (davItemId: string) => {
+        setShowDetailsModal(true);
+        setLoadingFileDetails(true);
+        setSelectedFileDetails(null);
+
+        try {
+            const response = await fetch(`/api/file-details/${davItemId}`);
+            if (response.ok) {
+                const fileDetails = await response.json();
+                setSelectedFileDetails(fileDetails);
+            } else {
+                console.error('Failed to fetch file details:', await response.text());
+            }
+        } catch (error) {
+            console.error('Error fetching file details:', error);
+        } finally {
+            setLoadingFileDetails(false);
+        }
+    }, []);
+
+    const onHideDetailsModal = useCallback(() => {
+        setShowDetailsModal(false);
+        setSelectedFileDetails(null);
+    }, []);
 
     // Build provider name lookup
     const providerNames = data.providerHealth.reduce((acc, p) => {
@@ -183,10 +213,10 @@ export function Dashboard({ initialData, initialConnections, initialBandwidth, i
             }
 
             {/* Active Streams - Full Width */}
-            <ActiveStreams streams={streams} />
+            <ActiveStreams streams={streams} onFileClick={onFileClick} />
 
             {/* Active Streaming - Full Width */}
-            <ActiveStreaming connections={connections} providerNames={providerNames} bandwidth={currentBandwidth} />
+            <ActiveStreaming connections={connections} providerNames={providerNames} bandwidth={currentBandwidth} onFileClick={onFileClick} />
 
             {/* Total Downloaded + Provider Health */}
             <Row className="mb-4 gy-4">
@@ -205,6 +235,13 @@ export function Dashboard({ initialData, initialConnections, initialBandwidth, i
 
             {/* Recent Completions - Full Width */}
             <RecentCompletions completions={data.recentCompletions} />
+
+            <FileDetailsModal
+                show={showDetailsModal}
+                onHide={onHideDetailsModal}
+                fileDetails={selectedFileDetails}
+                loading={loadingFileDetails}
+            />
         </div>
     );
 }

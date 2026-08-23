@@ -17,6 +17,7 @@ public sealed class StreamSessionRegistry
     private sealed class Entry
     {
         public string FileName = "";
+        public string JobName = "";
         public string AffinityKey = "";
         public long CurrentBytePosition;
         public long FileSize;
@@ -79,10 +80,11 @@ public sealed class StreamSessionRegistry
         _websocketManager.SendMessage(WebsocketTopic.ActiveStreams, json);
     }
 
-    public void Touch(Guid davItemId, string fileName, string affinityKey, long currentBytePosition, long fileSize)
+    public void Touch(Guid davItemId, string fileName, string affinityKey, long currentBytePosition, long fileSize, string? jobName = null)
     {
         var entry = _sessions.GetOrAdd(davItemId, _ => new Entry());
         entry.FileName = fileName;
+        entry.JobName = jobName ?? "";
         entry.AffinityKey = affinityKey;
         entry.CurrentBytePosition = currentBytePosition;
         entry.FileSize = fileSize;
@@ -100,7 +102,7 @@ public sealed class StreamSessionRegistry
                 continue;
             }
             result.Add(new ActiveStreamSnapshot(
-                davItemId, entry.FileName, entry.AffinityKey, entry.CurrentBytePosition, entry.FileSize));
+                davItemId, entry.FileName, entry.AffinityKey, entry.CurrentBytePosition, entry.FileSize, entry.JobName));
         }
         return result;
     }
@@ -131,7 +133,7 @@ public sealed class StreamSessionRegistry
                 : 0;
 
             dtos.Add(new ActiveStreamDto(
-                s.DavItemId, s.FileName, s.CurrentBytePosition, s.FileSize, progress, tallies));
+                s.DavItemId, s.FileName, s.CurrentBytePosition, s.FileSize, progress, tallies, s.JobName));
         }
         return dtos;
     }
@@ -145,11 +147,13 @@ public sealed record ActiveStreamDto(
     long CurrentBytePosition,
     long FileSize,
     int ProgressPercent,
-    IReadOnlyList<StreamProviderTally> Providers);
+    IReadOnlyList<StreamProviderTally> Providers,
+    string? JobName);
 
 public sealed record ActiveStreamSnapshot(
     Guid DavItemId,
     string FileName,
     string AffinityKey,
     long CurrentBytePosition,
-    long FileSize);
+    long FileSize,
+    string? JobName = null);

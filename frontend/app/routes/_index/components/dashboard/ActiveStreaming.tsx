@@ -6,6 +6,7 @@ type Props = {
     connections: Record<number, ConnectionUsageContext[]>;
     providerNames: Record<number, string>;
     bandwidth: ProviderBandwidthSnapshot[];
+    onFileClick: (davItemId: string) => void;
 };
 
 function formatSpeed(bytesPerSecond: number): string {
@@ -16,7 +17,7 @@ function formatSpeed(bytesPerSecond: number): string {
     return `${value.toFixed(index >= 2 ? 1 : 0)} ${units[index]}`;
 }
 
-export function ActiveStreaming({ connections, providerNames, bandwidth }: Props) {
+export function ActiveStreaming({ connections, providerNames, bandwidth, onFileClick }: Props) {
     const totalCurrentSpeed = bandwidth.reduce((sum, provider) => sum + provider.currentSpeed, 0);
     const providerIndices = Array.from(new Set([
         ...Object.keys(providerNames).map(Number),
@@ -45,6 +46,7 @@ export function ActiveStreaming({ connections, providerNames, bandwidth }: Props
                                 providerName={providerNames[providerIndex] || bandwidth.find(x => x.providerIndex === providerIndex)?.host || `Provider ${providerIndex + 1}`}
                                 currentSpeed={bandwidth.find(x => x.providerIndex === providerIndex)?.currentSpeed || 0}
                                 connections={connections[providerIndex] || []}
+                                onFileClick={onFileClick}
                             />
                         ))}
                 </div>
@@ -53,11 +55,11 @@ export function ActiveStreaming({ connections, providerNames, bandwidth }: Props
     );
 }
 
-function ProviderGroup({ providerName, currentSpeed, connections }: { providerName: string; currentSpeed: number; connections: ConnectionUsageContext[] }) {
+function ProviderGroup({ providerName, currentSpeed, connections, onFileClick }: { providerName: string; currentSpeed: number; connections: ConnectionUsageContext[]; onFileClick: (davItemId: string) => void }) {
     const renderStreams = (limit: number) => (
         <>
             {connections.slice(0, limit).map((conn, idx) => (
-                <StreamItem key={idx} connection={conn} />
+                <StreamItem key={idx} connection={conn} onFileClick={onFileClick} />
             ))}
             {connections.length > limit && (
                 <small className="text-muted">+{connections.length - limit} more</small>
@@ -84,8 +86,8 @@ function ProviderGroup({ providerName, currentSpeed, connections }: { providerNa
     );
 }
 
-function StreamItem({ connection }: { connection: ConnectionUsageContext }) {
-    const fileName = connection.details?.split('/').pop() || 'Unknown';
+function StreamItem({ connection, onFileClick }: { connection: ConnectionUsageContext; onFileClick: (davItemId: string) => void }) {
+    const fileName = connection.jobName || connection.details?.split('/').pop() || 'Unknown';
     const shortName = fileName.length > 25 ? fileName.substring(0, 22) + '...' : fileName;
 
     // Calculate progress if we have byte position and file size
@@ -95,9 +97,20 @@ function StreamItem({ connection }: { connection: ConnectionUsageContext }) {
 
     return (
         <div className="d-flex justify-content-between align-items-center small">
-            <span className="text-truncate" style={{ maxWidth: '150px' }} title={fileName}>
-                {shortName}
-            </span>
+            {connection.davItemId ? (
+                <span
+                    className="text-truncate"
+                    style={{ maxWidth: '150px', cursor: 'pointer', textDecoration: 'underline', color: '#6ea8fe' }}
+                    title={fileName}
+                    onClick={() => onFileClick(connection.davItemId!)}
+                >
+                    {shortName}
+                </span>
+            ) : (
+                <span className="text-truncate" style={{ maxWidth: '150px' }} title={fileName}>
+                    {shortName}
+                </span>
+            )}
             {progress !== null && (
                 <span className="text-muted ms-2">{progress}%</span>
             )}

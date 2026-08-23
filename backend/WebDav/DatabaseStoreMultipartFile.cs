@@ -73,6 +73,13 @@ public class DatabaseStoreMultipartFile(
         // Covers items created before this field existed and any aggregator that did not populate them.
         if (SegmentSizePopulation.NeedsPopulation(multipartFile.Metadata))
         {
+            // The raw request token (ct) carries no ConnectionUsageContext, so the lazy segment-size
+            // analysis would otherwise be accounted as Unlabeled in the global pool. Scope the
+            // stream's usage context (Streaming / QueueAnalysis) onto a linked token instead.
+            using var analysisCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using var _ = analysisCts.Token.SetScopedContext(usageContext);
+            var analysisToken = analysisCts.Token;
+
             var changed = false;
             foreach (var part in multipartFile.Metadata.FileParts)
             {
@@ -82,7 +89,7 @@ public class DatabaseStoreMultipartFile(
                 {
                     var sizes = await usenetClient.AnalyzeNzbAsync(
                         part.SegmentIds, configManager.GetTotalStreamingConnections(),
-                        progress: null, ct, useSmartAnalysis: true).ConfigureAwait(false);
+                        progress: null, analysisToken, useSmartAnalysis: true).ConfigureAwait(false);
 
                     if (SegmentSizePopulation.IsValidForPart(part, sizes)) { part.SegmentSizes = sizes; changed = true; }
                     else Serilog.Log.Warning("[DatabaseStoreMultipartFile] Computed sizes for '{File}' did not sum to part size; will interpolate.", davMultipartFile.Name);

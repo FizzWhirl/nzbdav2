@@ -47,6 +47,17 @@ public static class GetPar2FileDescriptorsStep
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromMinutes(3));
         var timeoutToken = timeoutCts.Token;
+
+        // Create Analysis usage context for Par2 segment fetches to avoid consuming Queue permits.
+        // Par2 extraction already holds one Queue permit - segment fetches should use the Analysis pool.
+        // Scoped before the file-size lookup so every Par2 network fetch (size + segments) is labeled.
+        var originalContext = cancellationToken.GetContext<ConnectionUsageContext>();
+        var par2Context = new ConnectionUsageContext(
+            ConnectionUsageType.Analysis,
+            originalContext.DetailsObject ?? new ConnectionUsageDetails { Text = originalContext.Details ?? "" }
+        );
+        using var _ = timeoutToken.SetScopedContext(par2Context);
+
         var startTime = DateTimeOffset.UtcNow;
 
         // Add periodic logging to detect long-running Par2 extraction
@@ -82,15 +93,6 @@ public static class GetPar2FileDescriptorsStep
             var filesize = par2Index.NzbFile.Segments.Count == 1
                 ? par2Index.Header!.PartOffset + par2Index.Header!.PartSize
                 : await client.GetFileSizeAsync(par2Index.NzbFile, timeoutToken).ConfigureAwait(false);
-
-            // Create Analysis usage context for Par2 segment fetches to avoid consuming Queue permits
-            // Par2 extraction already holds one Queue permit - segment fetches should use Analysis pool
-            var originalContext = cancellationToken.GetContext<ConnectionUsageContext>();
-            var par2Context = new ConnectionUsageContext(
-                ConnectionUsageType.Analysis,
-                originalContext.DetailsObject ?? new ConnectionUsageDetails { Text = originalContext.Details ?? "" }
-            );
-            using var _ = timeoutToken.SetScopedContext(par2Context);
 
             // Use early termination: stop reading once we've found all expected file descriptors
             // This avoids reading recovery blocks which can be very large (gigabytes of data)

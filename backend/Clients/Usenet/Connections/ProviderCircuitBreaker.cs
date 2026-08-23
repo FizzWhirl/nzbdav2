@@ -62,11 +62,23 @@ public class ProviderCircuitBreaker
 
             if (_consecutiveFailures < FailureThreshold) return;
 
+            // Capture whether the provider was already tripped before extending the
+            // cooldown. While tripped, further failures still extend the skip window
+            // (backoff behavior is unchanged), but we must not re-emit the warning:
+            // a single outage would otherwise log one "tripped" line per failed
+            // request. The warning is emitted only on the transition into the
+            // tripped state (or on a re-trip after the cooldown expires).
+            var wasTripped = IsTripped;
+
             _trippedUntilMs = Environment.TickCount64 + (long)_currentCooldown.TotalMilliseconds;
-            Log.Warning(
-                "Provider {Provider} tripped after {Failures} consecutive failures. " +
-                "Skipping for {Cooldown}s.",
-                _providerName, _consecutiveFailures, _currentCooldown.TotalSeconds);
+
+            if (!wasTripped)
+            {
+                Log.Warning(
+                    "Provider {Provider} tripped after {Failures} consecutive failures. " +
+                    "Skipping for {Cooldown}s.",
+                    _providerName, _consecutiveFailures, _currentCooldown.TotalSeconds);
+            }
 
             _currentCooldown = TimeSpan.FromMilliseconds(
                 Math.Min(_currentCooldown.TotalMilliseconds * 2, MaxCooldown.TotalMilliseconds));

@@ -67,6 +67,17 @@ class Program
             .Filter.ByExcluding(le =>
                 le.MessageTemplate.Text.StartsWith("Property ", StringComparison.Ordinal)
                 && le.MessageTemplate.Text.Contains("is not supported on item", StringComparison.Ordinal))
+            // Kestrel logs `Connection id ""{ConnectionId}"" application never completed.` at
+            // Critical (surfaced as Serilog Fatal) whenever a client aborts/resets a connection
+            // before the application finished the response — common with media players seeking or
+            // dropping a WebDAV stream. It is connection-lifecycle noise, not an application
+            // crash, so drop exactly that event from the Kestrel categories while keeping every
+            // other Kestrel warning/error (real server failures) intact.
+            .Filter.ByExcluding(le =>
+                le.Properties.TryGetValue("SourceContext", out var sourceContext)
+                && sourceContext is ScalarValue { Value: string source }
+                && source.StartsWith("Microsoft.AspNetCore.Server.Kestrel", StringComparison.Ordinal)
+                && le.MessageTemplate.Text.Contains("application never completed", StringComparison.Ordinal))
             .WriteTo.Console(formatter: new DozzleJsonConsoleFormatter())
             .WriteTo.Sink(InMemoryLogSink.Instance)
             .CreateLogger();

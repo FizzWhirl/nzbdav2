@@ -208,7 +208,7 @@ public class UsenetStreamingClient
                     catch (Exception confirmEx) when (!IsArticleNotFoundException(confirmEx))
                     {
                         // Transient error on confirmation — not conclusive, defer to ffprobe
-                        Serilog.Log.Warning(confirmEx, "[UsenetStreamingClient] DMCA confirmation check failed with non-article error. Deferring to ffprobe.");
+                        Serilog.Log.Information(confirmEx, "[UsenetStreamingClient] DMCA confirmation check failed with non-article error. Deferring to ffprobe.");
                         throw new UsenetArticleNotFoundException(
                             $"DMCA confirmation inconclusive (transient error). Deferring to ffprobe.");
                     }
@@ -216,7 +216,7 @@ public class UsenetStreamingClient
                 else
                 {
                     // Not article-not-found (timeout, connection reset, etc.) — skip full scan, defer to ffprobe
-                    Serilog.Log.Warning(ex, "[UsenetStreamingClient] Smart Analysis failed with non-article error. Deferring to ffprobe.");
+                    Serilog.Log.Information(ex, "[UsenetStreamingClient] Smart Analysis failed with non-article error. Deferring to ffprobe.");
                     throw;
                 }
             }
@@ -718,7 +718,7 @@ public class UsenetStreamingClient
                 {
                     // If we can't get the file size (e.g. missing article), log warning but don't fail the whole batch.
                     // The file processor will try again later or handle the missing file appropriately.
-                    Serilog.Log.Warning("[UsenetStreamingClient] Failed to get file size for {FileName}: {Message}", file.FileName, ex.Message);
+                    Serilog.Log.Information("[UsenetStreamingClient] Failed to get file size for {FileName}: {Message}", file.FileName, ex.Message);
                     return (file, -1L);
                 }
             })

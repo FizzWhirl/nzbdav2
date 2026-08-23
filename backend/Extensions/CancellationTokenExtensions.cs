@@ -48,7 +48,7 @@ public static class CancellationTokenExtensions
                 {
                     // Genuinely interesting: a context lived longer than any of our timeouts should allow,
                     // which can indicate a leaked CTS or a stuck operation.
-                    Serilog.Log.Warning("[CancellationTokenContext] Removed context after {HeldMinutes:F1} minutes: {ContextType} = {ContextValue}. Remaining contexts: {ContextCount}",
+                    Serilog.Log.Information("[CancellationTokenContext] Removed context after {HeldMinutes:F1} minutes: {ContextType} = {ContextValue}. Remaining contexts: {ContextCount}",
                         heldDuration.TotalMinutes, lookupKey.Type.Name, value?.ToString() ?? "null", Context.Count);
                 }
                 // Disabled noisy logging for normal context removal

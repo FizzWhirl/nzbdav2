@@ -110,7 +110,7 @@ public class GlobalOperationLimiter : IDisposable
             // Diagnostic: cancellation here means the caller's token fired while waiting for a
             // permit. Emit the gate snapshot so a leaked-permit scenario (gates pinned at 0 with
             // no active connections) is immediately visible in the logs.
-            Log.Warning(
+            Log.Information(
                 "[GlobalPool] Permit acquisition CANCELED for {UsageType} after {WaitSeconds:F1}s. LowGate={LowGateRemaining}/{LowGateMax}, SharedPool={SharedRemaining}/{SharedMax}, Usage=[{UsageBreakdown}]",
                 usageType, (DateTime.UtcNow - waitStartTime).TotalSeconds,
                 _lowPriorityGate.CurrentCount, _totalConnections - _streamingReserve,

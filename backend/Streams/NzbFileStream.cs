@@ -88,7 +88,7 @@ public class NzbFileStream : Stream
             // Validate cached size matches expected size
             if (current != _fileSize)
             {
-                Serilog.Log.Warning("[NzbFileStream] Cached segment sizes total {CachedSize} but expected {FileSize}. Ignoring cache.", current, _fileSize);
+                Serilog.Log.Information("[NzbFileStream] Cached segment sizes total {CachedSize} but expected {FileSize}. Ignoring cache.", current, _fileSize);
                 _segmentOffsets = null;
             }
         }

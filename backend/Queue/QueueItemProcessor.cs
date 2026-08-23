@@ -423,7 +423,7 @@ public class QueueItemProcessor(
                                     Log.Debug("[QueueItemProcessor] Step 3: Retrying probe for {FileName} after error: {Error}", file.FileName, ex.Message);
                                     continue; // Retry once
                                 }
-                                Log.Warning(ex, "[QueueItemProcessor] Step 3: Probe failed for {FileName} after retry", file.FileName);
+                                Log.Information(ex, "[QueueItemProcessor] Step 3: Probe failed for {FileName} after retry", file.FileName);
                                 Interlocked.Increment(ref probeFailures);
                             }
                         }
@@ -450,7 +450,7 @@ public class QueueItemProcessor(
                     throw new NonRetryableDownloadException($"DMCA/takedown pattern detected — all {dmcaCountFinal} files are taken down for {queueItem.JobName}");
                 }
 
-                Log.Warning("[QueueItemProcessor] Step 3: {DmcaCount}/{FileCount} files confirmed DMCA/takedown for {JobName}. Continuing with remaining files.",
+                Log.Information("[QueueItemProcessor] Step 3: {DmcaCount}/{FileCount} files confirmed DMCA/takedown for {JobName}. Continuing with remaining files.",
                     dmcaCountFinal, fileSegments.Count, queueItem.JobName);
                 triggerMediaAnalysis = true; // Enter Step 5 to clean up DMCA'd files from DB
             }

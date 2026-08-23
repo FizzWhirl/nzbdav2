@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NzbWebDAV.Database;
+using NzbWebDAV.Extensions;
 using NzbWebDAV.Services;
 
 namespace NzbWebDAV.Api.Controllers.ResetHealthStatus;
@@ -19,28 +20,41 @@ public class ResetHealthStatusController(DavDatabaseClient dbClient, ProviderErr
         }
 
         var guids = request.DavItemIds.Select(Guid.Parse).ToList();
+        const int batchSize = 500;
 
         // 1. Get paths for ProviderErrorService cleanup
-        var itemPaths = await dbClient.Ctx.Items
-            .Where(x => guids.Contains(x.Id))
-            .Select(x => x.Path)
-            .ToListAsync().ConfigureAwait(false);
+        var itemPaths = new List<string>();
+        foreach (var batch in guids.ToBatches(batchSize))
+        {
+            var paths = await dbClient.Ctx.Items
+                .Where(x => batch.Contains(x.Id))
+                .Select(x => x.Path)
+                .ToListAsync().ConfigureAwait(false);
+            itemPaths.AddRange(paths);
+        }
 
         // 2. Reset DavItems status
         // We set NextHealthCheck to null to trigger a fresh check ASAP
-        var resetCount = await dbClient.Ctx.Items
-            .Where(x => guids.Contains(x.Id))
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(p => p.IsCorrupted, false)
-                .SetProperty(p => p.CorruptionReason, (string?)null)
-                .SetProperty(p => p.LastHealthCheck, (DateTimeOffset?)null)
-                .SetProperty(p => p.NextHealthCheck, (DateTimeOffset?)null))
-            .ConfigureAwait(false);
+        var resetCount = 0;
+        foreach (var batch in guids.ToBatches(batchSize))
+        {
+            resetCount += await dbClient.Ctx.Items
+                .Where(x => batch.Contains(x.Id))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(p => p.IsCorrupted, false)
+                    .SetProperty(p => p.CorruptionReason, (string?)null)
+                    .SetProperty(p => p.LastHealthCheck, (DateTimeOffset?)null)
+                    .SetProperty(p => p.NextHealthCheck, (DateTimeOffset?)null))
+                .ConfigureAwait(false);
+        }
 
         // 3. Clear HealthCheckResults
-        await dbClient.Ctx.HealthCheckResults
-            .Where(x => guids.Contains(x.DavItemId))
-            .ExecuteDeleteAsync().ConfigureAwait(false);
+        foreach (var batch in guids.ToBatches(batchSize))
+        {
+            await dbClient.Ctx.HealthCheckResults
+                .Where(x => batch.Contains(x.DavItemId))
+                .ExecuteDeleteAsync().ConfigureAwait(false);
+        }
 
         // 4. Clear ProviderErrorService summaries/events
         foreach (var path in itemPaths)

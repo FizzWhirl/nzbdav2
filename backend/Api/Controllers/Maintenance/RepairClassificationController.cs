@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
+using NzbWebDAV.Extensions;
 using NzbWebDAV.Queue;
 using Serilog;
 using System.Text;
@@ -174,23 +175,32 @@ public class RepairClassificationController(
             // Find all children recursively
             var allIds = new List<Guid>(ids);
             var currentLevelIds = ids;
+            const int batchSize = 500;
 
             while (currentLevelIds.Count > 0)
             {
-                var nextLevelIds = await dbClient.Ctx.Items
-                    .Where(x => x.ParentId != null && currentLevelIds.Contains(x.ParentId.Value))
-                    .Select(x => x.Id)
-                    .ToListAsync(ct);
-                
+                var nextLevelIds = new List<Guid>();
+                foreach (var batch in currentLevelIds.ToBatches(batchSize))
+                {
+                    var childIds = await dbClient.Ctx.Items
+                        .Where(x => x.ParentId != null && batch.Contains(x.ParentId.Value))
+                        .Select(x => x.Id)
+                        .ToListAsync(ct);
+                    nextLevelIds.AddRange(childIds);
+                }
+
                 allIds.AddRange(nextLevelIds);
                 currentLevelIds = nextLevelIds;
             }
 
             // Delete in reverse order (children first)
             var uniqueIds = allIds.Distinct().Reverse().ToList();
-            await dbClient.Ctx.Items
-                .Where(x => uniqueIds.Contains(x.Id))
-                .ExecuteDeleteAsync(ct);
+            foreach (var batch in uniqueIds.ToBatches(batchSize))
+            {
+                await dbClient.Ctx.Items
+                    .Where(x => batch.Contains(x.Id))
+                    .ExecuteDeleteAsync(ct);
+            }
         }
         else
         {

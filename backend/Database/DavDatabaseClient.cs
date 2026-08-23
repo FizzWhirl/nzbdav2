@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NzbWebDAV.Database.Models;
+using NzbWebDAV.Extensions;
 
 namespace NzbWebDAV.Database;
 
@@ -164,9 +165,13 @@ public sealed class DavDatabaseClient(DavDatabaseContext ctx)
 
     public async Task RemoveQueueItemsAsync(List<Guid> ids, CancellationToken ct = default)
     {
-        await Ctx.QueueItems
-            .Where(x => ids.Contains(x.Id))
-            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        const int batchSize = 500;
+        foreach (var batch in ids.ToBatches(batchSize))
+        {
+            await Ctx.QueueItems
+                .Where(x => batch.Contains(x.Id))
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
     }
 
     // history
@@ -179,9 +184,15 @@ public sealed class DavDatabaseClient(DavDatabaseContext ctx)
 
     public async Task ArchiveHistoryItemsAsync(List<Guid> ids, CancellationToken ct = default)
     {
-        var historyItems = await Ctx.HistoryItems
-            .Where(x => ids.Contains(x.Id))
-            .ToListAsync(ct).ConfigureAwait(false);
+        var historyItems = new List<HistoryItem>();
+        const int batchSize = 500;
+        foreach (var batch in ids.ToBatches(batchSize))
+        {
+            var batchItems = await Ctx.HistoryItems
+                .Where(x => batch.Contains(x.Id))
+                .ToListAsync(ct).ConfigureAwait(false);
+            historyItems.AddRange(batchItems);
+        }
 
         if (historyItems.Count == 0) return;
 
@@ -198,9 +209,15 @@ public sealed class DavDatabaseClient(DavDatabaseContext ctx)
 
     public async Task RemoveHistoryItemsAsync(List<Guid> ids, bool deleteFiles, CancellationToken ct = default)
     {
-        var historyItems = await Ctx.HistoryItems
-            .Where(x => ids.Contains(x.Id))
-            .ToListAsync(ct).ConfigureAwait(false);
+        var historyItems = new List<HistoryItem>();
+        const int batchSize = 500;
+        foreach (var batch in ids.ToBatches(batchSize))
+        {
+            var batchItems = await Ctx.HistoryItems
+                .Where(x => batch.Contains(x.Id))
+                .ToListAsync(ct).ConfigureAwait(false);
+            historyItems.AddRange(batchItems);
+        }
 
         if (historyItems.Count == 0)
         {
@@ -249,9 +266,13 @@ public sealed class DavDatabaseClient(DavDatabaseContext ctx)
 
         // Delete old hidden history items
         var oldHiddenItemIds = oldHiddenItems.Select(x => x.Id).ToList();
-        await Ctx.HistoryItems
-            .Where(h => oldHiddenItemIds.Contains(h.Id))
-            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        const int batchSize = 500;
+        foreach (var batch in oldHiddenItemIds.ToBatches(batchSize))
+        {
+            await Ctx.HistoryItems
+                .Where(h => batch.Contains(h.Id))
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
 
         await transaction.CommitAsync(ct).ConfigureAwait(false);
     }

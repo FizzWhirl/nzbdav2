@@ -1033,10 +1033,15 @@ public class QueueItemProcessor(
 
         var itemIds = items.Select(x => x.Id).ToList();
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        var deleted = await dbContext.Items
-            .Where(i => itemIds.Contains(i.Id))
-            .ExecuteDeleteAsync(cancellationToken)
-            .ConfigureAwait(false);
+        var deleted = 0;
+        const int batchSize = 500;
+        foreach (var batch in itemIds.ToBatches(batchSize))
+        {
+            deleted += await dbContext.Items
+                .Where(i => batch.Contains(i.Id))
+                .ExecuteDeleteAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         if (deleted > 0)
         {
@@ -1083,14 +1088,19 @@ public class QueueItemProcessor(
         if (verifiedItems.Count == 0) return;
 
         var verifiedItemIds = verifiedItems.Select(i => i.Id).ToList();
-        var existingResultIds = await dbContext.HealthCheckResults
-            .AsNoTracking()
-            .Where(r => verifiedItemIds.Contains(r.DavItemId))
-            .Select(r => r.DavItemId)
-            .Distinct()
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-        var existingResultIdSet = existingResultIds.ToHashSet();
+        var existingResultIdSet = new HashSet<Guid>();
+        const int batchSize = 500;
+        foreach (var batch in verifiedItemIds.ToBatches(batchSize))
+        {
+            var existingResultIds = await dbContext.HealthCheckResults
+                .AsNoTracking()
+                .Where(r => batch.Contains(r.DavItemId))
+                .Select(r => r.DavItemId)
+                .Distinct()
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+            existingResultIdSet.UnionWith(existingResultIds);
+        }
 
         var healthResults = verifiedItems
             .Where(i => !existingResultIdSet.Contains(i.Id))

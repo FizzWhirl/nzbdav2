@@ -18,13 +18,15 @@ namespace NzbWebDAV.Database.Export;
 /// <param name="TableRows">Number of rows written per destination table.</param>
 /// <param name="NzbBlobCount">Number of raw NZB blob files written.</param>
 /// <param name="FileBlobCount">Number of typed streaming-metadata blob files written.</param>
+/// <param name="Warning">Set when the dump cannot be imported through InfiniDysk's upload endpoint.</param>
 public sealed record InfiniDyskExportResult(
     string OutputDirectory,
     string SqlFilePath,
     long Bytes,
     IReadOnlyDictionary<string, int> TableRows,
     int NzbBlobCount,
-    int FileBlobCount);
+    int FileBlobCount,
+    string? Warning = null);
 
 /// <summary>
 /// Exports the parts of this database that InfiniDysk can consume, as a logical SQL dump
@@ -102,13 +104,27 @@ public static class InfiniDyskExporter
     private static readonly Guid IdsRootId = Guid.Parse("00000000-0000-0000-0000-000000000004");
 
     /// <summary>
+    /// InfiniDysk's restore endpoint refuses a main database dump larger than 4 GiB: the controller
+    /// sets a matching multipart limit, and exceeding it surfaces as a bare HTTP 500 rather than a
+    /// readable error. Knowing the ceiling lets us say so instead of letting the operator discover
+    /// it from a failed upload.
+    /// </summary>
+    public const long MaxUploadBytes = 4L * 1024 * 1024 * 1024;
+
+    /// <summary>
     /// Writes <c>db.sql</c> and a <c>blobs/</c> tree into <paramref name="targetDirectory"/>.
     /// </summary>
     /// <param name="targetDirectory">Absolute directory to write into; created if missing.</param>
+    /// <param name="compact">
+    /// When true, health-check history (<c>HealthCheckResults</c> / <c>HealthCheckStats</c>) is
+    /// omitted. Those tables are per-check audit/metrics rows, not migration data — InfiniDysk
+    /// re-checks the library itself — and they are usually the bulk of a large dump.
+    /// </param>
     /// <param name="progress">Optional human-readable stage reporter.</param>
     /// <param name="cancellationToken">Cancels the run and removes the partial dump.</param>
     public static async Task<InfiniDyskExportResult> ExportAsync(
         string targetDirectory,
+        bool compact = false,
         Action<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -123,8 +139,8 @@ public static class InfiniDyskExporter
         var nzbBlobCount = 0;
         var fileBlobCount = 0;
 
-        Log.Warning("[InfiniDyskExport] Starting export to {Directory}", directory);
-        Report($"Starting export to {directory}");
+        Log.Warning("[InfiniDyskExport] Starting export to {Directory} (compact={Compact})", directory, compact);
+        Report($"Starting export to {directory}" + (compact ? " (compact)" : string.Empty));
 
         try
         {
@@ -222,28 +238,40 @@ public static class InfiniDyskExporter
 
                 // Our HealthResult enum uses 2 for "Skipped"; InfiniDysk uses 2 for "Degraded".
                 // Exporting skipped rows raw would relabel them as degraded damage, so drop them.
-                counts["HealthCheckResults"] = await WriteRowsAsync(
-                    source, writer, "HealthCheckResults", HealthCheckResultColumns,
-                    """
-                    SELECT "Id", "CreatedAt", "DavItemId", "Path", "Result", "RepairStatus", "Message"
-                    FROM "HealthCheckResults"
-                    WHERE "Result" <> 2
-                    """,
-                    MapHealthCheckResult, cancellationToken);
+                // Compact mode drops the tables entirely: they are per-check history, not
+                // migration data, and they dominate the size of a large dump.
+                if (compact)
+                {
+                    // Keep the keys present so callers can render "0" rather than a missing row.
+                    counts["HealthCheckResults"] = 0;
+                    counts["HealthCheckStats"] = 0;
+                    Report("Compact mode — skipping health-check history");
+                }
+                else
+                {
+                    counts["HealthCheckResults"] = await WriteRowsAsync(
+                        source, writer, "HealthCheckResults", HealthCheckResultColumns,
+                        """
+                        SELECT "Id", "CreatedAt", "DavItemId", "Path", "Result", "RepairStatus", "Message"
+                        FROM "HealthCheckResults"
+                        WHERE "Result" <> 2
+                        """,
+                        MapHealthCheckResult, cancellationToken);
 
-                counts["HealthCheckStats"] = await WriteRowsAsync(
-                    source, writer, "HealthCheckStats", HealthCheckStatColumns,
-                    """
-                    SELECT "DateStartInclusive", "DateEndExclusive", "Result", "RepairStatus", "Count"
-                    FROM "HealthCheckStats"
-                    WHERE "Result" <> 2
-                    """,
-                    reader => new object?[]
-                    {
-                        reader.GetValue(0), reader.GetValue(1), reader.GetValue(2),
-                        reader.GetValue(3), reader.GetValue(4),
-                    },
-                    cancellationToken);
+                    counts["HealthCheckStats"] = await WriteRowsAsync(
+                        source, writer, "HealthCheckStats", HealthCheckStatColumns,
+                        """
+                        SELECT "DateStartInclusive", "DateEndExclusive", "Result", "RepairStatus", "Count"
+                        FROM "HealthCheckStats"
+                        WHERE "Result" <> 2
+                        """,
+                        reader => new object?[]
+                        {
+                            reader.GetValue(0), reader.GetValue(1), reader.GetValue(2),
+                            reader.GetValue(3), reader.GetValue(4),
+                        },
+                        cancellationToken);
+                }
 
                 counts["ConfigItems"] = await WriteRowsAsync(
                     source, writer, "ConfigItems", ["ConfigName", "ConfigValue"],
@@ -266,16 +294,24 @@ public static class InfiniDyskExporter
 
         Report("Finalising...");
         File.Move(tempPath, sqlPath, overwrite: true);
-        await WriteReadmeAsync(directory, counts, nzbBlobCount, fileBlobCount, cancellationToken);
-
         var length = new FileInfo(sqlPath).Length;
+        var warning = length > MaxUploadBytes
+            ? $"db.sql is {length / (1024 * 1024 * 1024.0):0.#} GiB, which exceeds InfiniDysk's " +
+              $"{MaxUploadBytes / (1024 * 1024 * 1024)} GiB upload ceiling. It cannot be imported by upload; " +
+              "re-export with 'Compact' enabled to drop health-check history."
+            : null;
+
+        await WriteReadmeAsync(directory, counts, nzbBlobCount, fileBlobCount, compact, warning, cancellationToken);
+
         Log.Warning(
             "[InfiniDyskExport] Wrote {Path} ({Bytes} bytes, {Items} DavItems, {History} history rows, {NzbBlobs} NZB blobs, {FileBlobs} file blobs)",
             sqlPath, length, counts.GetValueOrDefault("DavItems"), counts.GetValueOrDefault("HistoryItems"),
             nzbBlobCount, fileBlobCount);
+        if (warning is not null) Log.Warning("[InfiniDyskExport] {Warning}", warning);
         Report($"Done — wrote {sqlPath} ({length} bytes)");
 
-        return new InfiniDyskExportResult(directory, sqlPath, length, counts, nzbBlobCount, fileBlobCount);
+        return new InfiniDyskExportResult(
+            directory, sqlPath, length, counts, nzbBlobCount, fileBlobCount, warning);
     }
 
     /// <summary>
@@ -809,25 +845,73 @@ public static class InfiniDyskExporter
         IReadOnlyDictionary<string, int> counts,
         int nzbBlobCount,
         int fileBlobCount,
+        bool compact,
+        string? warning,
         CancellationToken cancellationToken)
     {
         var path = Path.Join(directory, ReadmeFileName);
+        var sqlBytes = File.Exists(Path.Join(directory, SqlFileName))
+            ? new FileInfo(Path.Join(directory, SqlFileName)).Length
+            : 0L;
+
+        // Only emitted when it applies, so the file stays short in the normal case.
+        var warningSection = warning is null
+            ? string.Empty
+            : $"""
+
+                !! IMPORTANT WARNING !!
+                {warning}
+                """;
+
+        var compactNote = compact
+            ? "Health-check history (HealthCheckResults / HealthCheckStats) was omitted because\n" +
+              "this was a COMPACT export. InfiniDysk re-checks the library itself, so nothing\n" +
+              "important is lost."
+            : "Health-check history (HealthCheckResults / HealthCheckStats) was included. If\n" +
+              "db.sql is too large for the target setup, re-export with 'Compact' enabled to\n" +
+              "drop it.";
+
         var content = $"""
             InfiniDysk migration export
             Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC
+            db.sql size: {sqlBytes:N0} bytes
 
             IMPORTING
-              1. In InfiniDysk open Settings -> Backup & Restore.
-              2. Upload `db.sql` from this folder. A standalone `.sql` dump is an accepted
-                 backup format.
-              3. Copy the `blobs` folder from this export into InfiniDysk's config volume
+              1. Copy the `blobs` folder from this export into InfiniDysk's config volume
                  (`/config/blobs`), merging with anything already there. This restores the
                  original NZB documents used by "Download NZB", PAR2 repair, and health
-                 check identity.
-              4. Confirm the restore and let InfiniDysk restart. Do not interrupt the
-                 maintenance step that follows.
-              5. Sign in. Because no accounts were carried over, create the admin account
-                 when prompted.
+                 check identity. Do this BEFORE restoring so the post-restore check finds
+                 the files.
+              2. In InfiniDysk open Settings -> Backup & Restore and pick `db.sql` with the
+                 upload file input. Uploading only stages the file.
+              3. Click Restore on the uploaded row, tick the confirmation, and let the
+                 backend restart into maintenance. Do not interrupt it.
+              4. Sign in. No accounts are carried over, so create the admin account when
+                 prompted.{warningSection}
+
+            TROUBLESHOOTING
+              "Upload failed (413)" means a proxy in front of InfiniDysk rejected the body;
+              InfiniDysk itself never returns 413 (its size failures are 400 with a JSON
+              error, or a 500 at its 4 GiB multipart ceiling). Common causes:
+                - nginx / Nginx Proxy Manager: `client_max_body_size` defaults to 1 MB.
+                  Raise it (`client_max_body_size 5g;`) and disable request buffering
+                  (`proxy_request_buffering off;`) so the upload is streamed.
+                - Cloudflare (orange cloud): 100 MB cap on every plan; bypass it for this
+                  upload.
+                - Any other reverse proxy: raise its maximum body size and timeouts.
+
+              To bypass every proxy, upload from inside the container instead:
+                docker cp db.sql <container>:/tmp/db.sql
+                KEY=$(docker exec -u appuser <container> sh -c 'tr "\0" "\n" < \
+                  /proc/$(pgrep -f "^./NzbWebDAV" | head -1)/environ \
+                  | grep FRONTEND_BACKEND_API_KEY | cut -d= -f2')
+                docker exec -u appuser <container> curl -sS -H "x-api-key: $KEY" \
+                  -F "file=@/tmp/db.sql" -F "notes=migration" \
+                  http://localhost:8080/api/db-backup-upload
+              Then click Restore on the new row in the Backup tab.
+
+              If the upload succeeds but the page later reports missing blobs, step 1 was
+              skipped or `blobs` was copied to the wrong path.
 
             WHAT WAS EXPORTED
               Library tree (DavItems)             : {counts.GetValueOrDefault("DavItems"),6}
@@ -840,6 +924,8 @@ public static class InfiniDyskExporter
               NZB blob files (blobs/)             : {nzbBlobCount,6}
               File metadata blobs (blobs/)        : {fileBlobCount,6}
               Settings (ConfigItems)              : {counts.GetValueOrDefault("ConfigItems"),6}
+
+              {compactNote}
 
             WHAT WAS NOT EXPORTED
               - The active queue. In-flight downloads are better re-added than migrated, and

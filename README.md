@@ -131,6 +131,23 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.91 (2026-10-24)
+*   **Feature**: **Compact** export option. `HealthCheckResults` and `HealthCheckStats` are
+    per-check audit/metrics rows rather than migration data (InfiniDysk re-checks the library
+    itself), and on a mature library they dominate the dump. Dropping them measured
+    1.53 MB → 19 KB on a fixture with 4 000 results and 2 000 stat buckets; the saving scales
+    with how long health checking has been running. Exposed as a checkbox in the Maintenance
+    panel and as `compact` on the API.
+*   **Feature**: The generated `INFINIDYSK-MIGRATION-README.txt` now documents how to import
+    (copy `blobs/` *before* restoring), and includes a TROUBLESHOOTING section for
+    `Upload failed (413)`. InfiniDysk never emits 413 itself: its own size failures are `400`
+    with a JSON error, or a `500` at its 4 GiB multipart ceiling. A 413 therefore comes from a
+    proxy in front of it (nginx defaults to a 1 MB body), and the file carries both the proxy
+    settings to change and a container-local upload command that bypasses every proxy.
+*   **UX**: An export larger than InfiniDysk's 4 GiB upload ceiling is flagged as a warning in
+    the UI, the log, and the README, instead of being left for the operator to discover from a
+    failed restore.
+
 ## v0.6.90 (2026-10-24)
 *   **Fix**: The InfiniDysk export no longer runs inside the HTTP request. It is now a background
     job owned by `InfiniDyskExportRunner`, so closing the tab, reloading, or losing the

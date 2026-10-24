@@ -16,6 +16,7 @@ namespace NzbWebDAV.Services;
 /// <param name="NzbBlobCount">NZB blob files written by the last successful run.</param>
 /// <param name="FileBlobCount">Metadata blob files written by the last successful run.</param>
 /// <param name="Inspectable">True when the reported state came from disk rather than memory.</param>
+/// <param name="Warning">Set when the produced dump cannot be imported through InfiniDysk's upload.</param>
 public sealed record InfiniDyskExportStatus(
     string State,
     string Message,
@@ -25,7 +26,8 @@ public sealed record InfiniDyskExportStatus(
     IReadOnlyDictionary<string, int>? TableRows = null,
     int? NzbBlobCount = null,
     int? FileBlobCount = null,
-    bool Inspectable = false);
+    bool Inspectable = false,
+    string? Warning = null);
 
 /// <summary>
 /// Owns the InfiniDysk export as a background job rather than as part of an HTTP request.
@@ -84,7 +86,7 @@ public sealed class InfiniDyskExportRunner(WebsocketManager websocketManager)
     /// caller should surface that as a conflict rather than starting a second writer).
     /// </returns>
     /// <exception cref="BadHttpRequestException">The directory argument is invalid.</exception>
-    public bool TryStart(string? targetDirectory)
+    public bool TryStart(string? targetDirectory, bool compact = false)
     {
         // Validate before touching any state so a bad path is still an immediate 400.
         var directory = InfiniDyskExporter.ValidateTargetDirectory(targetDirectory);
@@ -96,8 +98,9 @@ public sealed class InfiniDyskExportRunner(WebsocketManager websocketManager)
 
             cts = new CancellationTokenSource();
             _cts = cts;
-            _last = new InfiniDyskExportStatus("running", "Starting export...", directory);
-            _running = Task.Run(() => RunAsync(directory, cts));
+            _last = new InfiniDyskExportStatus(
+                "running", compact ? "Starting compact export..." : "Starting export...", directory);
+            _running = Task.Run(() => RunAsync(directory, compact, cts));
         }
 
         Publish(_last);
@@ -170,13 +173,13 @@ public sealed class InfiniDyskExportRunner(WebsocketManager websocketManager)
         }
     }
 
-    private async Task RunAsync(string directory, CancellationTokenSource cts)
+    private async Task RunAsync(string directory, bool compact, CancellationTokenSource cts)
     {
         var token = cts.Token;
         try
         {
             var result = await InfiniDyskExporter
-                .ExportAsync(directory, message => PublishRunning(directory, message), token)
+                .ExportAsync(directory, compact, message => PublishRunning(directory, message), token)
                 .ConfigureAwait(false);
 
             lock (_gate)
@@ -189,7 +192,8 @@ public sealed class InfiniDyskExportRunner(WebsocketManager websocketManager)
                     result.Bytes,
                     result.TableRows,
                     result.NzbBlobCount,
-                    result.FileBlobCount);
+                    result.FileBlobCount,
+                    Warning: result.Warning);
             }
 
             Publish(_last);

@@ -21,6 +21,7 @@ type ExportResponse = {
     nzbBlobCount?: number;
     fileBlobCount?: number;
     inspectable?: boolean;
+    warning?: string | null;
 };
 
 function formatBytes(bytes: number): string {
@@ -42,6 +43,7 @@ function parseStatus(raw: string): ExportResponse | null {
 
 export function InfiniDyskExport() {
     const [path, setPath] = useState<string>(defaultExportPath);
+    const [compact, setCompact] = useState<boolean>(false);
     const [status, setStatus] = useState<ExportResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -109,7 +111,7 @@ export function InfiniDyskExport() {
             const response = await fetch("/api/export-infini-dysk", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ path }),
+                body: JSON.stringify({ path, compact }),
             });
 
             const payload = await response.json().catch(() => null) as ExportResponse | null;
@@ -126,7 +128,7 @@ export function InfiniDyskExport() {
             setError(e instanceof Error ? e.message : "Could not start the export.");
             setStatus(null);
         }
-    }, [path]);
+    }, [path, compact]);
 
     const rows = status?.tableRows ?? {};
     const rowSummary = Object.entries(rows)
@@ -155,6 +157,22 @@ export function InfiniDyskExport() {
                 <Form.Text className="text-muted">
                     Must be an absolute path that is mounted from the host, otherwise the file is
                     only reachable from inside the container.
+                </Form.Text>
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+                <Form.Check
+                    type="checkbox"
+                    id="infinidysk-export-compact"
+                    checked={compact}
+                    disabled={isRunning}
+                    onChange={(event) => setCompact(event.target.checked)}
+                    label="Compact — skip health-check history (smaller file)"
+                />
+                <Form.Text className="text-muted">
+                    Health-check results and stats are a large share of a mature library&apos;s
+                    dump but are not needed for migration; InfiniDysk re-checks files itself.
+                    Use this if the upload is rejected as too large.
                 </Form.Text>
             </Form.Group>
 
@@ -194,7 +212,7 @@ export function InfiniDyskExport() {
             )}
 
             {state === "completed" && (
-                <Alert variant="success" className="mt-3 mb-0">
+                <Alert variant={status?.warning ? "warning" : "success"} className="mt-3 mb-0">
                     <div>
                         {status?.inspectable
                             ? status?.message
@@ -202,6 +220,9 @@ export function InfiniDyskExport() {
                     </div>
                     {typeof status?.bytes === "number" && status.bytes > 0 && (
                         <div className="mt-1"><code>db.sql</code> is {formatBytes(status.bytes)}.</div>
+                    )}
+                    {status?.warning && (
+                        <div className="mt-2"><strong>{status.warning}</strong></div>
                     )}
                     {rowSummary && <div className="mt-1">Rows: {rowSummary}.</div>}
                     {(status?.nzbBlobCount != null || status?.fileBlobCount != null) && (

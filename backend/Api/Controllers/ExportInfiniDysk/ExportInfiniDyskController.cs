@@ -34,7 +34,7 @@ public class ExportInfiniDyskController(InfiniDyskExportRunner runner) : BaseApi
 
         var request = await ReadRequestAsync().ConfigureAwait(false);
 
-        if (!runner.TryStart(request?.Path))
+        if (!runner.TryStart(request?.Path, request?.Compact ?? false))
         {
             return Conflict(new ExportInfiniDyskResponse
             {
@@ -60,6 +60,7 @@ public class ExportInfiniDyskController(InfiniDyskExportRunner runner) : BaseApi
         NzbBlobCount = status.NzbBlobCount,
         FileBlobCount = status.FileBlobCount,
         Inspectable = status.Inspectable,
+        Warning = status.Warning,
     };
 
     private async Task<ExportInfiniDyskRequest?> ReadRequestAsync()
@@ -87,6 +88,12 @@ public class ExportInfiniDyskRequest
 {
     /// <summary>Absolute directory (inside the container) that receives <c>db.sql</c>.</summary>
     public string? Path { get; init; }
+
+    /// <summary>
+    /// Drop health-check history. Those rows are per-check audit data rather than migration
+    /// data, and they dominate the size of a large dump.
+    /// </summary>
+    public bool Compact { get; init; }
 }
 
 public class ExportInfiniDyskResponse : BaseApiResponse
@@ -101,4 +108,7 @@ public class ExportInfiniDyskResponse : BaseApiResponse
     public int? NzbBlobCount { get; init; }
     public int? FileBlobCount { get; init; }
     public bool Inspectable { get; init; }
+
+    /// <summary>Set when the dump exceeds InfiniDysk's upload ceiling and cannot be imported.</summary>
+    public string? Warning { get; init; }
 }

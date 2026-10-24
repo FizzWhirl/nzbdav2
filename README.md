@@ -131,6 +131,25 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.90 (2026-10-24)
+*   **Fix**: The InfiniDysk export no longer runs inside the HTTP request. It is now a background
+    job owned by `InfiniDyskExportRunner`, so closing the tab, reloading, or losing the
+    connection no longer cancels an export mid-run (it previously used
+    `HttpContext.RequestAborted`, which is exactly what a browser close triggers). `POST` now
+    returns `202` immediately and a second request while one is in flight gets `409` instead of
+    starting a competing writer on the same folder.
+*   **Feature**: Live export progress. Each stage is published on the cached state topic
+    `iep`, so the page shows *what* it is doing (blobs, `db.sql`, per-table counts) rather than
+    an indefinite spinner, and a reloaded or reconnected page is replayed the latest stage —
+    including the final `completed` result.
+*   **Feature**: `GET /api/export-infini-dysk?path=...` reports current and last-run status. It
+    prefers the in-memory result (which carries row/blob counts) and falls back to inspecting
+    the folder on disk, so the outcome is still reported after an application restart. A
+    `db.sql` that exists means the dump is complete, because it is renamed into place atomically.
+*   **UI**: The Maintenance panel explains that the export runs in the background, and shows
+    either the live stage, the failure reason, or a completion summary. Payload casing for the
+    websocket status was aligned to camelCase to match the REST shape the UI reads.
+
 ## v0.6.89 (2026-10-24)
 *   **Feature**: Added **Settings → Maintenance → Export to InfiniDysk**, which writes a
     restore-ready `db.sql`, a `blobs/` tree, and an `INFINIDYSK-MIGRATION-README.txt` into an

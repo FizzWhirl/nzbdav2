@@ -102,12 +102,18 @@ public static class InfiniDyskExporter
     private static readonly Guid IdsRootId = Guid.Parse("00000000-0000-0000-0000-000000000004");
 
     /// <summary>
-    /// Writes <c>db.sql</c> (and a short instruction file) into <paramref name="targetDirectory"/>.
+    /// Writes <c>db.sql</c> and a <c>blobs/</c> tree into <paramref name="targetDirectory"/>.
     /// </summary>
+    /// <param name="targetDirectory">Absolute directory to write into; created if missing.</param>
+    /// <param name="progress">Optional human-readable stage reporter.</param>
+    /// <param name="cancellationToken">Cancels the run and removes the partial dump.</param>
     public static async Task<InfiniDyskExportResult> ExportAsync(
         string targetDirectory,
+        Action<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        void Report(string message) => progress?.Invoke(message);
+
         var directory = ValidateTargetDirectory(targetDirectory);
         Directory.CreateDirectory(directory);
 
@@ -118,25 +124,33 @@ public static class InfiniDyskExporter
         var fileBlobCount = 0;
 
         Log.Warning("[InfiniDyskExport] Starting export to {Directory}", directory);
+        Report($"Starting export to {directory}");
 
         try
         {
+            Report("Opening database...");
             await using var source = await OpenSourceAsync(cancellationToken);
 
             await ExecuteAsync(source, "BEGIN;", cancellationToken);
 
             // NZB blobs are real files, not rows, so they are written before the dump. Doing
             // it inside the read transaction keeps blob content and rows on one snapshot.
+            Report("Writing NZB blobs...");
             var nzbBlobs = await WriteNzbBlobsAsync(source, directory, cancellationToken);
+            Report($"Wrote {nzbBlobs.Count} NZB blob(s)");
 
             // Same for the typed streaming-metadata blobs InfiniDysk prefers over the EF rows.
+            Report("Writing file metadata blobs...");
             var fileBlobs = await InfiniDyskBlobWriter
                 .WriteMetadataBlobsAsync(source, Path.Join(directory, BlobsDirectoryName), cancellationToken)
                 .ConfigureAwait(false);
+            Report($"Wrote {fileBlobs.Count} file metadata blob(s)");
 
             var providerGeneration = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             nzbBlobCount = nzbBlobs.Count;
             fileBlobCount = fileBlobs.Count;
+
+            Report("Writing db.sql...");
 
             await using (var stream = new FileStream(
                              tempPath,
@@ -162,6 +176,7 @@ public static class InfiniDyskExporter
                     FROM "DavItems"
                     """,
                     reader => MapDavItem(reader, nzbBlobs, fileBlobs), cancellationToken);
+                Report($"Exported {counts["DavItems"]} library item(s)");
 
                 counts["DavNzbFiles"] = await WriteRowsAsync(
                     source, writer, "DavNzbFiles", ["Id", "SegmentIds"],
@@ -199,6 +214,7 @@ public static class InfiniDyskExporter
                     WHERE IFNULL("IsHidden", 0) = 0
                     """,
                     reader => MapHistoryItem(reader, nzbBlobs), cancellationToken);
+                Report($"Exported {counts["HistoryItems"]} history row(s)");
 
                 // InfiniDysk serves "Download NZB" and resolves health-check identities through
                 // NzbNames, so every blob we wrote needs its original filename recorded.
@@ -248,6 +264,7 @@ public static class InfiniDyskExporter
             throw;
         }
 
+        Report("Finalising...");
         File.Move(tempPath, sqlPath, overwrite: true);
         await WriteReadmeAsync(directory, counts, nzbBlobCount, fileBlobCount, cancellationToken);
 
@@ -256,6 +273,7 @@ public static class InfiniDyskExporter
             "[InfiniDyskExport] Wrote {Path} ({Bytes} bytes, {Items} DavItems, {History} history rows, {NzbBlobs} NZB blobs, {FileBlobs} file blobs)",
             sqlPath, length, counts.GetValueOrDefault("DavItems"), counts.GetValueOrDefault("HistoryItems"),
             nzbBlobCount, fileBlobCount);
+        Report($"Done — wrote {sqlPath} ({length} bytes)");
 
         return new InfiniDyskExportResult(directory, sqlPath, length, counts, nzbBlobCount, fileBlobCount);
     }

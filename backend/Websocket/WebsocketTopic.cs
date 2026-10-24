@@ -8,6 +8,9 @@ public class WebsocketTopic
     public static readonly WebsocketTopic SymlinkTaskProgress = new("stp", TopicType.State);
     public static readonly WebsocketTopic CleanupTaskProgress = new("ctp", TopicType.State);
     public static readonly WebsocketTopic StrmToSymlinksTaskProgress = new("st2sy", TopicType.State);
+    // InfiniDysk migration export. State (not Event) so a browser that reloads or reconnects
+    // replays the last known stage — including the completion result.
+    public static readonly WebsocketTopic InfiniDyskExportProgress = new("iep", TopicType.State);
     public static readonly WebsocketTopic QueueItemStatus = new("qs", TopicType.State);
     public static readonly WebsocketTopic QueueItemProgress = new("qp", TopicType.State);
     public static readonly WebsocketTopic HealthItemStatus = new("hs", TopicType.State);

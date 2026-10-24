@@ -29,11 +29,11 @@ export const initializeWebsocketServer = websocketServer.initialize;
 // to appear empty even though the server returns 207 with a full body. Keeping the
 // original `Host` header (`changeOrigin: false`) makes NWebDav emit hrefs with the
 // correct public host. Kestrel does not validate the Host header, so this is safe.
-const forwardToBackend = createProxyMiddleware({
+const createBackendProxy = (timeoutMs: number) => createProxyMiddleware({
   target: runtimeConfig.backendUrl,
   changeOrigin: false,
-  timeout: 30000,
-  proxyTimeout: 30000,
+  timeout: timeoutMs,
+  proxyTimeout: timeoutMs,
   on: {
     error(error, req, res) {
       logJson("error", "Backend proxy request failed", {
@@ -52,6 +52,14 @@ const forwardToBackend = createProxyMiddleware({
     }
   }
 });
+
+const forwardToBackend = createBackendProxy(30000);
+
+// The InfiniDysk export streams a whole database through one request, which routinely
+// outlives the default 30s proxy budget on large libraries. Give it its own longer ceiling
+// instead of weakening the timeout for every other backend call.
+const forwardToBackendLongRunning = createBackendProxy(30 * 60 * 1000);
+const longRunningBackendPaths = ["/api/export-infini-dysk"];
 
 const setApiKeyForAuthenticatedRequests = async (req: express.Request) => {
   // if the path is not an API/metrics backend proxy request, do nothing
@@ -83,7 +91,10 @@ app.use(async (req, res, next) => {
     || path.startsWith("/completed-symlinks")
   ) {
     await setApiKeyForAuthenticatedRequests(req);
-    return forwardToBackend(req, res, next);
+    const forward = longRunningBackendPaths.some(prefix => path.startsWith(prefix))
+      ? forwardToBackendLongRunning
+      : forwardToBackend;
+    return forward(req, res, next);
   }
   next();
 });

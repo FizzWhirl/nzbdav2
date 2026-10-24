@@ -3,6 +3,7 @@ import styles from "./maintenance.module.css"
 import { RemoveUnlinkedFiles } from "./remove-unlinked-files/remove-unlinked-files";
 import { ConvertStrmToSymlinks } from "./strm-to-symlinks/strm-to-symlinks";
 import { ConnectionManagement } from "./connection-management/connection-management";
+import { InfiniDyskExport } from "./infinidysk-export/infinidysk-export";
 
 type MaintenanceProps = {
     savedConfig: Record<string, string>
@@ -38,6 +39,15 @@ export function Maintenance({ savedConfig }: MaintenanceProps) {
                     </Accordion.Header>
                     <Accordion.Body className={styles.accordionBody}>
                         <ConvertStrmToSymlinks savedConfig={savedConfig} />
+                    </Accordion.Body>
+                </Accordion.Item>
+
+                <Accordion.Item className={styles.accordionItem} eventKey="infini-dysk-export">
+                    <Accordion.Header className={styles.accordionHeader}>
+                        Export to InfiniDysk
+                    </Accordion.Header>
+                    <Accordion.Body className={styles.accordionBody}>
+                        <InfiniDyskExport />
                     </Accordion.Body>
                 </Accordion.Item>
 

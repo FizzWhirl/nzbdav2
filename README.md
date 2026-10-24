@@ -131,6 +131,45 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.89 (2026-10-24)
+*   **Feature**: Added **Settings → Maintenance → Export to InfiniDysk**, which writes a
+    restore-ready `db.sql`, a `blobs/` tree, and an `INFINIDYSK-MIGRATION-README.txt` into an
+    operator-chosen folder. The dump is built against InfiniDysk v1.6.3's own model rather than
+    this fork's schema, drops fork-only tables/columns/settings, decompresses the Zstd payload
+    columns to the plain JSON InfiniDysk expects, and marks InfiniDysk's full migration history
+    as applied so nothing is re-applied after the import.
+*   **Logic**: DavItem rows are remapped onto InfiniDysk's `Type`/`SubType` model, `Skipped`
+    health-check results are excluded (our value 2 means "skipped", theirs means "degraded"),
+    hidden history rows stay hidden, and only config keys both projects interpret identically
+    are carried over.
+*   **Logic**: Guid-typed TEXT columns are uppercased on export. InfiniDysk binds `Guid`
+    parameters as uppercase text, so a lowercase row is invisible to its EF queries — its own
+    `Normalize-Guid-Text-Casing` migration rewrites historical rows for exactly this reason,
+    and our dump marks that migration as already applied.
+*   **Feature**: NZB documents still held in `HistoryItems.NzbContents` are written as real
+    InfiniDysk blob files (`blobs/xx/yy/{guid}`, keyed by history id, matching InfiniDysk's own
+    `nzbBlobId = MountDirectory.HistoryItemId` convention), with `NzbNames` rows so
+    "Download NZB", PAR2 repair, and health-check identity work after the move. Mounted files
+    reuse their history item's blob id, and items without a surviving NZB simply fall back to
+    InfiniDysk's DB-resident `DavNzbFiles` reader.
+*   **Feature**: `usenet.providers` is translated rather than copied — deterministic
+    `ProviderId`s derived from host + username (InfiniDysk asserts a non-empty id before using
+    it as a metrics/quota key), with its newer quota/pipelining fields left at safe defaults.
+*   **Feature**: Typed streaming-metadata blobs (`DavItems.FileBlobId`) are emitted from
+    MemoryPack mirrors of InfiniDysk's contracts, including per-segment byte ranges rebuilt
+    from stored yEnc part sizes (marked trusted only when they sum to a known size). A
+    file covered by a blob is no longer also exported as a legacy `DavNzbFiles` /
+    `DavRarFiles` / `DavMultipartFiles` row, so InfiniDysk's `UsenetFileToBlobstoreMigrationService`
+    has nothing to re-migrate on first boot; rows that cannot be mapped faithfully
+    (obfuscation-key items, unparseable payloads) are still exported as the fallback.
+*   **UI**: The export request gets its own 30-minute proxy budget in the frontend, since
+    streaming a whole database through the default 30-second timeout would fail on large
+    libraries.
+*   **Verification**: Exercised against a real `ghcr.io/infinidysk/infinidysk:latest` (v1.6.3)
+    container: upload → restore → restart completed with no errors, the library tree,
+    history, settings, and 58 migration rows landed intact, `quick_check` passed, and
+    InfiniDysk's own `DownloadNzb` endpoint served a restored NZB from the exported blob.
+
 ## v0.6.88 (2026-07-22)
 *   **Optimization**: Wired the segment hot path through `SegmentBufferPool` so pooled segment buffers now use byte-bounded retention instead of `ArrayPool<byte>.Shared`.
 *   **Reliability**: Added provider-level circuit-breaker tracking and latency-check throttling to the NNTP client so tripped providers are deprioritized instead of repeatedly retried.

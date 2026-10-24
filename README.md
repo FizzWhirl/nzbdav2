@@ -168,8 +168,12 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 *   **Verification**: Exercised against a real `ghcr.io/infinidysk/infinidysk:latest` (v1.6.3)
     container: upload → restore → restart completed with no errors, the library tree,
     history, settings, and 58 migration rows landed intact, `quick_check` passed, and
-    InfiniDysk's own `DownloadNzb` endpoint served a restored NZB from the exported blob.
-
+    InfiniDysk's own `DownloadNzb` endpoint served a restored NZB from the exported blob.*   **Tooling**: Unblocked `docker build` and CI, which were failing at `dotnet restore` on
+    `NU1902` for `Microsoft.Build.Tasks.Git` 8.0.0. The vendored SharpCompress project treats
+    all warnings as errors, so a newly published NuGet advisory (which changes with no code
+    change) broke the build; `Microsoft.Build.Tasks.Git` is a SourceLink restore-time task that
+    never ships in the published image. NU19xx advisories now stay visible as warnings and are
+    excluded from warnings-as-errors, so the feed can no longer hard-fail a build.
 ## v0.6.88 (2026-07-22)
 *   **Optimization**: Wired the segment hot path through `SegmentBufferPool` so pooled segment buffers now use byte-bounded retention instead of `ArrayPool<byte>.Shared`.
 *   **Reliability**: Added provider-level circuit-breaker tracking and latency-check throttling to the NNTP client so tripped providers are deprioritized instead of repeatedly retried.

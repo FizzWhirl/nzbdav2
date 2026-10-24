@@ -944,10 +944,19 @@ public static class InfiniDyskExporter
                 bandwidth samples, analysis history).
 
             NOTES
-              - `api.key`, the WebDAV credentials, and the Usenet provider list are carried
-                over, so *Arr clients and WebDAV mounts keep working if the API key is
-                preserved. Provider priority is exported as 0 for all providers (this fork
-                prioritises by list order); review the order in Settings once.
+              - `api.key`, the WebDAV credentials, `rclone.mount-dir`, and the Usenet provider
+                list are carried over, so *Arr clients, WebDAV mounts, and existing library
+                symlinks keep working if the API key is preserved. Provider priority is
+                exported as 0 for all providers (this fork prioritises by list order); review
+                the order in Settings once.
+              - `rclone.mount-dir` matters even though rclone itself is not migrated: every
+                generated `.rclonelink` target is built from it
+                (`<mount-dir>/.ids/<prefix>/<guid>`). Keeping the old value is what lets the
+                symlinks Sonarr/Radarr already imported keep resolving, so leave InfiniDysk's
+                mount dir matching your existing rclone mount.
+              - `/completed-symlinks` is a virtual view of the `/content` tree and `/.ids` still
+                exists in InfiniDysk with the same `<5-char prefix>/<guid>` layout, so a
+                migrated library produces the same symlink targets it did before.
               - Import this dump into a *fresh* InfiniDysk instance. Restoring over an
                 existing install replaces its settings, queue, history, and WebDAV tree.
             """;

@@ -131,6 +131,17 @@ nzbdav2 tracks [nzbdav-dev/nzbdav](https://github.com/nzbdav-dev/nzbdav) and per
 
 ## Changelog
 
+## v0.6.92 (2026-10-24)
+*   **Fix**: `rclone.mount-dir` is now exported. Every generated `.rclonelink` target is built
+    from it (`{mount-dir}/.ids/{prefix}/{guid}`), so omitting it made a migrated InfiniDysk fall
+    back to its own default mount dir (`/mnt/nzbdav`) and re-point every new symlink away from
+    the path Sonarr/Radarr/Plex already have mounted. Verified end to end: a dump without the
+    key produced `/mnt/nzbdav/.ids/...` after restore, and the exported value now reproduces the
+    original `/mnt/remote/nzbdav/.ids/...`.
+*   **Docs**: The generated `INFINIDYSK-MIGRATION-README.txt` records that `/completed-symlinks`
+    is a virtual view of the `/content` tree and that `/.ids` exists in InfiniDysk with the same
+    `{5-char prefix}/{guid}` layout, so migrated symlinks keep resolving.
+
 ## v0.6.91 (2026-10-24)
 *   **Feature**: **Compact** export option. `HealthCheckResults` and `HealthCheckStats` are
     per-check audit/metrics rows rather than migration data (InfiniDysk re-checks the library

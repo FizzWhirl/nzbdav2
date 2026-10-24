@@ -84,7 +84,7 @@ class Program
 
         // Log build version to verify correct build is running
         Log.Warning("═══════════════════════════════════════════════════════════════");
-        Log.Warning("  NzbDav Backend Starting - BUILD v2026-10-24-INFINIDYSK-EXPORT-COMPACT");
+        Log.Warning("  NzbDav Backend Starting - BUILD v2026-10-24-INFINIDYSK-EXPORT-SYMLINK-MOUNTDIR");
         Log.Warning("  FEATURE: Settings > Maintenance > Export to InfiniDysk writes a restore-ready db.sql against InfiniDysk's current schema, as a background job that survives closing the page and reports progress over websocket topic 'iep'. Compact mode drops health-check history to shrink the dump (health-check rows are usually the bulk and are not migration data).");
         Log.Warning("  FIX: Upstream runtime wiring for buffered segments, provider circuit breaking, and stream sessions.");
         Log.Warning("  FIX (OOM): streaming memory is now derived from the process heap ceiling (MemoryBudget) and the prefetch window is bound by the per-stream byte budget raised only to a one-segment-per-connection parallelism floor. Sample-video filtering is available via 'api.sample-filter-enabled' (opt-in, default OFF in this fork) plus 'api.download-filename-blacklist' globs.");

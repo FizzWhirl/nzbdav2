@@ -432,6 +432,11 @@ internal static class InfiniDyskExportSchema
         "api.duplicate-nzb-behavior",
         "api.ignore-history-limit",
         "api.ensure-importable-video",
+        // The rclone mount point is baked into every generated .rclonelink target
+        // (`{mount-dir}/.ids/{prefix}/{guid}`). Carrying it over keeps migrated symlinks
+        // pointing at the path Sonarr/Radarr/Plex already have mounted; without it the
+        // destination falls back to its own default and every existing link dangles.
+        "rclone.mount-dir",
         "usenet.providers",
         "webdav.user",
         "webdav.pass",
